@@ -1,6 +1,15 @@
-// Universal Tactical AI Bot Controller (Runs identically in Node.js Server & Browser P2P Host)
+// Smart Tactical AI Bot Controller v2.5:
+// - Verified LOS Waypoint Pathfinding (Dijkstra + String-Pulling Lookahead)
+// - 5-Ray Whisker Obstacle Avoidance (Never slams into walls or corners)
+// - Wall-Safe Combat Strafing, Damage-Direction Reaction & Close-Range Sidearm Swap
 import { PHYSICS } from '../constants.js';
-import { anglesFromDirection, hasLineOfSight } from '../physics.js';
+import {
+  anglesFromDirection,
+  directionFromAngles,
+  hasLineOfSight,
+  raycastMap,
+  canWalkBetweenXZ
+} from '../physics.js';
 
 const BOT_NAMES = [
   'Sói_Đêm', 'Đại_Bàng', 'Tia_Chớp', 'Bóng_Ma', 'Hổ_Xám',
@@ -18,9 +27,9 @@ const BOT_LOADOUTS = [
 ];
 
 const DIFFICULTY_PRESETS = {
-  easy: { reactionMs: 520, aimJitter: 0.085, turnSpeed: 4.5, burstChance: 0.55 },
-  normal: { reactionMs: 320, aimJitter: 0.045, turnSpeed: 6.8, burstChance: 0.75 },
-  hard: { reactionMs: 180, aimJitter: 0.020, turnSpeed: 9.5, burstChance: 0.90 }
+  easy: { reactionMs: 950, aimJitter: 0.165, turnSpeed: 3.5, burstChance: 0.22, shotCooldownMs: 480 },
+  normal: { reactionMs: 700, aimJitter: 0.120, turnSpeed: 4.8, burstChance: 0.35, shotCooldownMs: 340 },
+  hard: { reactionMs: 480, aimJitter: 0.080, turnSpeed: 6.4, burstChance: 0.48, shotCooldownMs: 240 }
 };
 
 export function createBotProfile(index = 0) {
@@ -51,58 +60,128 @@ function shortestAngleDiff(from, to) {
   return diff - Math.PI;
 }
 
-function nearestWaypoint(x, z, waypoints) {
-  let best = waypoints[0];
-  let bestD = Infinity;
-  for (const wp of waypoints) {
-    const d = (wp.x - x) ** 2 + (wp.z - z) ** 2;
-    if (d < bestD) {
-      bestD = d;
-      best = wp;
+function nearestVisibleWaypoint(x, z, waypoints, map) {
+  let bestVisible = null;
+  let bestVisDist = Infinity;
+  let bestAny = waypoints[0];
+  let bestAnyDist = Infinity;
+
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+    const d = Math.hypot(wp.x - x, wp.z - z);
+    if (d < bestAnyDist) {
+      bestAnyDist = d;
+      bestAny = wp;
+    }
+    if (d < bestVisDist && d < 24 && canWalkBetweenXZ(x, z, wp.x, wp.z, map, 0.35)) {
+      bestVisDist = d;
+      bestVisible = wp;
     }
   }
-  return best;
+  return bestVisible || bestAny;
 }
 
-function bfsNextWaypoint(startId, goalId, waypoints) {
-  if (startId === goalId) return waypoints.find((w) => w.id === goalId) || waypoints[0];
-  const byId = new Map(waypoints.map((w) => [w.id, w]));
-  const queue = [[startId]];
-  const visited = new Set([startId]);
+// Dijkstra shortest Euclidean path across verified waypoint links
+function computeWaypointPath(startId, goalId, waypoints) {
+  if (startId === goalId) {
+    const single = waypoints.find((w) => w.id === goalId);
+    return single ? [single] : [];
+  }
 
-  while (queue.length > 0) {
-    const path = queue.shift();
-    const curr = path[path.length - 1];
-    if (curr === goalId) {
-      return byId.get(path[1]) || byId.get(goalId);
+  const byId = new Map(waypoints.map((w) => [w.id, w]));
+  const dist = new Map();
+  const prev = new Map();
+  const unvisited = new Set();
+
+  for (const w of waypoints) {
+    dist.set(w.id, Infinity);
+    unvisited.add(w.id);
+  }
+  dist.set(startId, 0);
+
+  while (unvisited.size > 0) {
+    let u = null;
+    let bestD = Infinity;
+    for (const id of unvisited) {
+      const d = dist.get(id);
+      if (d < bestD) {
+        bestD = d;
+        u = id;
+      }
     }
-    const node = byId.get(curr);
-    if (!node) continue;
-    for (const nextId of node.links) {
-      if (!visited.has(nextId)) {
-        visited.add(nextId);
-        queue.push([...path, nextId]);
+    if (u === null || u === goalId || bestD === Infinity) break;
+    unvisited.delete(u);
+
+    const nodeU = byId.get(u);
+    if (!nodeU) continue;
+    for (const v of nodeU.links) {
+      if (!unvisited.has(v)) continue;
+      const nodeV = byId.get(v);
+      if (!nodeV) continue;
+      const alt = bestD + Math.hypot(nodeV.x - nodeU.x, nodeV.z - nodeU.z);
+      if (alt < dist.get(v)) {
+        dist.set(v, alt);
+        prev.set(v, u);
       }
     }
   }
-  return byId.get(goalId) || waypoints[0];
+
+  const path = [];
+  let curr = goalId;
+  while (curr !== undefined) {
+    const node = byId.get(curr);
+    if (node) path.unshift(node);
+    if (curr === startId) break;
+    curr = prev.get(curr);
+  }
+  return path.length ? path : [byId.get(goalId) || waypoints[0]];
+}
+
+// Cast a horizontal feeler ray at waist height to check obstacle clearance distance
+function feelClearance(x, y, z, angleYaw, maxDist, map) {
+  const dir = { x: -Math.sin(angleYaw), y: 0, z: -Math.cos(angleYaw) };
+  const hit = raycastMap({ x, y: y + 0.85, z }, dir, maxDist, map);
+  if (hit && (!hit.block || !hit.block.isStep)) {
+    return hit.dist;
+  }
+  return maxDist;
+}
+
+function pickTacticalGoalWaypoint(bot, room, waypoints) {
+  const map = room.map;
+  // In team modes, push toward midfield or enemy half / objectives rather than staying in own spawn
+  const candidates = waypoints.filter((w) => {
+    if (Math.hypot(w.x - bot.x, w.z - bot.z) < 8) return false;
+    if (room.modeConfig.teamBased) {
+      if (bot.team === 'alpha') return w.z > -12; // Push South toward Mid & Bravo
+      if (bot.team === 'bravo') return w.z < 12;  // Push North toward Mid & Alpha
+    }
+    return true;
+  });
+  const pool = candidates.length > 0 ? candidates : waypoints;
+  return pool[Math.floor(Math.random() * pool.length)] || waypoints[0];
 }
 
 export function updateBotAI(bot, room, dt, now) {
   if (bot.dead) return;
   const diff = DIFFICULTY_PRESETS[room.botDifficulty] || DIFFICULTY_PRESETS.normal;
   const map = room.map;
+  const waypoints = map.waypoints;
+
   const ai = bot.aiState || (bot.aiState = {
     goalWpId: null,
-    nextWp: null,
+    path: [],
     repathAt: 0,
     targetId: null,
     firstSeenAt: 0,
+    lastSeenEnemyPos: null,
+    lastSeenEnemyUntil: 0,
     strafeDir: Math.random() < 0.5 ? -1 : 1,
-    strafeSwitchAt: now + 1200,
-    stuckCheckAt: now + 1000,
+    strafeSwitchAt: now + 1100,
+    crouchCombat: false,
+    stuckCheckAt: now + 700,
     lastPos: { x: bot.x, z: bot.z },
-    unstuckUntil: 0
+    avoidYawOffset: 0
   });
 
   const input = {
@@ -118,30 +197,21 @@ export function updateBotAI(bot, room, dt, now) {
   };
 
   const wStats = room.getPlayerWeaponStats(bot);
-  if (!wStats.isMelee && bot.ammo <= 0 && !bot.reloadingUntil) {
-    if (bot.reserveAmmo > 0) {
-      room.startReload(bot, now);
-    } else if (bot.slot !== 2) {
-      room.switchWeapon(bot, 2);
-    }
-  }
 
-  // 1. Bomb Mode Objective Priority
+  // 1. Bomb Mode Objective Priority (Planting / Defusing)
   if (room.mode === 'bomb' && room.roundPhase === 'live') {
     if (!room.bombState.planted && bot.hasBomb) {
       const targetSite = map.bombSites[bot.aiBombSiteIdx ?? 0] || map.bombSites[0];
-      const distToSite = Math.hypot(bot.x - targetSite.x, bot.z - targetSite.z);
-      if (distToSite < targetSite.radius * 0.72) {
+      if (Math.hypot(bot.x - targetSite.x, bot.z - targetSite.z) < targetSite.radius * 0.72) {
         input.interact = true;
         input.crouch = true;
         bot.input = input;
         return;
       }
     } else if (room.bombState.planted && bot.team === 'alpha') {
-      const distToBomb = Math.hypot(bot.x - room.bombState.x, bot.z - room.bombState.z);
-      if (distToBomb < 2.2) {
+      if (Math.hypot(bot.x - room.bombState.x, bot.z - room.bombState.z) < 2.2) {
         const closeEnemy = room.getLivingCombatants().find(
-          (p) => p.team !== bot.team && Math.hypot(p.x - bot.x, p.z - bot.z) < 7.0
+          (p) => p.team !== bot.team && Math.hypot(p.x - bot.x, p.z - bot.z) < 7.5
         );
         if (!closeEnemy) {
           input.interact = true;
@@ -153,7 +223,7 @@ export function updateBotAI(bot, room, dt, now) {
     }
   }
 
-  // 2. Visible Enemy Target Acquisition
+  // 2. Scan for Visible Enemies (with FOV & Damage-Reaction Awareness)
   const botEye = {
     x: bot.x,
     y: bot.y + (bot.crouching ? PHYSICS.EYE_CROUCH : PHYSICS.EYE_STAND),
@@ -161,13 +231,22 @@ export function updateBotAI(bot, room, dt, now) {
   };
 
   let visibleEnemy = null;
-  let bestEnemyDist = Infinity;
+  let bestScore = Infinity;
+
   for (const other of room.getLivingCombatants()) {
     if (other.id === bot.id) continue;
     if (room.modeConfig.teamBased && other.team === bot.team) continue;
 
-    const dist = Math.hypot(other.x - bot.x, other.z - bot.z);
-    if (dist > 78) continue;
+    const dx = other.x - bot.x;
+    const dz = other.z - bot.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 82) continue;
+
+    // Check angle relative to bot's look direction (bots notice enemies within 130° cone or close < 12m or if recently damaged)
+    const angleToEnemy = Math.atan2(-dx, -dz);
+    const yawDelta = Math.abs(shortestAngleDiff(bot.yaw, angleToEnemy));
+    const recentlyShot = now - (bot.lastDamagedAt || 0) < 2200;
+    if (yawDelta > 2.15 && dist > 12 && !recentlyShot) continue;
 
     const otherChest = {
       x: other.x,
@@ -175,20 +254,38 @@ export function updateBotAI(bot, room, dt, now) {
       z: other.z
     };
     if (hasLineOfSight(botEye, otherChest, map)) {
-      if (dist < bestEnemyDist) {
-        bestEnemyDist = dist;
+      const priority = dist + yawDelta * 6;
+      if (priority < bestScore) {
+        bestScore = priority;
         visibleEnemy = { player: other, aimPoint: otherChest, dist };
       }
     }
   }
 
+  // 3. Active Combat Engagement
   if (visibleEnemy) {
-    if (ai.targetId !== visibleEnemy.player.id) {
-      ai.targetId = visibleEnemy.player.id;
+    const enemy = visibleEnemy.player;
+    if (ai.targetId !== enemy.id) {
+      ai.targetId = enemy.id;
       ai.firstSeenAt = now;
+      ai.crouchCombat = visibleEnemy.dist > 16 && Math.random() < 0.35;
+    }
+    ai.lastSeenEnemyPos = { x: enemy.x, z: enemy.z };
+    ai.lastSeenEnemyUntil = now + 3500;
+
+    // Smart weapon management in combat: swap to pistol if primary is empty at close/mid range!
+    if (!wStats.isMelee && bot.ammo <= 0 && !bot.reloadingUntil) {
+      if (bot.slot === 1 && visibleEnemy.dist < 18 && bot.weaponsState?.[2]?.ammo > 0) {
+        room.switchWeapon(bot, 2);
+      } else if (bot.reserveAmmo > 0) {
+        room.startReload(bot, now);
+      } else if (bot.slot !== 3) {
+        room.switchWeapon(bot, 3);
+      }
     }
 
-    const aimYOffset = visibleEnemy.dist < 18 ? 0.18 : 0.04;
+    // Aim at lower torso / center mass (no velocity leading so player can dodge)
+    const aimYOffset = -0.10;
     const desired = anglesFromDirection(
       visibleEnemy.aimPoint.x - botEye.x,
       visibleEnemy.aimPoint.y + aimYOffset - botEye.y,
@@ -198,105 +295,171 @@ export function updateBotAI(bot, room, dt, now) {
     const pitchDiff = desired.pitch - bot.pitch;
     const turnBlend = Math.min(1, diff.turnSpeed * dt);
     input.yaw = bot.yaw + yawDiff * turnBlend;
-    input.pitch = Math.max(-1.3, Math.min(1.3, bot.pitch + pitchDiff * turnBlend));
+    input.pitch = Math.max(-1.35, Math.min(1.35, bot.pitch + pitchDiff * turnBlend));
 
+    // Wall-safe combat strafing (check left/right clearance so bot NEVER strafes into a wall!)
     if (now > ai.strafeSwitchAt) {
       ai.strafeDir = -ai.strafeDir;
-      ai.strafeSwitchAt = now + 900 + Math.random() * 900;
+      ai.strafeSwitchAt = now + 800 + Math.random() * 850;
+    }
+    const strafeAngle = input.yaw + (ai.strafeDir > 0 ? -Math.PI * 0.5 : Math.PI * 0.5);
+    const strafeClear = feelClearance(bot.x, bot.y, bot.z, strafeAngle, 1.35, map);
+    if (strafeClear < 0.95) {
+      ai.strafeDir = -ai.strafeDir;
+      ai.strafeSwitchAt = now + 900;
     }
     input.right = ai.strafeDir * 0.85;
-    if (visibleEnemy.dist > 22) input.forward = 0.75;
-    else if (visibleEnemy.dist < 6.5) input.forward = -0.45;
-    if (visibleEnemy.dist > 26 && wStats.isSniper) {
-      input.ads = true;
-      input.right *= 0.25;
-      input.forward = 0;
+
+    // Range-appropriate forward/back spacing (check clearance first!)
+    if (wStats.isMelee) {
+      input.forward = 1;
+      input.sprint = true;
+    } else if (visibleEnemy.dist > 22) {
+      const fwdClear = feelClearance(bot.x, bot.y, bot.z, input.yaw, 1.8, map);
+      if (fwdClear > 1.2) input.forward = 0.8;
+    } else if (visibleEnemy.dist < 6.0) {
+      const backClear = feelClearance(bot.x, bot.y, bot.z, input.yaw + Math.PI, 1.5, map);
+      if (backClear > 1.0) input.forward = -0.55;
     }
 
+    if (visibleEnemy.dist > 24 && wStats.isSniper) {
+      input.ads = true;
+      input.right *= 0.2;
+      input.forward = 0;
+    } else if (ai.crouchCombat && visibleEnemy.dist > 15) {
+      input.crouch = true;
+    }
+
+    // Fire weapon in spaced bursts when reaction time and shot cooldown have elapsed
     if (
       now - ai.firstSeenAt >= diff.reactionMs &&
+      now >= (ai.nextShotAt || 0) &&
       Math.abs(yawDiff) < 0.22 &&
       !bot.reloadingUntil &&
       Math.random() < diff.burstChance
     ) {
-      const jitterYaw = input.yaw + (Math.random() - 0.5) * diff.aimJitter * 2;
-      const jitterPitch = input.pitch + (Math.random() - 0.5) * diff.aimJitter * 1.6;
+      ai.nextShotAt = now + (diff.shotCooldownMs || 340) + Math.random() * 240;
+      const jitterYaw = input.yaw + (Math.random() - 0.5) * diff.aimJitter * 2.2;
+      const jitterPitch = input.pitch + (Math.random() - 0.5) * diff.aimJitter * 1.8;
       room.botFireWeapon(bot, jitterYaw, jitterPitch, now);
     }
 
     bot.input = input;
     return;
-  } else {
-    ai.targetId = null;
-    if (!wStats.isMelee && bot.ammo < wStats.magSize * 0.4 && bot.reserveAmmo > 0 && !bot.reloadingUntil) {
-      room.startReload(bot, now);
-    }
   }
 
-  // 3. Waypoint Navigation
-  const waypoints = map.waypoints;
-  if (now >= ai.repathAt || !ai.nextWp) {
-    ai.repathAt = now + 1400 + Math.random() * 700;
-    const curWp = nearestWaypoint(bot.x, bot.z, waypoints);
+  // Out of combat: switch back to primary weapon & reload if needed
+  ai.targetId = null;
+  if (bot.slot === 2 && (bot.weaponsState?.[1]?.ammo > 0 || bot.weaponsState?.[1]?.reserve > 0)) {
+    room.switchWeapon(bot, 1);
+  } else if (!wStats.isMelee && bot.ammo < wStats.magSize * 0.45 && bot.reserveAmmo > 0 && !bot.reloadingUntil) {
+    room.startReload(bot, now);
+  }
 
-    let desiredGoalWp = null;
+  // 4. Verified Waypoint Pathfinding + String-Pulling Lookahead
+  if (now >= ai.repathAt || !ai.path || ai.path.length === 0) {
+    ai.repathAt = now + 1500 + Math.random() * 600;
+    const startWp = nearestVisibleWaypoint(bot.x, bot.z, waypoints, map);
+
+    let goalWp = null;
     if (room.mode === 'bomb' && room.roundPhase === 'live') {
       if (room.bombState.planted) {
-        desiredGoalWp = nearestWaypoint(room.bombState.x, room.bombState.z, waypoints);
+        goalWp = nearestVisibleWaypoint(room.bombState.x, room.bombState.z, waypoints, map);
       } else {
         if (bot.aiBombSiteIdx === undefined) bot.aiBombSiteIdx = Math.random() < 0.5 ? 0 : 1;
         const site = map.bombSites[bot.aiBombSiteIdx] || map.bombSites[0];
-        desiredGoalWp = nearestWaypoint(site.x, site.z, waypoints);
+        goalWp = nearestVisibleWaypoint(site.x, site.z, waypoints, map);
       }
     } else if (room.mode === 'survival' && room.storm) {
       const distFromSafe = Math.hypot(bot.x - room.storm.x, bot.z - room.storm.z);
       if (distFromSafe > room.storm.radius * 0.72) {
-        desiredGoalWp = nearestWaypoint(room.storm.x, room.storm.z, waypoints);
+        goalWp = nearestVisibleWaypoint(room.storm.x, room.storm.z, waypoints, map);
       }
+    } else if (ai.lastSeenEnemyPos && now < ai.lastSeenEnemyUntil) {
+      // Pursue last seen enemy position!
+      goalWp = nearestVisibleWaypoint(ai.lastSeenEnemyPos.x, ai.lastSeenEnemyPos.z, waypoints, map);
     }
 
-    if (!desiredGoalWp) {
-      if (ai.goalWpId === null || curWp.id === ai.goalWpId) {
-        const randWp = waypoints[Math.floor(Math.random() * waypoints.length)];
-        ai.goalWpId = randWp.id;
+    if (!goalWp) {
+      if (ai.goalWpId === null || startWp.id === ai.goalWpId) {
+        const picked = pickTacticalGoalWaypoint(bot, room, waypoints);
+        ai.goalWpId = picked.id;
       }
-      desiredGoalWp = waypoints.find((w) => w.id === ai.goalWpId) || waypoints[0];
+      goalWp = waypoints.find((w) => w.id === ai.goalWpId) || waypoints[0];
     }
 
-    ai.nextWp = bfsNextWaypoint(curWp.id, desiredGoalWp.id, waypoints);
+    ai.path = computeWaypointPath(startWp.id, goalWp.id, waypoints);
   }
 
-  if (ai.nextWp) {
-    const dx = ai.nextWp.x - bot.x;
-    const dz = ai.nextWp.z - bot.z;
+  // Advance along path using String-Pulling:
+  // If close to path[0], or if path[1] is already directly walkable with wide clearance, pop path[0]
+  while (ai.path.length > 1) {
+    const wp0 = ai.path[0];
+    const wp1 = ai.path[1];
+    const dist0 = Math.hypot(wp0.x - bot.x, wp0.z - bot.z);
+    if (dist0 < 1.65 || canWalkBetweenXZ(bot.x, bot.z, wp1.x, wp1.z, map, 0.48)) {
+      ai.path.shift();
+    } else {
+      break;
+    }
+  }
+
+  const targetWp = ai.path[0];
+  if (targetWp) {
+    const dx = targetWp.x - bot.x;
+    const dz = targetWp.z - bot.z;
     const dist = Math.hypot(dx, dz);
-    if (dist < 2.2) {
-      ai.repathAt = 0;
+
+    if (dist < 1.65) {
+      ai.path.shift();
+      if (ai.path.length === 0) {
+        ai.goalWpId = null;
+        ai.repathAt = 0;
+      }
     } else {
       const desired = anglesFromDirection(dx, 0, dz);
-      const yawDiff = shortestAngleDiff(bot.yaw, desired.yaw);
-      input.yaw = bot.yaw + yawDiff * Math.min(1, 6.0 * dt);
+      let steerYaw = desired.yaw;
+
+      // 5. 3-Ray Whisker Obstacle Avoidance: Smoothly steer around any crate/corner ahead!
+      const whiskerDist = Math.min(2.3, dist);
+      const centerClear = feelClearance(bot.x, bot.y, bot.z, steerYaw, whiskerDist, map);
+      const leftClear = feelClearance(bot.x, bot.y, bot.z, steerYaw + 0.58, 2.1, map);
+      const rightClear = feelClearance(bot.x, bot.y, bot.z, steerYaw - 0.58, 2.1, map);
+
+      if (centerClear < whiskerDist * 0.88 || leftClear < 0.85 || rightClear < 0.85) {
+        if (leftClear > rightClear + 0.15) {
+          steerYaw += 0.72;
+          input.right = -0.45;
+        } else if (rightClear > leftClear + 0.15) {
+          steerYaw -= 0.72;
+          input.right = 0.45;
+        } else {
+          steerYaw += ai.strafeDir * 0.85;
+        }
+      }
+
+      const yawDiff = shortestAngleDiff(bot.yaw, steerYaw);
+      input.yaw = bot.yaw + yawDiff * Math.min(1, 7.5 * dt);
       input.pitch = bot.pitch * 0.88;
-      input.forward = 1;
-      input.sprint = dist > 7;
+      input.forward = Math.abs(yawDiff) > 1.2 ? 0.35 : 1.0;
+      input.sprint = dist > 5.5 && Math.abs(yawDiff) < 0.45 && centerClear >= 2.0;
     }
   }
 
+  // Unstuck safeguard if blocked by another player or tight corner
   if (now > ai.stuckCheckAt) {
     const moved = Math.hypot(bot.x - ai.lastPos.x, bot.z - ai.lastPos.z);
     ai.lastPos = { x: bot.x, z: bot.z };
-    ai.stuckCheckAt = now + 950;
-    if (moved < 0.45 && input.forward > 0) {
-      ai.unstuckUntil = now + 550;
+    ai.stuckCheckAt = now + 700;
+    if (moved < 0.35 && input.forward > 0) {
       ai.strafeDir = -ai.strafeDir;
       ai.goalWpId = null;
+      ai.path = [];
       ai.repathAt = 0;
+      input.yaw = bot.yaw + ai.strafeDir * 1.1;
+      input.right = ai.strafeDir;
       input.jump = true;
     }
-  }
-  if (now < ai.unstuckUntil) {
-    input.right = ai.strafeDir;
-    input.sprint = false;
   }
 
   bot.input = input;

@@ -7,7 +7,7 @@ import {
   getEffectiveWeaponStats
 } from '/shared/constants.js';
 import { MAPS } from '/shared/maps.js';
-import { stepPlayerPhysics } from '/shared/physics.js';
+import { stepPlayerPhysics, depenetratePlayerXZ } from '/shared/physics.js';
 import { buildThreeMap, createLootCrateMesh } from './mapBuilder.js';
 import {
   createFirstPersonRig,
@@ -273,7 +273,10 @@ export class FPSGameClient {
   }
 
   requestLock() {
-    try { this.canvas.requestPointerLock(); } catch {}
+    try {
+      const p = this.canvas.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {}
   }
 
   openInGameChat() {
@@ -341,7 +344,34 @@ export class FPSGameClient {
     this.local.primaryId = this.localMeta.primary || 'ak47';
     this.local.secondaryId = this.localMeta.secondary || 'deagle';
     this.local.meleeId = this.localMeta.melee || 'knife';
-    this.local.grenades = this.mode === 'practice' ? 5 : 1;
+    this.local.grenades = this.localMeta.grenades ?? (this.mode === 'practice' ? 5 : 1);
+
+    // Initialize local position directly to authoritative spawn point so we never start at (0,0,0) inside a central block!
+    const fallbackSpawn = this.mapData.spawns?.alpha?.[0] || { x: -6, y: 0, z: -28, yaw: Math.PI };
+    this.local.x = Number.isFinite(this.localMeta.x) ? this.localMeta.x : fallbackSpawn.x;
+    this.local.y = Number.isFinite(this.localMeta.y) ? this.localMeta.y : (fallbackSpawn.y || 0);
+    this.local.z = Number.isFinite(this.localMeta.z) ? this.localMeta.z : fallbackSpawn.z;
+    this.local.yaw = Number.isFinite(this.localMeta.yaw) ? this.localMeta.yaw : (fallbackSpawn.yaw || Math.PI);
+    this.local.pitch = 0;
+    this.local.vx = 0;
+    this.local.vy = 0;
+    this.local.vz = 0;
+    this.local.dead = false;
+    this.local.onGround = true;
+    depenetratePlayerXZ(this.local, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS, this.mapData);
+
+    const wStats = getEffectiveWeaponStats(
+      this.local.primaryId,
+      this.localMeta?.attachments?.[this.local.primaryId] || {},
+      this.localMeta?.operator || 'vanguard'
+    );
+    this.local.slot = 1;
+    this.local.weaponId = this.local.primaryId;
+    this.local.ammo = this.localMeta.ammo ?? wStats.magSize;
+    this.local.reserveAmmo = this.localMeta.reserveAmmo ?? wStats.reserveAmmo;
+    this.local.hp = this.localMeta.hp ?? 100;
+    this.local.armor = this.localMeta.armor ?? 100;
+    this.local.maxArmor = this.localMeta.maxArmor ?? 100;
 
     this.mapObjects = buildThreeMap(this.scene, this.mapData, this.mode, this.quality);
 
@@ -353,7 +383,12 @@ export class FPSGameClient {
       this.lootMeshes.set(crate.id, m);
     }
 
+    this.camera.position.set(this.local.x, this.local.y + PHYSICS.EYE_STAND, this.local.z);
+    this.camera.rotation.y = this.local.yaw;
+    this.camera.rotation.x = 0;
+
     this.rebuildFirstPersonRig(this.local.primaryId);
+    this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
     this.refreshHudWeapon();
 
     setTimeout(() => {
@@ -756,15 +791,6 @@ export class FPSGameClient {
         this.local.hasBomb = Boolean(ps.hasBomb);
         this.local.kills = ps.k || 0;
         if (this.fpRig) this.fpRig.visible = !this.local.dead && this.sniperZoomStage === 0;
-
-        if (!this.local.dead) {
-          const err = Math.hypot(ps.x - this.local.x, ps.y - this.local.y, ps.z - this.local.z);
-          if (err > 1.65) {
-            this.local.x = ps.x;
-            this.local.y = ps.y;
-            this.local.z = ps.z;
-          }
-        }
         this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
         continue;
       }
@@ -935,6 +961,15 @@ export class FPSGameClient {
       mesh.rotation.y += dt * 1.6;
     }
 
+    if (this.mapObjects?.bombMarkers) {
+      const floatOff = Math.sin(now * 0.0028) * 0.14;
+      for (const bm of this.mapObjects.bombMarkers) {
+        if (bm.userData?.baseY !== undefined) {
+          bm.position.y = bm.userData.baseY + floatOff;
+        }
+      }
+    }
+
     const enrichedPlayers = (this.lastSnapshotPlayers || []).map((p) => ({
       ...p,
       team: this.rosterMeta.get(p.id)?.team || ''
@@ -990,6 +1025,7 @@ export class FPSGameClient {
       this.net.send({
         type: 'input',
         ...input,
+        onGround: this.local.onGround,
         x: Number(this.local.x.toFixed(3)),
         y: Number(this.local.y.toFixed(3)),
         z: Number(this.local.z.toFixed(3))
@@ -1076,19 +1112,28 @@ export class FPSGameClient {
   }
 
   updateRemotePlayers(dt, timeSec) {
-    const lerpFactor = Math.min(1, 16 * dt);
+    const lerpFactor = Math.min(1, 15 * dt);
     for (const ent of this.remoteEntities.values()) {
       const tgt = ent.target;
       const cur = ent.current;
       const prevX = cur.x;
       const prevZ = cur.z;
 
-      if (Math.hypot(tgt.x - cur.x, tgt.z - cur.z) > 8.0) {
-        cur.x = tgt.x; cur.y = tgt.y; cur.z = tgt.z;
+      if (Math.hypot(tgt.x - cur.x, tgt.z - cur.z) > 6.5) {
+        cur.x = tgt.x;
+        cur.y = tgt.y;
+        cur.z = tgt.z;
       } else {
         cur.x += (tgt.x - cur.x) * lerpFactor;
         cur.y += (tgt.y - cur.y) * lerpFactor;
         cur.z += (tgt.z - cur.z) * lerpFactor;
+
+        // Ensure interpolated remote players/bots never visually clip through wall corners
+        if (!tgt.dead && this.mapData) {
+          const h = tgt.crouch ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
+          cur.onGround = Boolean(tgt.ground);
+          depenetratePlayerXZ(cur, h, PHYSICS.PLAYER_RADIUS, this.mapData);
+        }
       }
 
       cur.yaw += shortestAngleDiff(cur.yaw, tgt.yaw) * lerpFactor;
@@ -1097,7 +1142,9 @@ export class FPSGameClient {
       ent.rig.group.position.set(cur.x, cur.y, cur.z);
       ent.rig.group.rotation.y = cur.yaw;
 
-      const approxSpeed = Math.hypot(cur.x - prevX, cur.z - prevZ) / Math.max(0.001, dt);
+      const serverSpeed = (tgt.vx !== undefined && tgt.vz !== undefined)
+        ? Math.hypot(tgt.vx, tgt.vz)
+        : Math.hypot(cur.x - prevX, cur.z - prevZ) / Math.max(0.001, dt);
       const distToMe = Math.hypot(cur.x - this.local.x, cur.z - this.local.z);
 
       animateOperatorRig(
@@ -1106,7 +1153,7 @@ export class FPSGameClient {
           dead: Boolean(tgt.dead),
           crouch: Boolean(tgt.crouch),
           sprint: Boolean(tgt.sprint),
-          moveSpeed: approxSpeed,
+          moveSpeed: serverSpeed,
           pitch: cur.pitch,
           hasBomb: Boolean(tgt.hasBomb),
           shield: Boolean(tgt.shield),

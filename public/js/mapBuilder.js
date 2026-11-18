@@ -1,4 +1,4 @@
-// Builds Three.js 3D Arena, Lighting, Bomb Zones, C4 & Survival Storm/Loot from shared/maps.js
+// Builds Three.js 3D Arena, UV-Tiled Geometry, Zero-Z-Fighting Decals, Lighting & Bomb/Storm Visuals
 import * as THREE from 'three';
 import { getMapMaterial } from './textures.js';
 import { createC4Mesh } from './models.js';
@@ -8,7 +8,7 @@ function makeSiteBadgeSprite(letter, colorHex = '#f59e0b') {
   c.width = 128;
   c.height = 128;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
   ctx.beginPath();
   ctx.arc(64, 64, 50, 0, Math.PI * 2);
   ctx.fill();
@@ -23,21 +23,47 @@ function makeSiteBadgeSprite(letter, colorHex = '#f59e0b') {
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
   sp.scale.set(1.8, 1.8, 1);
   return sp;
+}
+
+// Proportionally tile UVs on architectural walls & buildings so textures never look stretched
+function applyProportionalBoxUVs(geo, w, h, d, tileSize = 4.0) {
+  const uv = geo.attributes.uv;
+  const pos = geo.attributes.position;
+  const norm = geo.attributes.normal;
+  if (!uv || !pos || !norm) return;
+
+  for (let i = 0; i < pos.count; i++) {
+    const nx = Math.abs(norm.getX(i));
+    const ny = Math.abs(norm.getY(i));
+    const u = uv.getX(i);
+    const v = uv.getY(i);
+
+    if (nx > 0.5) {
+      // +X / -X faces (d x h)
+      uv.setXY(i, u * Math.max(1, d / tileSize), v * Math.max(1, h / tileSize));
+    } else if (ny > 0.5) {
+      // +Y / -Y faces (w x d)
+      uv.setXY(i, u * Math.max(1, w / tileSize), v * Math.max(1, d / tileSize));
+    } else {
+      // +Z / -Z faces (w x h)
+      uv.setXY(i, u * Math.max(1, w / tileSize), v * Math.max(1, h / tileSize));
+    }
+  }
+  uv.needsUpdate = true;
 }
 
 export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   const worldGroup = new THREE.Group();
   scene.background = new THREE.Color(mapData.skyColor || '#6989a8');
-  scene.fog = new THREE.FogExp2(mapData.fogColor || '#7c96b0', mapData.fogDensity || 0.006);
+  scene.fog = new THREE.FogExp2(mapData.fogColor || '#7c96b0', mapData.fogDensity || 0.005);
 
-  // Hemisphere + Directional Sun Light
-  const hemi = new THREE.HemisphereLight('#e2e8f0', '#334155', 0.85);
+  const hemi = new THREE.HemisphereLight('#e2e8f0', '#334155', 0.90);
   worldGroup.add(hemi);
 
-  const sun = new THREE.DirectionalLight('#fffbeb', 1.35);
+  const sun = new THREE.DirectionalLight('#fffbeb', 1.38);
   sun.position.set(36, 58, 28);
   if (quality !== 'low') {
     sun.castShadow = true;
@@ -50,22 +76,28 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     sun.shadow.camera.right = d;
     sun.shadow.camera.top = d;
     sun.shadow.camera.bottom = -d;
-    sun.shadow.bias = -0.0005;
+    sun.shadow.bias = -0.0006;
   }
   worldGroup.add(sun);
 
-  // Ground Plane
+  // Ground Plane offset slightly (-0.008m) so block bottoms at y=0 never Z-fight
   const floorW = mapData.bounds.halfW * 2 + 8;
   const floorD = mapData.bounds.halfD * 2 + 8;
   const floorGeo = new THREE.PlaneGeometry(floorW, floorD);
   const floorMesh = new THREE.Mesh(floorGeo, getMapMaterial(mapData.floorMat));
   floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.position.y = -0.008;
   floorMesh.receiveShadow = quality !== 'low';
   worldGroup.add(floorMesh);
+
+  const tiledMaterials = new Set(['building_brick', 'building_glass']);
 
   // Arena Blocks
   for (const b of mapData.blocks) {
     const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
+    if (tiledMaterials.has(b.mat)) {
+      applyProportionalBoxUVs(geo, b.w, b.h, b.d, 5.5);
+    }
     const mat = getMapMaterial(b.mat);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(b.x, b.y + b.h * 0.5, b.z);
@@ -76,56 +108,60 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     worldGroup.add(mesh);
   }
 
-  // Spawn Zone Subtle Team FloorPads (Alpha Cyan / Bravo Amber)
-  if (mapData.spawns?.alpha?.[2]) {
-    const aPad = new THREE.Mesh(
-      new THREE.RingGeometry(2.2, 2.6, 28),
-      new THREE.MeshBasicMaterial({ color: '#38bdf8', side: THREE.DoubleSide, transparent: true, opacity: 0.45 })
+  // Spawn Zone Floor Rings (with polygonOffset + depthWrite:false to eliminate Z-fighting)
+  const makeDecalRing = (innerR, outerR, colorHex, opacity) =>
+    new THREE.Mesh(
+      new THREE.RingGeometry(innerR, outerR, 32),
+      new THREE.MeshBasicMaterial({
+        color: colorHex,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2
+      })
     );
+
+  if (mapData.spawns?.alpha?.[2]) {
+    const aPad = makeDecalRing(2.2, 2.6, '#38bdf8', 0.48);
     aPad.rotation.x = -Math.PI / 2;
-    aPad.position.set(mapData.spawns.alpha[2].x, 0.03, mapData.spawns.alpha[2].z);
+    aPad.position.set(mapData.spawns.alpha[2].x, 0.025, mapData.spawns.alpha[2].z);
     worldGroup.add(aPad);
   }
   if (mapData.spawns?.bravo?.[2]) {
-    const bPad = new THREE.Mesh(
-      new THREE.RingGeometry(2.2, 2.6, 28),
-      new THREE.MeshBasicMaterial({ color: '#f97316', side: THREE.DoubleSide, transparent: true, opacity: 0.45 })
-    );
+    const bPad = makeDecalRing(2.2, 2.6, '#f97316', 0.48);
     bPad.rotation.x = -Math.PI / 2;
-    bPad.position.set(mapData.spawns.bravo[2].x, 0.03, mapData.spawns.bravo[2].z);
+    bPad.position.set(mapData.spawns.bravo[2].x, 0.025, mapData.spawns.bravo[2].z);
     worldGroup.add(bPad);
   }
 
-  // Bomb Sites A & B (Highlighted strongly in Bomb mode, subtle tactical markers in others)
+  // Bomb Sites A & B
   const bombMarkers = [];
   for (const site of mapData.bombSites || []) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(site.radius - 0.18, site.radius, 36),
-      new THREE.MeshBasicMaterial({
-        color: mode === 'bomb' ? '#ef4444' : '#f59e0b',
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: mode === 'bomb' ? 0.72 : 0.25
-      })
+    const ring = makeDecalRing(
+      site.radius - 0.18,
+      site.radius,
+      mode === 'bomb' ? '#ef4444' : '#f59e0b',
+      mode === 'bomb' ? 0.72 : 0.28
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(site.x, (site.y || 0) + 0.04, site.z);
+    ring.position.set(site.x, (site.y || 0) + 0.03, site.z);
     worldGroup.add(ring);
 
     if (mode === 'bomb') {
       const badge = makeSiteBadgeSprite(site.id, '#f97316');
-      badge.position.set(site.x, (site.y || 0) + 3.2, site.z);
+      badge.position.set(site.x, (site.y || 0) + 3.1, site.z);
+      badge.userData.baseY = (site.y || 0) + 3.1;
       worldGroup.add(badge);
       bombMarkers.push(badge);
     }
   }
 
-  // World C4 Mesh (for Planted or Dropped state)
   const worldC4 = createC4Mesh();
   worldC4.visible = false;
   worldGroup.add(worldC4);
 
-  // Survival Mode Storm Wall Cylinder
   let stormMesh = null;
   if (mode === 'survival') {
     stormMesh = new THREE.Mesh(

@@ -13,6 +13,8 @@ import {
 import { MAPS } from '../maps.js';
 import {
   stepPlayerPhysics,
+  depenetratePlayerXZ,
+  canStandAt,
   directionFromAngles,
   raycastShot,
   raycastMap,
@@ -251,7 +253,7 @@ export class GameRoomCore {
     }
 
     if (this.status === 'playing') {
-      this.spawnPlayer(player, Date.now());
+      this.spawnPlayer(player, Date.now(), false);
       this.sendTo(player.id, {
         type: 'match_started',
         room: this.getLobbyPayload(),
@@ -264,6 +266,7 @@ export class GameRoomCore {
         storm: this.storm,
         lootCrates: this.lootCrates
       });
+      this.broadcastPlayerSpawned(player);
     }
 
     this.addSystemChat(`${player.name} đã tham gia phòng đấu (#${this.code}).`);
@@ -351,6 +354,10 @@ export class GameRoomCore {
       this.mapId = settings.mapId;
       this.map = MAPS[this.mapId];
     }
+    if (settings.maxPlayers !== undefined) {
+      const minAllowed = Math.max(2, this.getHumanPlayers().length);
+      this.maxPlayers = Math.min(12, Math.max(minAllowed, Number(settings.maxPlayers) || 10));
+    }
     if (settings.fillBots !== undefined) {
       this.fillBots = Boolean(settings.fillBots);
     }
@@ -419,7 +426,7 @@ export class GameRoomCore {
       p.currentStreak = 0;
       p.score = 0;
       p.hasBomb = false;
-      this.spawnPlayer(p, now);
+      this.spawnPlayer(p, now, false);
     }
 
     if (this.mode === 'bomb') {
@@ -440,6 +447,10 @@ export class GameRoomCore {
       storm: this.storm,
       lootCrates: this.lootCrates
     });
+
+    for (const p of this.combatants.values()) {
+      this.broadcastPlayerSpawned(p);
+    }
 
     this.onListChangedFn();
     this.startMatchLoop();
@@ -507,44 +518,41 @@ export class GameRoomCore {
 
   pickSpawnPoint(player) {
     const spawns = this.map.spawns;
+    let base;
     if (this.modeConfig.teamBased && (player.team === 'alpha' || player.team === 'bravo')) {
       const list = spawns[player.team] || spawns.alpha;
       const idx = [...this.combatants.values()]
         .filter((p) => p.team === player.team)
         .findIndex((p) => p.id === player.id);
-      const base = list[Math.max(0, idx) % list.length];
-      return {
-        x: base.x + (Math.random() - 0.5) * 1.1,
-        y: base.y || 0,
-        z: base.z + (Math.random() - 0.5) * 1.1,
-        yaw: base.yaw || 0
-      };
+      base = list[Math.max(0, idx) % list.length];
+    } else {
+      const list = spawns.ffa || [...spawns.alpha, ...spawns.bravo];
+      base = list[Math.floor(Math.random() * list.length)];
+      let bestMinDist = -1;
+      for (const candidate of list) {
+        let minDist = Infinity;
+        for (const other of this.getLivingCombatants()) {
+          if (other.id === player.id) continue;
+          const d = Math.hypot(other.x - candidate.x, other.z - candidate.z);
+          if (d < minDist) minDist = d;
+        }
+        if (minDist > bestMinDist) {
+          bestMinDist = minDist;
+          base = candidate;
+        }
+      }
     }
 
-    const list = spawns.ffa || [...spawns.alpha, ...spawns.bravo];
-    let bestSpawn = list[Math.floor(Math.random() * list.length)];
-    let bestMinDist = -1;
-    for (const candidate of list) {
-      let minDist = Infinity;
-      for (const other of this.getLivingCombatants()) {
-        if (other.id === player.id) continue;
-        const d = Math.hypot(other.x - candidate.x, other.z - candidate.z);
-        if (d < minDist) minDist = d;
-      }
-      if (minDist > bestMinDist) {
-        bestMinDist = minDist;
-        bestSpawn = candidate;
-      }
+    const jx = base.x + (Math.random() - 0.5) * 0.6;
+    const jz = base.z + (Math.random() - 0.5) * 0.6;
+    const jy = base.y || 0;
+    if (canStandAt(jx, jy, jz, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS + 0.1, this.map.blocks)) {
+      return { x: jx, y: jy, z: jz, yaw: base.yaw || 0 };
     }
-    return {
-      x: bestSpawn.x + (Math.random() - 0.5) * 0.8,
-      y: bestSpawn.y || 0,
-      z: bestSpawn.z + (Math.random() - 0.5) * 0.8,
-      yaw: bestSpawn.yaw || 0
-    };
+    return { x: base.x, y: jy, z: base.z, yaw: base.yaw || 0 };
   }
 
-  spawnPlayer(player, now = Date.now()) {
+  spawnPlayer(player, now = Date.now(), emitPacket = true) {
     const pt = this.pickSpawnPoint(player);
     const op = OPERATORS[player.operator] || OPERATORS.vanguard;
     player.x = pt.x;
@@ -557,6 +565,8 @@ export class GameRoomCore {
     player.pitch = 0;
     player.onGround = true;
     player.crouching = false;
+    depenetratePlayerXZ(player, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS, this.map);
+
     player.hp = PHYSICS.MAX_HP;
     player.maxHp = PHYSICS.MAX_HP;
     player.armor = op.maxArmor;
@@ -565,10 +575,17 @@ export class GameRoomCore {
     player.respawnAt = 0;
     player.currentStreak = 0;
     player.spawnedAt = now;
+    player.lastClientPosAt = 0;
     player.spawnProtectedUntil = now + PHYSICS.SPAWN_PROTECT_MS;
     player.damageTakenBy.clear();
     this.resetWeaponsForSpawn(player);
 
+    if (emitPacket) {
+      this.broadcastPlayerSpawned(player);
+    }
+  }
+
+  broadcastPlayerSpawned(player) {
     this.broadcast({
       type: 'player_spawned',
       id: player.id,
@@ -723,6 +740,7 @@ export class GameRoomCore {
     p.yaw = clean.yaw;
     p.pitch = clean.pitch;
     p.ads = clean.ads;
+    p.crouching = clean.crouch;
     p.sprinting = clean.sprint && clean.forward > 0 && !clean.crouch && !clean.ads;
 
     if (
@@ -731,10 +749,20 @@ export class GameRoomCore {
       Number.isFinite(rawInput.y) &&
       Number.isFinite(rawInput.z)
     ) {
-      const drift = Math.hypot(rawInput.x - p.x, rawInput.y - p.y, rawInput.z - p.z);
-      if (drift > 0.01 && drift < 0.65) {
-        p.x += (rawInput.x - p.x) * 0.35;
-        p.z += (rawInput.z - p.z) * 0.35;
+      const now = Date.now();
+      const dtSec = Math.max(0.015, (now - (p.lastClientPosAt || now - 30)) / 1000);
+      const drift = Math.hypot(rawInput.x - p.x, rawInput.z - p.z);
+      // Accept client position if within generous anti-speedhack envelope (< 5.5m)
+      if (drift < 5.5 && rawInput.y >= -0.05 && rawInput.y <= 9.5) {
+        p.vx = (rawInput.x - p.x) / dtSec;
+        p.vz = (rawInput.z - p.z) / dtSec;
+        p.x = rawInput.x;
+        p.y = Math.max(0, rawInput.y);
+        p.z = rawInput.z;
+        p.onGround = rawInput.onGround !== undefined ? Boolean(rawInput.onGround) : p.onGround;
+        const h = p.crouching ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
+        depenetratePlayerXZ(p, h, PHYSICS.PLAYER_RADIUS, this.map);
+        p.lastClientPosAt = now;
       }
     }
   }
@@ -1006,8 +1034,23 @@ export class GameRoomCore {
       rawDmg *= 1 - t * (1 - (wStats.minDamageMult || 0.75));
     }
 
-    if (hitZone === 'head') rawDmg *= wStats.headMult || 3.0;
-    else if (hitZone === 'legs') rawDmg *= wStats.legMult || 0.78;
+    // Bots do not get instant-kill headshot multipliers against human players, and deal heavily reduced damage
+    const isBotVsHuman = Boolean(attacker?.isBot && !victim.isBot);
+    if (hitZone === 'head') {
+      rawDmg *= isBotVsHuman ? 1.05 : (wStats.headMult || 3.0);
+    } else if (hitZone === 'legs') {
+      rawDmg *= wStats.legMult || 0.78;
+    }
+
+    if (attacker?.isBot) {
+      if (!victim.isBot) {
+        const botDmgScale = this.botDifficulty === 'easy' ? 0.22 : (this.botDifficulty === 'hard' ? 0.42 : 0.30);
+        rawDmg = Math.min(24, rawDmg * botDmgScale);
+      } else {
+        rawDmg *= 0.65;
+      }
+    }
+
     if (attacker.damageBoostUntil && now < attacker.damageBoostUntil) rawDmg *= 1.18;
 
     const absorbRatio = hitZone === 'head' ? PHYSICS.ARMOR_ABSORB_HEAD : PHYSICS.ARMOR_ABSORB_BODY;
@@ -1159,8 +1202,11 @@ export class GameRoomCore {
         updateBotAI(p, this, dt, now);
       }
 
-      const wStats = this.getPlayerWeaponStats(p);
-      stepPlayerPhysics(p, p.input, this.map, dt, wStats.moveSpeedMult, op.speedMult);
+      // Only step physics on server for AI Bots or human players without recent client-predicted position packets
+      if (p.isBot || now - (p.lastClientPosAt || 0) > 180) {
+        const wStats = this.getPlayerWeaponStats(p);
+        stepPlayerPhysics(p, p.input, this.map, dt, wStats.moveSpeedMult, op.speedMult);
+      }
       p.yaw = p.input.yaw;
       p.pitch = p.input.pitch;
       p.sprinting = Boolean(p.input.sprint && p.input.forward > 0 && !p.crouching && !p.input.ads);
@@ -1501,6 +1547,8 @@ export class GameRoomCore {
         x: Number(p.x.toFixed(3)),
         y: Number(p.y.toFixed(3)),
         z: Number(p.z.toFixed(3)),
+        vx: Number((p.vx || 0).toFixed(2)),
+        vz: Number((p.vz || 0).toFixed(2)),
         yaw: Number(p.yaw.toFixed(3)),
         pitch: Number(p.pitch.toFixed(3)),
         crouch: p.crouching ? 1 : 0,
@@ -1601,7 +1649,19 @@ export class GameRoomCore {
         attachments: p.attachments,
         rank: p.rank,
         rp: p.rp,
-        ping: p.ping
+        ping: p.ping,
+        x: p.x,
+        y: p.y,
+        z: p.z,
+        yaw: p.yaw,
+        hp: p.hp,
+        armor: p.armor,
+        maxArmor: p.maxArmor,
+        slot: p.slot,
+        weaponId: p.weaponId,
+        ammo: p.ammo,
+        reserveAmmo: p.reserveAmmo,
+        grenades: p.grenades
       })),
       chat: this.chatLog.slice(-25)
     };

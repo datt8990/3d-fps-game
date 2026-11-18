@@ -591,6 +591,8 @@ export function createOperatorRig({
     nameplate,
     currentWeaponId: weaponId,
     walkPhase: Math.random() * Math.PI * 2,
+    smoothSpeed: 0,
+    crouchBlend: 0,
     deathProgress: 0,
     recoilKick: 0
   };
@@ -609,41 +611,58 @@ export function swapRigWeapon(rig, weaponId, skinId = 'default', attachments = {
 
 export function animateOperatorRig(rig, state, dt, timeSec = 0) {
   if (!rig) return;
+  const clampedDt = Math.min(0.05, dt);
+
+  // Death fall animation: lie flat on top of the floor (y = 0.14) without sinking underground
   if (state.dead) {
-    rig.deathProgress = Math.min(1, rig.deathProgress + dt * 4.2);
-    rig.bodyRoot.rotation.x = -rig.deathProgress * (Math.PI * 0.48);
-    rig.bodyRoot.position.y = -rig.deathProgress * 0.65;
+    rig.deathProgress = Math.min(1, rig.deathProgress + clampedDt * 4.8);
+    rig.bodyRoot.rotation.x = -rig.deathProgress * (Math.PI * 0.47);
+    rig.bodyRoot.position.y = rig.deathProgress * 0.14;
+    rig.leftLeg.rotation.x *= 0.85;
+    rig.rightLeg.rotation.x *= 0.85;
     rig.shieldMesh.visible = false;
     rig.nameplate.visible = false;
     return;
   }
 
   if (rig.deathProgress > 0) {
-    rig.deathProgress = Math.max(0, rig.deathProgress - dt * 6.0);
-    rig.bodyRoot.rotation.x = -rig.deathProgress * (Math.PI * 0.48);
+    rig.deathProgress = Math.max(0, rig.deathProgress - clampedDt * 7.0);
+    rig.bodyRoot.rotation.x = -rig.deathProgress * (Math.PI * 0.47);
   }
+
   rig.nameplate.visible = state.showNameplate !== false;
   rig.c4Pack.visible = Boolean(state.hasBomb);
   rig.shieldMesh.visible = Boolean(state.shield);
   if (rig.shieldMesh.visible) rig.shieldMesh.rotation.y = timeSec * 2.5;
 
-  const targetCrouchY = state.crouch ? -0.44 : 0;
-  rig.bodyRoot.position.y += (targetCrouchY - rig.bodyRoot.position.y) * Math.min(1, 14 * dt);
+  // Smooth crouch blend (keeps boots near ground while lowering torso & head)
+  const targetCrouch = state.crouch ? 1 : 0;
+  rig.crouchBlend = (rig.crouchBlend || 0) + (targetCrouch - (rig.crouchBlend || 0)) * Math.min(1, 14 * clampedDt);
+  rig.upperBody.position.y = 0.95 - rig.crouchBlend * 0.34;
+  rig.leftLeg.position.y = 0.84 - rig.crouchBlend * 0.16;
+  rig.rightLeg.position.y = 0.84 - rig.crouchBlend * 0.16;
 
-  const speed = state.moveSpeed || 0;
-  if (speed > 0.25) {
-    rig.walkPhase += dt * (state.sprint ? 13.5 : 9.2);
-    const swing = Math.sin(rig.walkPhase) * (state.crouch ? 0.35 : 0.62);
-    rig.leftLeg.rotation.x = swing;
-    rig.rightLeg.rotation.x = -swing;
-    rig.bodyRoot.position.y += Math.abs(Math.cos(rig.walkPhase)) * 0.025;
+  // Smooth horizontal speed blend for stutter-free leg swing
+  const rawSpeed = state.moveSpeed || 0;
+  rig.smoothSpeed = (rig.smoothSpeed || 0) + (rawSpeed - (rig.smoothSpeed || 0)) * Math.min(1, 12 * clampedDt);
+  const moveFactor = Math.min(1, rig.smoothSpeed / 4.2);
+
+  if (moveFactor > 0.04) {
+    rig.walkPhase += clampedDt * (state.sprint ? 12.8 : 8.8) * Math.max(0.55, moveFactor);
+    const maxAmp = state.crouch ? 0.36 : (state.sprint ? 0.68 : 0.52);
+    const swing = Math.sin(rig.walkPhase) * maxAmp * moveFactor;
+    const crouchBias = rig.crouchBlend * 0.25;
+    rig.leftLeg.rotation.x = swing + crouchBias;
+    rig.rightLeg.rotation.x = -swing - crouchBias;
+    rig.bodyRoot.position.y = Math.abs(Math.cos(rig.walkPhase)) * 0.032 * moveFactor;
+    rig.upperBody.rotation.y = Math.sin(rig.walkPhase) * 0.06 * moveFactor;
   } else {
-    rig.leftLeg.rotation.x *= 0.82;
-    rig.rightLeg.rotation.x *= 0.82;
-    if (state.crouch) {
-      rig.leftLeg.rotation.x = 0.55;
-      rig.rightLeg.rotation.x = -0.35;
-    }
+    const restLeft = rig.crouchBlend * 0.42;
+    const restRight = -rig.crouchBlend * 0.32;
+    rig.leftLeg.rotation.x += (restLeft - rig.leftLeg.rotation.x) * Math.min(1, 12 * clampedDt);
+    rig.rightLeg.rotation.x += (restRight - rig.rightLeg.rotation.x) * Math.min(1, 12 * clampedDt);
+    rig.bodyRoot.position.y += (0 - rig.bodyRoot.position.y) * Math.min(1, 12 * clampedDt);
+    rig.upperBody.rotation.y += (0 - rig.upperBody.rotation.y) * Math.min(1, 10 * clampedDt);
   }
 
   if (state.victoryPose) {
@@ -653,7 +672,7 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
     return;
   }
 
-  rig.recoilKick = Math.max(0, rig.recoilKick - dt * 6.5);
+  rig.recoilKick = Math.max(0, rig.recoilKick - clampedDt * 6.5);
   const pitch = state.pitch || 0;
   rig.armsPivot.rotation.x = pitch * 0.85 + rig.recoilKick;
   rig.headGroup.rotation.x = pitch * 0.55;

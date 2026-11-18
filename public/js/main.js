@@ -754,13 +754,17 @@ function updateRoomTabPanels() {
 }
 
 function renderWaitingRoom(room) {
-  document.getElementById('room-lobby-badge').textContent = room.modeConfig?.shortName || room.mode;
+  const isSolo = !room.modeConfig?.teamBased || room.maxPlayers === 2;
+  document.getElementById('room-lobby-badge').textContent = room.maxPlayers === 2
+    ? 'SOLO 1v1'
+    : (room.modeConfig?.shortName || room.mode);
   document.getElementById('room-lobby-title').textContent = `${room.name} — ${room.mapName}`;
   document.getElementById('room-lobby-code').textContent = `#${room.code || room.id}`;
 
   const isHost = room.hostId === net.clientId;
   const modeSel = document.getElementById('room-edit-mode');
   const mapSel = document.getElementById('room-edit-map');
+  const maxSel = document.getElementById('room-edit-max');
   const diffSel = document.getElementById('room-edit-botdiff');
   const fillChk = document.getElementById('room-edit-fillbots');
   const startBtn = document.getElementById('btn-start-match');
@@ -768,6 +772,7 @@ function renderWaitingRoom(room) {
 
   if (modeSel) { modeSel.value = room.mode; modeSel.disabled = !isHost; }
   if (mapSel) { mapSel.value = room.mapId; mapSel.disabled = !isHost; }
+  if (maxSel) { maxSel.value = String(room.maxPlayers || 10); maxSel.disabled = !isHost; }
   if (diffSel) { diffSel.value = room.botDifficulty; diffSel.disabled = !isHost; }
   if (fillChk) { fillChk.checked = room.fillBots; fillChk.disabled = !isHost; }
   if (switchTeamBtn) {
@@ -794,17 +799,19 @@ function renderWaitingRoom(room) {
   `;
 
   if (room.modeConfig?.teamBased) {
+    const perTeam = Math.max(1, Math.floor((room.maxPlayers || 10) / 2));
     const alphas = players.filter((p) => p.team === 'alpha');
     const bravos = players.filter((p) => p.team === 'bravo');
     alphaContainer.innerHTML = alphas.map(renderSlot).join('') +
-      (room.fillBots && alphas.length < 5 ? `<div class="roster-slot empty">+ ${5 - alphas.length} vị trí sẽ được AI Bot hỗ trợ</div>` : '');
+      (room.fillBots && alphas.length < perTeam ? `<div class="roster-slot empty">+ ${perTeam - alphas.length} vị trí sẽ được AI Bot hỗ trợ</div>` : '');
     bravoContainer.innerHTML = bravos.map(renderSlot).join('') +
-      (room.fillBots && bravos.length < 5 ? `<div class="roster-slot empty">+ ${5 - bravos.length} vị trí sẽ được AI Bot hỗ trợ</div>` : '');
+      (room.fillBots && bravos.length < perTeam ? `<div class="roster-slot empty">+ ${perTeam - bravos.length} vị trí sẽ được AI Bot hỗ trợ</div>` : '');
   } else {
     const half = Math.ceil(players.length / 2);
+    const botSlots = Math.max(0, (room.maxPlayers || 8) - players.length);
     alphaContainer.innerHTML = players.slice(0, half).map(renderSlot).join('');
     bravoContainer.innerHTML = players.slice(half).map(renderSlot).join('') +
-      (room.fillBots ? `<div class="roster-slot empty">Chế độ Đấu Đơn — AI Bot sẽ tham chiến khi bắt đầu</div>` : '');
+      (room.fillBots && botSlots > 0 ? `<div class="roster-slot empty">Chế độ Solo (${room.maxPlayers} người) — +${botSlots} AI Bot khi bắt đầu</div>` : '');
   }
 
   const chatEl = document.getElementById('room-chat-log');
@@ -1221,6 +1228,38 @@ function bindUIEvents() {
     net.send({ type: 'quick_match', mode: 'ranked', mapId: 'urban_city' });
   });
 
+  const quickCreatePresetRoom = (presetType) => {
+    soundEngine.ensureContext();
+    const hostName = state.user?.username || 'Chiến Binh';
+    const mapId = state.selectedQuickMap || 'warehouse';
+    if (presetType === 'solo') {
+      net.send({
+        type: 'create_room',
+        name: `[SOLO] Phòng Đấu Đơn - ${hostName}`,
+        mode: 'ffa',
+        mapId,
+        maxPlayers: 8,
+        botDifficulty: 'normal',
+        fillBots: true
+      });
+    } else {
+      net.send({
+        type: 'create_room',
+        name: `[5v5] Phòng Đấu Đội - ${hostName}`,
+        mode: 'tdm',
+        mapId,
+        maxPlayers: 10,
+        botDifficulty: 'normal',
+        fillBots: true
+      });
+    }
+  };
+
+  document.getElementById('btn-home-create-5v5')?.addEventListener('click', () => quickCreatePresetRoom('5v5'));
+  document.getElementById('btn-home-create-solo')?.addEventListener('click', () => quickCreatePresetRoom('solo'));
+  document.getElementById('btn-quick-create-5v5')?.addEventListener('click', () => quickCreatePresetRoom('5v5'));
+  document.getElementById('btn-quick-create-solo')?.addEventListener('click', () => quickCreatePresetRoom('solo'));
+
   // Global Chat
   document.getElementById('global-chat-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1240,6 +1279,19 @@ function bindUIEvents() {
       nameInput.value = `Phòng của ${state.user?.username || 'Chiến Binh'}`;
     }
     document.getElementById('create-room-modal')?.classList.remove('hidden');
+  });
+  document.querySelectorAll('.cr-preset-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const modeEl = document.getElementById('cr-mode');
+      const maxEl = document.getElementById('cr-max');
+      const nameEl = document.getElementById('cr-name');
+      const hostName = state.user?.username || 'Chiến Binh';
+      if (modeEl && btn.dataset.presetMode) modeEl.value = btn.dataset.presetMode;
+      if (maxEl && btn.dataset.presetMax) maxEl.value = btn.dataset.presetMax;
+      if (nameEl && btn.dataset.presetLabel) {
+        nameEl.value = `[${btn.dataset.presetLabel}] Phòng của ${hostName}`;
+      }
+    });
   });
   document.getElementById('btn-cancel-create-room')?.addEventListener('click', () => {
     document.getElementById('create-room-modal')?.classList.add('hidden');
@@ -1265,12 +1317,13 @@ function bindUIEvents() {
     soundEngine.ensureContext();
     net.send({ type: 'start_match' });
   });
-  ['room-edit-mode', 'room-edit-map', 'room-edit-botdiff', 'room-edit-fillbots'].forEach((id) => {
+  ['room-edit-mode', 'room-edit-map', 'room-edit-max', 'room-edit-botdiff', 'room-edit-fillbots'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', () => {
       net.send({
         type: 'update_room',
         mode: document.getElementById('room-edit-mode').value,
         mapId: document.getElementById('room-edit-map').value,
+        maxPlayers: Number(document.getElementById('room-edit-max')?.value || 10),
         botDifficulty: document.getElementById('room-edit-botdiff').value,
         fillBots: document.getElementById('room-edit-fillbots').checked
       });

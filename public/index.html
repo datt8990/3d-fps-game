@@ -142,7 +142,11 @@
         </button>
 
         <div class="two-col" style="margin-top:8px;">
-          <button id="btn-go-rooms" class="btn-secondary full-w">☰ Tạo Phòng Bạn Bè</button>
+          <button id="btn-home-create-5v5" class="btn-secondary full-w">⚔ Tạo Phòng 5v5</button>
+          <button id="btn-home-create-solo" class="btn-secondary full-w">🎯 Tạo Phòng Solo</button>
+        </div>
+        <div class="two-col" style="margin-top:6px;">
+          <button id="btn-go-rooms" class="btn-secondary full-w">☰ Danh Sách Phòng</button>
           <button id="btn-practice-range" class="btn-secondary full-w">🔫 Phòng Tập Thử Súng</button>
         </div>
       </div>
@@ -197,13 +201,15 @@
         <div class="panel-header-row">
           <div>
             <h2 class="section-title">PHÒNG ĐẤU ONLINE & GHÉP TRẬN BẠN BÈ</h2>
-            <p class="muted">Tạo phòng lấy <strong>Mã Phòng 6 ký tự</strong> hoặc <strong>Link Mời</strong> gửi cho bạn bè vào bắn chung ngay lập tức!</p>
+            <p class="muted">Tạo phòng <strong>Solo (1v1 / Tự Do)</strong> hoặc <strong>Đấu Đội 5v5</strong> lấy Mã Phòng gửi cho bạn bè vào bắn chung ngay!</p>
           </div>
           <div class="row-gap">
-            <input id="browser-code-input" type="text" maxlength="10" placeholder="Nhập Mã Phòng (VD: BS1001)..." style="width:210px;" />
+            <input id="browser-code-input" type="text" maxlength="10" placeholder="Nhập Mã Phòng (VD: BS1001)..." style="width:190px;" />
             <button id="btn-browser-join-code" class="btn-secondary">Vào Bằng Mã</button>
             <button id="btn-refresh-rooms" class="btn-secondary">↻ Làm mới</button>
-            <button id="btn-open-create-room" class="btn-primary pulse-glow">+ TẠO PHÒNG CÙNG BẠN BÈ</button>
+            <button id="btn-quick-create-solo" class="btn-secondary">🎯 Tạo Nhanh Solo</button>
+            <button id="btn-quick-create-5v5" class="btn-secondary">⚔ Tạo Nhanh 5v5</button>
+            <button id="btn-open-create-room" class="btn-primary pulse-glow">+ TÙY CHỈNH TẠO PHÒNG</button>
           </div>
         </div>
 
@@ -258,7 +264,7 @@
 
           <div class="room-side-controls">
             <div class="room-settings-box">
-              <div class="panel-tag">THIẾT LẬP PHÒNG ĐẤU</div>
+              <div class="panel-tag">THIẾT LẬP PHÒNG ĐẤU (SOLO / 5V5)</div>
               <div class="two-col">
                 <div>
                   <label class="field-label">Chế độ chơi</label>
@@ -269,12 +275,25 @@
                   <select id="room-edit-map" class="tactical-select"></select>
                 </div>
               </div>
-              <label class="field-label">Độ khó AI Bot hỗ trợ</label>
-              <select id="room-edit-botdiff" class="tactical-select">
-                <option value="easy">Dễ (Tập luyện)</option>
-                <option value="normal" selected>Thường (Cân bằng)</option>
-                <option value="hard">Khó (Xạ thủ tinh nhuệ)</option>
-              </select>
+              <div class="two-col">
+                <div>
+                  <label class="field-label">Quy mô phòng</label>
+                  <select id="room-edit-max" class="tactical-select">
+                    <option value="2">2 Người (Solo 1v1)</option>
+                    <option value="6">6 Người (3v3)</option>
+                    <option value="8">8 Người (Solo Tự Do / 4v4)</option>
+                    <option value="10" selected>10 Người (5v5 Chuẩn)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label">Độ khó AI Bot</label>
+                  <select id="room-edit-botdiff" class="tactical-select">
+                    <option value="easy">Dễ (Tập luyện)</option>
+                    <option value="normal" selected>Thường (Cân bằng)</option>
+                    <option value="hard">Khó (Tinh nhuệ)</option>
+                  </select>
+                </div>
+              </div>
               <label class="checkbox-row">
                 <input id="room-edit-fillbots" type="checkbox" checked />
                 <span>Tự động lấp đầy vị trí trống bằng AI Bot</span>
@@ -384,7 +403,14 @@
   <!-- CREATE ROOM MODAL -->
   <div id="create-room-modal" class="modal-backdrop hidden">
     <div class="modal-card glass-panel">
-      <h3 class="section-title">TẠO PHÒNG ĐẤU CÙNG BẠN BÈ</h3>
+      <h3 class="section-title">TẠO PHÒNG ĐẤU (SOLO HOẶC 5V5)</h3>
+      <div class="panel-tag" style="margin-top:8px;">CHỌN NHANH THỂ THỨC PHÒNG</div>
+      <div class="two-col" style="margin-bottom:6px;">
+        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="tdm" data-max="10">⚔ Đấu Đội 5v5 (10 Người)</button>
+        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="ffa" data-max="2">🔥 Solo 1v1 Tay Đôi (2 Người)</button>
+        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="ffa" data-max="8">🎯 Solo Tự Do (8 Người)</button>
+        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="bomb" data-max="10">💣 Đặt Bom C4 5v5 (10 Người)</button>
+      </div>
       <form id="create-room-form">
         <label class="field-label">Tên Phòng Đấu</label>
         <input id="cr-name" type="text" maxlength="30" placeholder="Phòng Bắn Giao Hữu 5v5" required />
@@ -400,9 +426,9 @@
             <label class="field-label">Số Người Tối Đa</label>
             <select id="cr-max" class="tactical-select">
               <option value="10" selected>10 Chiến binh (5v5)</option>
-              <option value="8">8 Chiến binh (4v4 / FFA)</option>
+              <option value="8">8 Chiến binh (Solo Tự Do / 4v4)</option>
               <option value="6">6 Chiến binh (3v3)</option>
-              <option value="2">2 Chiến binh (1v1 Solo Bạn Bè)</option>
+              <option value="2">2 Chiến binh (Solo 1v1 Tay Đôi)</option>
             </select>
           </div>
           <div>

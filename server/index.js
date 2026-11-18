@@ -108,6 +108,17 @@ createRoom({
   botDifficulty: 'hard',
   isPersistentDefault: true
 });
+createRoom({
+  id: 'rm_BS4004',
+  code: 'BS4004',
+  name: '[SOLO] Đấu Đơn Tự Do - Nhà Kho',
+  mode: 'ffa',
+  mapId: 'warehouse',
+  maxPlayers: 8,
+  fillBots: true,
+  botDifficulty: 'normal',
+  isPersistentDefault: true
+});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });

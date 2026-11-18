@@ -1,4 +1,4 @@
-// Shared 3D Physics, Collision, Step-Up, and Hitbox Raycasting (Server & Client)
+// Shared 3D Physics, Multi-Block Collision, Circle-AABB Depenetration, Step-Up & Hitbox Raycasting
 import { PHYSICS } from './constants.js';
 
 export function directionFromAngles(yaw, pitch) {
@@ -37,7 +37,7 @@ function overlapsXZ(px, pz, r, box) {
   );
 }
 
-function canStandAt(px, py, pz, height, r, blocks) {
+export function canStandAt(px, py, pz, height, r, blocks) {
   for (let i = 0; i < blocks.length; i++) {
     const box = getBoxBounds(blocks[i]);
     if (!overlapsXZ(px, pz, r - 0.02, box)) continue;
@@ -49,12 +49,55 @@ function canStandAt(px, py, pz, height, r, blocks) {
 }
 
 /**
+ * Push a cylinder (x, z, r) out of any solid AABB blocks at its current vertical span [y, y + height].
+ * Guarantees that neither players nor AI bots can ever clip into or walk through walls/corners.
+ */
+export function depenetratePlayerXZ(state, height, r, map) {
+  const blocks = map.blocks;
+  for (let pass = 0; pass < 3; pass++) {
+    let pushed = false;
+    for (let i = 0; i < blocks.length; i++) {
+      const box = getBoxBounds(blocks[i]);
+      // Must check XZ overlap FIRST!
+      if (!overlapsXZ(state.x, state.z, r, box)) continue;
+      // Skip blocks entirely below feet, steppable curbs/stairs, or blocks above head
+      if (state.y >= box.maxY - 0.02 || state.y + height <= box.minY + 0.02) continue;
+      if (box.maxY - state.y <= PHYSICS.STEP_HEIGHT + 0.02) continue;
+
+      const penLeft = (state.x + r) - box.minX;
+      const penRight = box.maxX - (state.x - r);
+      const penBack = (state.z + r) - box.minZ;
+      const penFront = box.maxZ - (state.z - r);
+
+      const minPenX = penLeft < penRight ? -penLeft : penRight;
+      const minPenZ = penBack < penFront ? -penBack : penFront;
+
+      if (Math.abs(minPenX) < Math.abs(minPenZ)) {
+        state.x += minPenX + (minPenX < 0 ? -0.002 : 0.002);
+        if (state.vx !== undefined) state.vx = 0;
+      } else {
+        state.z += minPenZ + (minPenZ < 0 ? -0.002 : 0.002);
+        if (state.vz !== undefined) state.vz = 0;
+      }
+      pushed = true;
+    }
+    if (!pushed) break;
+  }
+
+  // Clamp inside arena bounds
+  const maxW = map.bounds.halfW - r;
+  const maxD = map.bounds.halfD - r;
+  if (state.x < -maxW) { state.x = -maxW; if (state.vx) state.vx = 0; }
+  if (state.x > maxW) { state.x = maxW; if (state.vx) state.vx = 0; }
+  if (state.z < -maxD) { state.z = -maxD; if (state.vz) state.vz = 0; }
+  if (state.z > maxD) { state.z = maxD; if (state.vz) state.vz = 0; }
+}
+
+/**
  * Simulates 1 physics step for a player/bot on `map`
- * state: { x, y, z, vx, vy, vz, onGround, crouching }
- * input: { forward: -1..1, right: -1..1, sprint: bool, crouch: bool, jump: bool, ads: bool, yaw: rad }
  */
 export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, operatorSpeedMult = 1.0) {
-  const clampedDt = Math.min(dt, 0.06);
+  const clampedDt = Math.min(dt, 0.05);
   const r = PHYSICS.PLAYER_RADIUS;
   const blocks = map.blocks;
 
@@ -114,22 +157,19 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
   if (state.vy < -32) state.vy = -32;
 
   // Move X with step-up support
-  let nextX = state.x + state.vx * clampedDt;
-  nextX = resolveAxisX(nextX, state, height, r, blocks);
+  const prevX = state.x;
+  let nextX = prevX + state.vx * clampedDt;
+  nextX = resolveAxisX(prevX, nextX, state, height, r, blocks);
   state.x = nextX;
 
   // Move Z with step-up support
-  let nextZ = state.z + state.vz * clampedDt;
-  nextZ = resolveAxisZ(nextZ, state, height, r, blocks);
+  const prevZ = state.z;
+  let nextZ = prevZ + state.vz * clampedDt;
+  nextZ = resolveAxisZ(prevZ, nextZ, state, height, r, blocks);
   state.z = nextZ;
 
-  // Clamp inside arena bounds
-  const maxW = map.bounds.halfW - r;
-  const maxD = map.bounds.halfD - r;
-  if (state.x < -maxW) { state.x = -maxW; state.vx = 0; }
-  if (state.x > maxW) { state.x = maxW; state.vx = 0; }
-  if (state.z < -maxD) { state.z = -maxD; state.vz = 0; }
-  if (state.z > maxD) { state.z = maxD; state.vz = 0; }
+  // Enforce multi-block corner depenetration so nothing can ever clip through walls
+  depenetratePlayerXZ(state, height, r, map);
 
   // Move Y (floor + blocks, order-independent highest supporting surface)
   let nextY = state.y + state.vy * clampedDt;
@@ -140,7 +180,7 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
     const box = getBoxBounds(blocks[i]);
     if (!overlapsXZ(state.x, state.z, r - 0.015, box)) continue;
 
-    if (state.vy <= 0 && state.y >= box.maxY - 0.16 && nextY <= box.maxY + 0.002) {
+    if (state.vy <= 0 && state.y >= box.maxY - 0.18 && nextY <= box.maxY + 0.005) {
       if (box.maxY > bestFloorY) {
         bestFloorY = box.maxY;
       }
@@ -160,7 +200,8 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
   return state;
 }
 
-function resolveAxisX(nextX, state, height, r, blocks) {
+function resolveAxisX(prevX, nextX, state, height, r, blocks) {
+  const movingDir = nextX - prevX;
   for (let i = 0; i < blocks.length; i++) {
     const box = getBoxBounds(blocks[i]);
     if (nextX + r <= box.minX || nextX - r >= box.maxX) continue;
@@ -176,17 +217,19 @@ function resolveAxisX(nextX, state, height, r, blocks) {
       }
     }
 
-    if (state.vx > 0) {
-      nextX = box.minX - r;
-    } else if (state.vx < 0) {
-      nextX = box.maxX + r;
+    const boxCenterX = (box.minX + box.maxX) * 0.5;
+    if (movingDir > 0 || (movingDir === 0 && prevX < boxCenterX)) {
+      nextX = box.minX - r - 0.001;
+    } else {
+      nextX = box.maxX + r + 0.001;
     }
     state.vx = 0;
   }
   return nextX;
 }
 
-function resolveAxisZ(nextZ, state, height, r, blocks) {
+function resolveAxisZ(prevZ, nextZ, state, height, r, blocks) {
+  const movingDir = nextZ - prevZ;
   for (let i = 0; i < blocks.length; i++) {
     const box = getBoxBounds(blocks[i]);
     if (state.x + r <= box.minX || state.x - r >= box.maxX) continue;
@@ -201,10 +244,11 @@ function resolveAxisZ(nextZ, state, height, r, blocks) {
       }
     }
 
-    if (state.vz > 0) {
-      nextZ = box.minZ - r;
-    } else if (state.vz < 0) {
-      nextZ = box.maxZ + r;
+    const boxCenterZ = (box.minZ + box.maxZ) * 0.5;
+    if (movingDir > 0 || (movingDir === 0 && prevZ < boxCenterZ)) {
+      nextZ = box.minZ - r - 0.001;
+    } else {
+      nextZ = box.maxZ + r + 0.001;
     }
     state.vz = 0;
   }
@@ -219,7 +263,6 @@ export function intersectRayAABB(ox, oy, oz, dx, dy, dz, minX, minY, minZ, maxX,
   let tmax = maxDist;
   let hitNormal = { x: 0, y: 0, z: 0 };
 
-  // X slab
   if (Math.abs(dx) < 1e-8) {
     if (ox < minX || ox > maxX) return null;
   } else {
@@ -233,7 +276,6 @@ export function intersectRayAABB(ox, oy, oz, dx, dy, dz, minX, minY, minZ, maxX,
     if (tmin > tmax) return null;
   }
 
-  // Y slab
   if (Math.abs(dy) < 1e-8) {
     if (oy < minY || oy > maxY) return null;
   } else {
@@ -247,7 +289,6 @@ export function intersectRayAABB(ox, oy, oz, dx, dy, dz, minX, minY, minZ, maxX,
     if (tmin > tmax) return null;
   }
 
-  // Z slab
   if (Math.abs(dz) < 1e-8) {
     if (oz < minZ || oz > maxZ) return null;
   } else {
@@ -276,7 +317,6 @@ export function raycastMap(origin, dir, maxDist, map) {
   let closest = null;
   let bestDist = maxDist;
 
-  // Floor y = 0
   if (dir.y < -1e-6 && origin.y > 0) {
     const tFloor = -origin.y / dir.y;
     if (tFloor >= 0 && tFloor < bestDist) {
@@ -314,6 +354,42 @@ export function raycastMap(origin, dir, maxDist, map) {
 }
 
 /**
+ * Checks if a character cylinder can walk in a straight line between two XZ points without hitting any non-steppable wall/crate.
+ * Used by AI Bots and Waypoint Graph validation.
+ */
+export function canWalkBetweenXZ(x1, z1, x2, z2, map, clearanceRadius = 0.46) {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.05) return true;
+
+  const dirX = dx / dist;
+  const dirZ = dz / dist;
+  const perpX = -dirZ * clearanceRadius;
+  const perpZ = dirX * clearanceRadius;
+
+  // Test 3 parallel rays (center + left shoulder + right shoulder) at chest height y=0.95
+  const offsets = [
+    { ox: 0, oz: 0 },
+    { ox: perpX, oz: perpZ },
+    { ox: -perpX, oz: -perpZ }
+  ];
+
+  for (const off of offsets) {
+    const hit = raycastMap(
+      { x: x1 + off.ox, y: 0.95, z: z1 + off.oz },
+      { x: dirX, y: 0, z: dirZ },
+      dist,
+      map
+    );
+    if (hit && (!hit.block || !hit.block.isStep)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Raycast against enemy players (Head, Body, Legs hitboxes) occluded by map geometry
  */
 export function raycastShot(origin, dir, maxRange, map, combatants, shooterId, shooterTeam, teamBased = true) {
@@ -328,12 +404,10 @@ export function raycastShot(origin, dir, maxRange, map, combatants, shooterId, s
     if (teamBased && shooterTeam && target.team === shooterTeam) continue;
 
     const totalH = target.crouching ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
-    // Generous, responsive FPS hitboxes (compensates slight network interpolation)
     const headSize = 0.24;
     const headBottom = target.y + totalH - 0.36;
     const headTop = target.y + totalH + 0.06;
 
-    // 1. Check Head Hitbox first
     const headHit = intersectRayAABB(
       origin.x, origin.y, origin.z,
       dir.x, dir.y, dir.z,
@@ -354,7 +428,6 @@ export function raycastShot(origin, dir, maxRange, map, combatants, shooterId, s
       continue;
     }
 
-    // 2. Check Torso & Legs Hitbox
     const bodyR = 0.37;
     const bodyHit = intersectRayAABB(
       origin.x, origin.y, origin.z,
