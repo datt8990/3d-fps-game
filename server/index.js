@@ -238,8 +238,14 @@ wss.on('connection', (ws) => {
       }
 
       case 'join_room': {
+        const rawCode = String(msg.roomCode || msg.roomId || '').replace(/^rm_/i, '').trim().toUpperCase();
         const target = findRoomByIdOrCode(msg.roomCode || msg.roomId);
         if (!target) {
+          const cloudRoom = gameDB.getActiveCloudRooms().find((r) => (r.code || '').toUpperCase() === rawCode);
+          if (cloudRoom) {
+            safeSend(ws, { type: 'p2p_redirect_join', roomCode: cloudRoom.code });
+            break;
+          }
           safeSend(ws, { type: 'error_msg', text: 'Không tìm thấy Mã Phòng hoặc phòng đã đóng.' });
           break;
         }

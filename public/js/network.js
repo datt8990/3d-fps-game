@@ -117,6 +117,9 @@ export class NetworkClient {
       if (msg.type === 'welcome') {
         this.clientId = msg.clientId;
         this.onlineCount = msg.onlineCount || 1;
+      } else if (msg.type === 'p2p_redirect_join') {
+        this.cleanupP2PSession().then(() => this.joinRemoteP2PRoom(msg.roomCode));
+        return;
       } else if (msg.type === 'pong_check') {
         this.pingMs = Math.max(1, Math.round(performance.now() - (msg.clientSentAt || performance.now())));
         if (msg.onlineCount) this.onlineCount = msg.onlineCount;
@@ -203,6 +206,21 @@ export class NetworkClient {
   // Unified Outgoing Command Dispatcher (Identical API for WS & P2P!)
   send(obj) {
     if (this.transportMode === 'ws') {
+      if (this.hostConn?.open) {
+        if (obj.type === 'leave_room') {
+          this.cleanupP2PSession().then(() => {
+            this.emit('left_room', {});
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+              this.ws.send(JSON.stringify({ type: 'list_rooms' }));
+            }
+          });
+          return;
+        }
+        if (!['list_rooms', 'global_chat', 'create_room', 'join_room', 'quick_match'].includes(obj.type)) {
+          this.hostConn.send(obj);
+          return;
+        }
+      }
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify(obj));
       }
