@@ -7,7 +7,28 @@
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' }
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  {
+    urls: 'turn:global.relay.metered.ca:80',
+    username: 'e8dd65b92f6212101d3b9286',
+    credential: '8W7f5d2H4tQ8wQ+3'
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+    username: 'e8dd65b92f6212101d3b9286',
+    credential: '8W7f5d2H4tQ8wQ+3'
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:443',
+    username: 'e8dd65b92f6212101d3b9286',
+    credential: '8W7f5d2H4tQ8wQ+3'
+  },
+  {
+    urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+    username: 'e8dd65b92f6212101d3b9286',
+    credential: '8W7f5d2H4tQ8wQ+3'
+  }
 ];
 
 function sanitizeId(str) {

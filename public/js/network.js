@@ -6,7 +6,28 @@ import { GameRoomCore, generateRoomCode } from '/shared/engine/gameRoomCore.js';
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' }
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  {
+    urls: 'turn:global.relay.metered.ca:80',
+    username: 'e8dd65b92f6212101d3b9286',
+    credential: '8W7f5d2H4tQ8wQ+3'
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+    username: 'e8dd65b92f6212101d3b9286',
+    credential: '8W7f5d2H4tQ8wQ+3'
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:443',
+    username: 'e8dd65b92f6212101d3b9286',
+    credential: '8W7f5d2H4tQ8wQ+3'
+  },
+  {
+    urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+    username: 'e8dd65b92f6212101d3b9286',
+    credential: '8W7f5d2H4tQ8wQ+3'
+  }
 ];
 
 function makeSessionClientId() {
@@ -380,12 +401,19 @@ export class NetworkClient {
     // Open WebRTC PeerJS Host Broker so Friends anywhere can join via Room Code!
     if (window.Peer && options.mode !== 'practice') {
       try {
-        this.hostPeer = new window.Peer(peerHostId, { config: { iceServers: ICE_SERVERS } });
+        this.hostPeer = new window.Peer(peerHostId, {
+          config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }
+        });
         this.hostPeer.on('open', () => {
           this.publishRoomHeartbeat();
         });
         this.hostPeer.on('connection', (conn) => {
           this.setupIncomingFriendConnection(conn);
+        });
+        this.hostPeer.on('disconnected', () => {
+          if (this.hostRoom && this.hostPeer && !this.hostPeer.destroyed) {
+            try { this.hostPeer.reconnect(); } catch {}
+          }
         });
       } catch (err) {
         console.warn('PeerJS Host warning:', err);
@@ -497,7 +525,9 @@ export class NetworkClient {
     }
 
     const peerHostId = `bstrike_v2_${code}`;
-    this.clientPeer = new window.Peer({ config: { iceServers: ICE_SERVERS } });
+    this.clientPeer = new window.Peer({
+      config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }
+    });
     let connectedOnce = false;
 
     const failTimer = setTimeout(() => {
@@ -506,7 +536,7 @@ export class NetworkClient {
         if (onFailFallback) onFailFallback();
         else this.emit('error_msg', { text: `Không thể kết nối tới Mã Phòng #${code} (Phòng đã đóng hoặc sai mã).` });
       }
-    }, 6500);
+    }, 15000);
 
     this.clientPeer.on('open', () => {
       const conn = this.clientPeer.connect(peerHostId, { reliable: true });
