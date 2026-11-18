@@ -594,100 +594,428 @@ export function getMapMaterial(matKey = 'concrete') {
   return mat;
 }
 
+const outfitTextureCache = new Map();
+const miscTextureCache = new Map();
+
 export function getWeaponSkinTexture(skinId = 'default') {
   if (skinTextureCache.has(skinId)) return skinTextureCache.get(skinId);
   const skin = WEAPON_SKINS[skinId] || WEAPON_SKINS.default;
-  const c = createCanvas(256, 256);
+  const c = createCanvas(512, 512);
   const ctx = c.getContext('2d');
 
   ctx.fillStyle = skin.bodyColor;
-  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillRect(0, 0, 512, 512);
 
-  if (skin.pattern === 'stripes') {
-    ctx.fillStyle = skin.accentColor;
-    ctx.beginPath(); ctx.moveTo(0, 180); ctx.lineTo(256, 40); ctx.lineTo(256, 105); ctx.lineTo(0, 245); ctx.fill();
-    ctx.fillStyle = skin.woodOrGrip;
-    ctx.fillRect(0, 0, 256, 36);
-  } else if (skin.pattern === 'gold') {
-    const grad = ctx.createLinearGradient(0, 0, 256, 256);
-    grad.addColorStop(0, '#fef08a');
-    grad.addColorStop(0.5, '#eab308');
-    grad.addColorStop(1, '#854d0e');
+  if (skin.pattern === 'solid') {
+    // Brushed anodized gunmetal with machined micro-grooves & subtle panel seams
+    const grad = ctx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0, '#363b45');
+    grad.addColorStop(0.45, '#252930');
+    grad.addColorStop(1, '#191c22');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 256, 256);
-    ctx.strokeStyle = '#451a03';
+    ctx.fillRect(0, 0, 512, 512);
+    for (let y = 0; y < 512; y += 3) {
+      ctx.fillStyle = y % 6 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.05)';
+      ctx.fillRect(0, y, 512, 1);
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(18, 18, 476, 476);
+  } else if (skin.pattern === 'stripes') {
+    // Asiimov precision sci-fi geometric plating
+    const grad = ctx.createLinearGradient(0, 0, 512, 512);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(1, '#e2e8f0');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 512);
+
+    ctx.fillStyle = '#18181b';
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(190, 0); ctx.lineTo(90, 120); ctx.lineTo(0, 120);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = skin.accentColor;
+    ctx.beginPath();
+    ctx.moveTo(0, 340); ctx.lineTo(512, 70); ctx.lineTo(512, 195); ctx.lineTo(0, 465);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#09090b';
+    ctx.beginPath();
+    ctx.moveTo(0, 445); ctx.lineTo(512, 175); ctx.lineTo(512, 220); ctx.lineTo(0, 490);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(24,24,27,0.35)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(20, 20, 472, 472);
+  } else if (skin.pattern === 'gold') {
+    const grad = ctx.createLinearGradient(0, 0, 512, 512);
+    grad.addColorStop(0, '#fef9c3');
+    grad.addColorStop(0.35, '#facc15');
+    grad.addColorStop(0.7, '#ca8a04');
+    grad.addColorStop(1, '#78350f');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Ornate engraved dragon scales
+    ctx.strokeStyle = 'rgba(69, 26, 3, 0.58)';
+    ctx.lineWidth = 4;
+    for (let row = 0; row < 10; row++) {
+      const y = row * 56;
+      const offsetX = (row % 2) * 32;
+      for (let x = -32; x < 544; x += 64) {
+        ctx.beginPath();
+        ctx.arc(x + offsetX, y, 30, 0, Math.PI, false);
+        ctx.stroke();
+      }
+    }
+    ctx.strokeStyle = '#fef08a';
     ctx.lineWidth = 6;
-    for (let i = 20; i < 240; i += 45) {
-      ctx.beginPath(); ctx.arc(i, 128, 32, 0, Math.PI * 1.4); ctx.stroke();
-    }
+    ctx.strokeRect(14, 14, 484, 484);
   } else if (skin.pattern === 'cyber') {
-    ctx.strokeStyle = skin.accentColor;
-    ctx.lineWidth = 5;
-    for (let y = 24; y < 256; y += 48) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(110, y); ctx.lineTo(145, y + 24); ctx.lineTo(256, y + 24); ctx.stroke();
+    const grad = ctx.createLinearGradient(0, 0, 512, 512);
+    grad.addColorStop(0, '#0f0c29');
+    grad.addColorStop(0.5, '#1e1b4b');
+    grad.addColorStop(1, '#090d16');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 512);
+
+    ctx.strokeStyle = 'rgba(6, 182, 212, 0.25)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 512; i += 32) {
+      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
     }
-    ctx.fillStyle = skin.woodOrGrip;
-    ctx.fillRect(40, 110, 180, 12);
+
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 6;
+    for (let y = 40; y < 500; y += 84) {
+      ctx.beginPath();
+      ctx.moveTo(0, y); ctx.lineTo(180, y); ctx.lineTo(240, y + 40); ctx.lineTo(512, y + 40);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#ec4899';
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0, 260); ctx.lineTo(210, 260); ctx.lineTo(270, 200); ctx.lineTo(512, 200); ctx.stroke();
   } else if (skin.pattern === 'web') {
+    const grad = ctx.createRadialGradient(256, 256, 30, 256, 256, 360);
+    grad.addColorStop(0, '#dc2626');
+    grad.addColorStop(0.55, '#991b1b');
+    grad.addColorStop(1, '#270707');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 512);
+
     ctx.strokeStyle = '#09090b';
-    ctx.lineWidth = 3;
-    for (let a = 0; a < Math.PI * 2; a += Math.PI / 6) {
-      ctx.beginPath(); ctx.moveTo(128, 128); ctx.lineTo(128 + Math.cos(a) * 180, 128 + Math.sin(a) * 180); ctx.stroke();
+    ctx.lineWidth = 4;
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 7) {
+      ctx.beginPath(); ctx.moveTo(256, 256); ctx.lineTo(256 + Math.cos(a) * 380, 256 + Math.sin(a) * 380); ctx.stroke();
     }
-    for (let r = 28; r < 160; r += 30) {
-      ctx.beginPath(); ctx.arc(128, 128, r, 0, Math.PI * 2); ctx.stroke();
+    for (let r = 44; r < 340; r += 48) {
+      ctx.beginPath(); ctx.arc(256, 256, r, 0, Math.PI * 2); ctx.stroke();
     }
   } else if (skin.pattern === 'glacier') {
-    const grad = ctx.createLinearGradient(0, 0, 256, 256);
+    const grad = ctx.createLinearGradient(0, 0, 512, 512);
     grad.addColorStop(0, '#f0f9ff');
-    grad.addColorStop(0.5, '#7dd3fc');
-    grad.addColorStop(1, '#0284c7');
+    grad.addColorStop(0.45, '#7dd3fc');
+    grad.addColorStop(1, '#0369a1');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 256, 256);
-    ctx.strokeStyle = '#ffffff';
+    ctx.fillRect(0, 0, 512, 512);
+
+    const facets = [
+      [0, 0, 180, 90, 90, 240, 'rgba(255,255,255,0.28)'],
+      [180, 90, 390, 30, 290, 260, 'rgba(14,165,233,0.22)'],
+      [90, 240, 290, 260, 180, 470, 'rgba(224,242,254,0.34)'],
+      [290, 260, 512, 190, 430, 490, 'rgba(2,132,199,0.28)']
+    ];
+    for (const [x1, y1, x2, y2, x3, y3, col] of facets) {
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3); ctx.closePath(); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
     ctx.lineWidth = 3;
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 14; i++) {
       ctx.beginPath();
-      ctx.moveTo(i * 22, 0);
-      ctx.lineTo(i * 18 + 40, 128);
-      ctx.lineTo(i * 24 - 10, 256);
+      ctx.moveTo(i * 42, 0);
+      ctx.lineTo(i * 36 + 54, 256);
+      ctx.lineTo(i * 44 - 20, 512);
       ctx.stroke();
     }
   } else if (skin.pattern === 'jade') {
-    const grad = ctx.createLinearGradient(0, 0, 256, 256);
-    grad.addColorStop(0, '#10b981');
-    grad.addColorStop(0.55, '#047857');
+    const grad = ctx.createLinearGradient(0, 0, 512, 512);
+    grad.addColorStop(0, '#34d399');
+    grad.addColorStop(0.45, '#059669');
     grad.addColorStop(1, '#064e3b');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 256, 256);
-    ctx.strokeStyle = '#fde047';
-    ctx.lineWidth = 5;
-    ctx.strokeRect(14, 14, 228, 228);
-    ctx.beginPath(); ctx.moveTo(0, 128); ctx.lineTo(256, 128); ctx.stroke();
-  } else if (skin.pattern === 'magma') {
-    ctx.fillStyle = '#18181b';
-    ctx.fillRect(0, 0, 256, 256);
-    ctx.strokeStyle = '#f97316';
-    ctx.lineWidth = 6;
-    for (let y = 20; y < 250; y += 38) {
+    ctx.fillRect(0, 0, 512, 512);
+
+    ctx.strokeStyle = 'rgba(167, 243, 208, 0.25)';
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 18; i++) {
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.bezierCurveTo(80, y - 22, 170, y + 22, 256, y);
+      ctx.arc(Math.random() * 512, Math.random() * 512, 30 + Math.random() * 65, 0, Math.PI * 1.3);
       ctx.stroke();
     }
     ctx.strokeStyle = '#fde047';
-    ctx.lineWidth = 2;
-    for (let y = 20; y < 250; y += 38) {
+    ctx.lineWidth = 8;
+    ctx.strokeRect(20, 20, 472, 472);
+    ctx.lineWidth = 4;
+    ctx.strokeRect(36, 36, 440, 440);
+  } else if (skin.pattern === 'magma') {
+    ctx.fillStyle = '#121215';
+    ctx.fillRect(0, 0, 512, 512);
+
+    for (let y = 32; y < 500; y += 64) {
+      ctx.strokeStyle = '#dc2626';
+      ctx.lineWidth = 14;
       ctx.beginPath();
       ctx.moveTo(0, y);
-      ctx.bezierCurveTo(80, y - 22, 170, y + 22, 256, y);
+      ctx.bezierCurveTo(150, y - 34, 340, y + 34, 512, y);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#f97316';
+      ctx.lineWidth = 7;
+      ctx.stroke();
+
+      ctx.strokeStyle = '#fef08a';
+      ctx.lineWidth = 2.5;
       ctx.stroke();
     }
   }
 
-  addNoise(ctx, 256, 256, 0.04);
+  addNoise(ctx, 512, 512, 0.045);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   skinTextureCache.set(skinId, tex);
+  return tex;
+}
+
+export function getOutfitTextures(outfitId = 'urban', basePrimary = '#2b3648', baseSecondary = '#1a202c', accent = '#38bdf8') {
+  const key = `${outfitId}_${basePrimary}_${baseSecondary}`;
+  if (outfitTextureCache.has(key)) return outfitTextureCache.get(key);
+
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  const b = createCanvas(256, 256);
+  const bctx = b.getContext('2d');
+
+  ctx.fillStyle = basePrimary;
+  ctx.fillRect(0, 0, 256, 256);
+  bctx.fillStyle = '#808080';
+  bctx.fillRect(0, 0, 256, 256);
+
+  // Ripstop tactical grid weave in bump map + subtle diffuse
+  for (let i = 0; i < 256; i += 8) {
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.fillRect(i, 0, 1, 256);
+    ctx.fillRect(0, i, 256, 1);
+    bctx.fillStyle = '#9c9c9c';
+    bctx.fillRect(i, 0, 2, 256);
+    bctx.fillRect(0, i, 256, 2);
+  }
+
+  if (outfitId === 'cyber') {
+    ctx.strokeStyle = accent;
+    ctx.globalAlpha = 0.25;
+    ctx.lineWidth = 2;
+    for (let y = 16; y < 256; y += 32) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(100, y); ctx.lineTo(128, y + 16); ctx.lineTo(256, y + 16); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  } else if (outfitId === 'royal_gold') {
+    ctx.strokeStyle = accent;
+    ctx.globalAlpha = 0.22;
+    ctx.lineWidth = 2;
+    for (let y = 0; y < 256; y += 32) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(256, y + 32); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  } else {
+    // Organic / digital tactical camo blotches
+    ctx.fillStyle = baseSecondary;
+    ctx.globalAlpha = 0.42;
+    for (let i = 0; i < 28; i++) {
+      const rx = ((i * 73) % 230) + 12;
+      const ry = ((i * 137) % 230) + 12;
+      const rw = 22 + ((i * 19) % 34);
+      const rh = 12 + ((i * 29) % 24);
+      if (outfitId === 'urban' || outfitId === 'stealth_ops') {
+        ctx.fillRect(rx - rw * 0.5, ry - rh * 0.5, rw, rh);
+      } else {
+        ctx.beginPath();
+        ctx.ellipse(rx, ry, rw * 0.6, rh * 0.5, (i % 5) * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 12; i++) {
+      const rx = ((i * 97 + 40) % 220) + 16;
+      const ry = ((i * 53 + 20) % 220) + 16;
+      ctx.fillRect(rx, ry, 18, 10);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  addNoise(ctx, 256, 256, 0.05);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+
+  const res = { map, bumpMap };
+  outfitTextureCache.set(key, res);
+  return res;
+}
+
+export function getMolleVestTextures() {
+  if (miscTextureCache.has('molle')) return miscTextureCache.get('molle');
+  const b = createCanvas(256, 256);
+  const bctx = b.getContext('2d');
+  bctx.fillStyle = '#707070';
+  bctx.fillRect(0, 0, 256, 256);
+
+  // Heavy ballistic Cordura nylon + MOLLE PALS webbing straps
+  for (let y = 16; y < 256; y += 32) {
+    bctx.fillStyle = '#c8c8c8';
+    bctx.fillRect(0, y, 256, 14);
+    bctx.fillStyle = '#383838';
+    for (let x = 0; x < 256; x += 32) {
+      bctx.fillRect(x, y, 4, 14);
+    }
+  }
+  addNoise(bctx, 256, 256, 0.06);
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  miscTextureCache.set('molle', bumpMap);
+  return bumpMap;
+}
+
+export function getBalaclavaTexture(isSkull = false) {
+  const key = isSkull ? 'balaclava_skull' : 'balaclava_plain';
+  if (miscTextureCache.has(key)) return miscTextureCache.get(key);
+
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Subtle knit weave
+  ctx.fillStyle = 'rgba(255,255,255,0.04)';
+  for (let y = 0; y < 256; y += 6) {
+    ctx.fillRect(0, y, 256, 2);
+  }
+
+  if (isSkull) {
+    // Iconic Ghost Jaw & Teeth Print
+    ctx.fillStyle = '#e2e8f0';
+    // Cheekbone ridges
+    ctx.beginPath();
+    ctx.moveTo(42, 70); ctx.lineTo(95, 92); ctx.lineTo(82, 130); ctx.lineTo(50, 118);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(214, 70); ctx.lineTo(161, 92); ctx.lineTo(174, 130); ctx.lineTo(206, 118);
+    ctx.closePath();
+    ctx.fill();
+
+    // Nasal cavity
+    ctx.fillStyle = '#090d16';
+    ctx.beginPath();
+    ctx.moveTo(128, 66); ctx.lineTo(114, 108); ctx.lineTo(142, 108);
+    ctx.closePath();
+    ctx.fill();
+
+    // Skull teeth row
+    ctx.fillStyle = '#f1f5f9';
+    for (let x = 76; x <= 164; x += 18) {
+      ctx.fillRect(x, 140, 13, 38);
+      ctx.fillRect(x + 1, 184, 11, 30);
+    }
+    ctx.fillStyle = '#090d16';
+    ctx.fillRect(68, 176, 120, 6);
+  } else {
+    // Breathable mesh vents on lower mask
+    ctx.fillStyle = '#090d16';
+    for (let y = 110; y < 200; y += 14) {
+      for (let x = 86; x < 174; x += 14) {
+        ctx.beginPath();
+        ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  miscTextureCache.set(key, tex);
+  return tex;
+}
+
+export function getWatchFaceTexture(accent = '#38bdf8') {
+  const key = `watch_${accent}`;
+  if (miscTextureCache.has(key)) return miscTextureCache.get(key);
+
+  const c = createCanvas(128, 128);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#040812';
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(8, 8, 112, 112);
+  ctx.fillStyle = accent;
+  ctx.font = 'bold 24px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('100 HP', 64, 52);
+  ctx.fillStyle = '#4ade80';
+  ctx.font = 'bold 16px monospace';
+  ctx.fillText('TAC-LINK', 64, 82);
+  ctx.fillRect(24, 96, 80, 6);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  miscTextureCache.set(key, tex);
+  return tex;
+}
+
+export function getStudioEnvMap() {
+  if (miscTextureCache.has('studio_env')) return miscTextureCache.get('studio_env');
+  const c = createCanvas(512, 256);
+  const ctx = c.getContext('2d');
+
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0.0, '#1e3a5f');
+  grad.addColorStop(0.32, '#64748b');
+  grad.addColorStop(0.50, '#cbd5e1');
+  grad.addColorStop(0.52, '#1e293b');
+  grad.addColorStop(1.0, '#090d16');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 256);
+
+  // Studio softbox key & rim reflections for metallic gunsteel, gold & visors
+  const softboxes = [
+    [130, 60, 90, 32, 'rgba(255,255,255,0.92)'],
+    [390, 72, 70, 24, 'rgba(186,230,253,0.85)'],
+    [256, 118, 120, 14, 'rgba(253,186,116,0.55)']
+  ];
+  for (const [x, y, rw, rh, col] of softboxes) {
+    const sg = ctx.createRadialGradient(x, y, 2, x, y, rw);
+    sg.addColorStop(0, col);
+    sg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.ellipse(x, y, rw, rh, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  miscTextureCache.set('studio_env', tex);
   return tex;
 }

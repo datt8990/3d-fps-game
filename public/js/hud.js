@@ -43,6 +43,11 @@ export class MatchHUD {
     this.hitmarkerEl = document.getElementById('hud-hitmarker');
     this.hitDmgEl = document.getElementById('hud-hit-dmg');
     this.sniperOverlay = document.getElementById('sniper-scope-overlay');
+    this.sniperZoomLabel = document.getElementById('sniper-zoom-label');
+    this.acogOverlay = document.getElementById('acog-scope-overlay');
+    this.acogZoomLabel = document.getElementById('acog-zoom-label');
+    this.adsVignette = document.getElementById('ads-vignette-overlay');
+    this.adsBadgeEl = document.getElementById('ads-mode-badge');
     this.damageVignette = document.getElementById('hud-damage-vignette');
     this.respawnOverlay = document.getElementById('hud-respawn-overlay');
     this.respawnTimerEl = document.getElementById('hud-respawn-sec');
@@ -70,8 +75,9 @@ export class MatchHUD {
       secondaryId: '',
       meleeId: '',
       chGap: -1,
-      chScoped: null,
-      chAds: null,
+      chMode: '',
+      zoomText: '',
+      adsBadgeText: '',
       timerText: '',
       alphaScore: -1,
       bravoScore: -1,
@@ -219,20 +225,60 @@ export class MatchHUD {
     }
   }
 
-  updateCrosshair(spreadPx = 6, isSniperScoped = false, isAds = false) {
-    if (isSniperScoped !== this._cache.chScoped) {
-      this._cache.chScoped = isSniperScoped;
-      this.sniperOverlay?.classList.toggle('hidden', !isSniperScoped);
-      this.crosshairEl?.classList.toggle('hidden', isSniperScoped);
-    }
-    if (!this.crosshairEl || isSniperScoped) return;
-
-    const adsTight = Boolean(isAds && !isSniperScoped);
-    if (adsTight !== this._cache.chAds) {
-      this._cache.chAds = adsTight;
-      this.crosshairEl.classList.toggle('ads-tight', adsTight);
+  updateCrosshair(spreadPx = 6, isSniperScoped = false, isAds = false, opticId = 'iron', adsBlend = 0, zoomFactor = 1.0) {
+    let mode = 'hip';
+    if (isSniperScoped) {
+      mode = 'sniper';
+    } else if (isAds && opticId === 'acog' && adsBlend > 0.55) {
+      mode = 'acog';
+    } else if (isAds && opticId === 'reddot' && adsBlend > 0.35) {
+      mode = 'holo';
+    } else if (isAds && adsBlend > 0.35) {
+      mode = 'iron';
     }
 
+    if (mode !== this._cache.chMode) {
+      this._cache.chMode = mode;
+      this.sniperOverlay?.classList.toggle('hidden', mode !== 'sniper');
+      this.acogOverlay?.classList.toggle('hidden', mode !== 'acog');
+      this.adsVignette?.classList.toggle('hidden', mode !== 'holo' && mode !== 'iron');
+      this.adsBadgeEl?.classList.toggle('hidden', mode !== 'holo' && mode !== 'iron');
+      if (this.crosshairEl) {
+        this.crosshairEl.classList.toggle('hidden', mode === 'sniper' || mode === 'acog');
+        this.crosshairEl.classList.toggle('ads-holo', mode === 'holo');
+        this.crosshairEl.classList.toggle('ads-iron', mode === 'iron');
+        this.crosshairEl.classList.toggle('ads-tight', mode === 'holo' || mode === 'iron');
+      }
+    }
+
+    if (mode === 'sniper') {
+      const zt = `${zoomFactor.toFixed(1)}×`;
+      if (zt !== this._cache.zoomText && this.sniperZoomLabel) {
+        this._cache.zoomText = zt;
+        this.sniperZoomLabel.textContent = zt;
+      }
+      return;
+    }
+
+    if (mode === 'acog') {
+      const zt = `ACOG ${zoomFactor.toFixed(1)}×`;
+      if (zt !== this._cache.zoomText && this.acogZoomLabel) {
+        this._cache.zoomText = zt;
+        this.acogZoomLabel.textContent = zt;
+      }
+      return;
+    }
+
+    if (mode === 'holo' || mode === 'iron') {
+      const label = mode === 'holo' ? `HOLO • ${zoomFactor.toFixed(1)}×` : `NGẮM CHUẨN • ${zoomFactor.toFixed(1)}×`;
+      if (label !== this._cache.adsBadgeText && this.adsBadgeEl) {
+        this._cache.adsBadgeText = label;
+        this.adsBadgeEl.textContent = label;
+      }
+      return;
+    }
+
+    if (!this.crosshairEl) return;
     const gap = Math.round(Math.max(4, Math.min(26, spreadPx)));
     if (gap !== this._cache.chGap) {
       this._cache.chGap = gap;

@@ -746,6 +746,8 @@ export class NetworkClient {
         if (p) this.hostRoom.changeInMatchPrimary(p, msg.primaryId);
         break;
       }
+      case 'voice_signal': this.hostRoom.handleVoiceSignal(playerId, msg); break;
+      case 'voice_audio': this.hostRoom.handleVoiceAudio(playerId, msg); break;
     }
   }
 

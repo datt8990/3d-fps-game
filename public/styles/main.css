@@ -903,14 +903,138 @@ kbd {
   top: -1px;
   background: #f8fafc;
 }
-.crosshair.ads-tight .ch-dot {
+.crosshair.ads-tight .ch-dot,
+.crosshair.ads-iron .ch-dot {
+  width: 3px;
+  height: 3px;
+  left: -1.5px;
+  top: -1.5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.95);
+}
+.crosshair.ads-iron .ch-blade,
+.crosshair.ads-holo .ch-blade {
+  opacity: 0;
+}
+
+.ch-holo-ring {
+  display: none;
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  left: -12px;
+  top: -12px;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(239, 68, 68, 0.85);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.55);
+}
+.crosshair.ads-holo .ch-holo-ring {
+  display: block;
+}
+.crosshair.ads-holo .ch-dot {
   width: 4px;
   height: 4px;
   left: -2px;
   top: -2px;
   border-radius: 50%;
-  background: #ef4444;
-  box-shadow: 0 0 6px #ef4444;
+  background: #ff2e2e;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.ads-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at center, transparent 42%, rgba(4, 7, 15, 0.52) 100%);
+}
+
+.ads-mode-badge {
+  position: fixed;
+  top: calc(50% + 76px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(8, 13, 24, 0.72);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  color: #bae6fd;
+  pointer-events: none;
+}
+
+.acog-scope {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at center, rgba(14, 165, 233, 0.04) 24%, rgba(3, 6, 12, 0.74) 26.5%, rgba(3, 6, 12, 0.82) 100%);
+  display: grid;
+  place-items: center;
+}
+.acog-lens {
+  position: relative;
+  width: min(50vh, 50vw);
+  height: min(50vh, 50vw);
+  border-radius: 50%;
+  border: 10px solid #0b1120;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35), inset 0 0 26px rgba(2, 6, 23, 0.75);
+}
+.acog-line-h {
+  position: absolute;
+  top: 50%;
+  left: 10%;
+  right: 10%;
+  height: 1.5px;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.95) 0%, rgba(15, 23, 42, 0.95) 42%, transparent 42%, transparent 58%, rgba(15, 23, 42, 0.95) 58%, rgba(15, 23, 42, 0.95) 100%);
+}
+.acog-line-v {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  bottom: 12%;
+  width: 1.5px;
+  transform: translateX(-0.75px);
+  background: rgba(15, 23, 42, 0.92);
+}
+.acog-stadia {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 1.5px;
+  background: rgba(239, 68, 68, 0.85);
+}
+.acol-s1 { top: calc(50% + 20px); width: 22px; }
+.acol-s2 { top: calc(50% + 40px); width: 16px; }
+.acol-s3 { top: calc(50% + 60px); width: 11px; }
+.acog-chevron {
+  position: absolute;
+  top: calc(50% - 1px);
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -2px) rotate(45deg);
+  border-top: 2.5px solid #ff2e2e;
+  border-left: 2.5px solid #ff2e2e;
+  filter: drop-shadow(0 0 5px #ef4444);
+}
+
+.scope-zoom-badge {
+  position: absolute;
+  bottom: 14%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 9px;
+  border-radius: 5px;
+  background: rgba(8, 13, 24, 0.78);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #38bdf8;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
 }
 
 .hitmarker {
@@ -954,7 +1078,8 @@ kbd {
   width: min(64vh, 64vw);
   height: min(64vh, 64vw);
   border-radius: 50%;
-  border: 2px solid rgba(56, 189, 248, 0.5);
+  border: 6px solid #090d16;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.48), inset 0 0 38px rgba(0, 0, 0, 0.65);
 }
 .scope-line-h {
   position: absolute;
@@ -962,7 +1087,7 @@ kbd {
   left: 0;
   right: 0;
   height: 1px;
-  background: rgba(15, 23, 42, 0.9);
+  background: rgba(15, 23, 42, 0.92);
 }
 .scope-line-v {
   position: absolute;
@@ -970,7 +1095,23 @@ kbd {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: rgba(15, 23, 42, 0.9);
+  background: rgba(15, 23, 42, 0.92);
+}
+.scope-ticks-h {
+  position: absolute;
+  top: calc(50% - 4px);
+  left: 16%;
+  right: 16%;
+  height: 8px;
+  background: repeating-linear-gradient(90deg, rgba(15, 23, 42, 0.92) 0 1.5px, transparent 1.5px 24px);
+}
+.scope-ticks-v {
+  position: absolute;
+  left: calc(50% - 4px);
+  top: 16%;
+  bottom: 16%;
+  width: 8px;
+  background: repeating-linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0 1.5px, transparent 1.5px 24px);
 }
 .scope-center-dot {
   position: absolute;
@@ -1624,7 +1765,8 @@ kbd {
   transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
-.voice-dot.connected {
+.voice-dot.connected,
+.voice-row.connected .voice-dot {
   background: #22c55e;
 }
 

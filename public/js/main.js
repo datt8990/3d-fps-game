@@ -38,7 +38,7 @@ const net = new NetworkClient();
 const lobbyShowcase = new LobbyShowcase(lobbyCanvas);
 const hud = new MatchHUD();
 const fpsClient = new FPSGameClient(gameCanvas, net, hud);
-const voice = new TeamVoiceChat();
+const voice = new TeamVoiceChat(net);
 
 let friendsPollTimer = null;
 let lastShownInviteId = null;
@@ -452,7 +452,7 @@ function renderArmoryTab() {
       </div>
       <div class="stat-row">
         <div class="stat-label-line"><span>Tốc Độ Bắn</span><span>${eff.rpm} RPM</span></div>
-        <div class="stat-track"><div class="stat-fill" style="width:${Math.min(100, (eff.rpm / 860) * 100)}%"></div></div>
+        <div class="stat-track"><div class="stat-fill" style="width:${Math.min(100, (eff.rpm / 1060) * 100)}%"></div></div>
       </div>
       <div class="stat-row">
         <div class="stat-label-line"><span>Độ Ổn Định & Kiểm Soát Giật</span><span>${ctrlPct}%</span></div>
@@ -1013,14 +1013,18 @@ function bindNetworkEvents() {
     document.getElementById('match-hud')?.classList.remove('hidden');
     lobbyShowcase.setPaused(true);
     fpsClient.startMatchSession(msg, net.clientId);
+    const myTeam = fpsClient.localMeta?.team || msg.room?.players?.find((p) => p.id === net.clientId)?.team;
     voice.start({
       roomCode: msg.room?.code,
       clientId: net.clientId,
       players: msg.room?.players || [],
-      myTeam: fpsClient.localMeta?.team,
+      myTeam,
       teamBased: Boolean(msg.modeConfig?.teamBased)
     });
   });
+
+  net.on('voice_signal', (msg) => voice.onSignal(msg));
+  net.on('voice_audio', (msg) => voice.onRelayAudio(msg));
 
   net.on('world_state', (msg) => fpsClient.onWorldState(msg));
   net.on('player_spawned', (msg) => fpsClient.onPlayerSpawned(msg));
@@ -1420,7 +1424,10 @@ function bindUIEvents() {
       voice.setVolume(v);
     });
   }
-  document.getElementById('hud-voice-toggle')?.addEventListener('click', () => voice.toggleOpenMic());
+  document.getElementById('hud-voice-toggle')?.addEventListener('click', () => {
+    voice.toggleOpenMic();
+    if (voiceModeEl) voiceModeEl.value = voice.mode;
+  });
 
   // Voice Hotkeys (V: Push-to-Talk, N: Toggle Open Mic)
   window.addEventListener('keydown', (e) => {

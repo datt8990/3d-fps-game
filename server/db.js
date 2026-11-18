@@ -81,8 +81,8 @@ export function createDefaultAccount(username, passwordHash = '') {
     },
     unlocked: {
       weapons: ['ak47', 'm4a1', 'awp', 'deagle', 'knife'],
-      operators: ['vanguard', 'ghost'],
-      outfits: ['urban', 'desert'],
+      operators: ['vanguard', 'ghost', 'siren'],
+      outfits: ['urban', 'desert', 'summer_bikini'],
       skins: ['default'],
       attachments: ['optic:iron', 'optic:reddot', 'muzzle:none', 'mag:standard']
     },
@@ -224,6 +224,10 @@ class GameDatabase {
     if (!u) return null;
     if (!u.friendCode) u.friendCode = makeFriendCode();
     if (!u.unlocked.weapons) u.unlocked.weapons = ['ak47', 'm4a1', 'awp', 'deagle', 'knife'];
+    if (!u.unlocked.operators) u.unlocked.operators = ['vanguard', 'ghost', 'siren'];
+    if (!u.unlocked.operators.includes('siren')) u.unlocked.operators.push('siren');
+    if (!u.unlocked.outfits) u.unlocked.outfits = ['urban', 'desert', 'summer_bikini'];
+    if (!u.unlocked.outfits.includes('summer_bikini')) u.unlocked.outfits.push('summer_bikini');
     if (!u.loadout.melee) u.loadout.melee = 'knife';
     if (!Array.isArray(u.friends)) u.friends = [];
     return u;

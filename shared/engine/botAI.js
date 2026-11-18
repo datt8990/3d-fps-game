@@ -19,11 +19,13 @@ const BOT_NAMES = [
 
 const BOT_LOADOUTS = [
   { operator: 'vanguard', outfit: 'urban', primary: 'ak47', secondary: 'deagle', melee: 'knife', skin: 'asiimov' },
-  { operator: 'shadow', outfit: 'stealth_ops', primary: 'mp5', secondary: 'usps', melee: 'karambit', skin: 'neon_cyber' },
-  { operator: 'titan', outfit: 'royal_gold', primary: 'scarh', secondary: 'deagle', melee: 'knife', skin: 'gold_dragon' },
-  { operator: 'valkyrie', outfit: 'arctic', primary: 'awp', secondary: 'usps', melee: 'karambit', skin: 'arctic_glacier' },
-  { operator: 'phoenix', outfit: 'crimson', primary: 'p90', secondary: 'deagle', melee: 'knife', skin: 'magma_core' },
-  { operator: 'ghost', outfit: 'jungle', primary: 'm4a1', secondary: 'usps', melee: 'knife', skin: 'imperial_jade' }
+  { operator: 'siren', outfit: 'summer_bikini', primary: 'hk416', secondary: 'fiveseven', melee: 'karambit', skin: 'neon_cyber' },
+  { operator: 'titan', outfit: 'royal_gold', primary: 'm249', secondary: 'magnum', melee: 'knife', skin: 'gold_dragon' },
+  { operator: 'aria', outfit: 'tropical_swim', primary: 'm200', secondary: 'glock18', melee: 'karambit', skin: 'arctic_glacier' },
+  { operator: 'phoenix', outfit: 'crimson', primary: 'famas', secondary: 'deagle', melee: 'knife', skin: 'magma_core' },
+  { operator: 'valkyrie', outfit: 'jungle', primary: 'galil', secondary: 'usps', melee: 'knife', skin: 'imperial_jade' },
+  { operator: 'ghost', outfit: 'desert', primary: 'ump45', secondary: 'magnum', melee: 'knife', skin: 'default' },
+  { operator: 'shadow', outfit: 'cyber', primary: 'kar98k', secondary: 'glock18', melee: 'karambit', skin: 'crimson_web' }
 ];
 
 const DIFFICULTY_PRESETS = {
@@ -36,7 +38,12 @@ export function createBotProfile(index = 0) {
   const preset = BOT_LOADOUTS[index % BOT_LOADOUTS.length];
   const baseName = BOT_NAMES[index % BOT_NAMES.length];
   const skins = {};
-  for (const k of ['ak47', 'm4a1', 'scarh', 'mp5', 'p90', 'spas12', 'awp', 'barrett', 'deagle', 'usps', 'knife', 'karambit']) {
+  for (const k of [
+    'ak47', 'm4a1', 'scarh', 'aug', 'm16a4', 'famas', 'galil', 'hk416',
+    'mp5', 'p90', 'vector', 'ump45', 'mp7', 'm249', 'rpk',
+    'spas12', 'aa12', 'm870', 'awp', 'svd', 'barrett', 'kar98k', 'm200',
+    'deagle', 'usps', 'glock18', 'magnum', 'fiveseven', 'knife', 'karambit'
+  ]) {
     skins[k] = preset.skin;
   }
   return {

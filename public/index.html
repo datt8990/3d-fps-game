@@ -52,7 +52,7 @@
         </button>
       </form>
       <div class="auth-features">
-        <span>12 Vũ Khí 3D</span> • <span>6 Quân Nhân</span> • <span>Ghép Phòng Bạn Bè</span> • <span>Vercel Ready</span>
+        <span>30 Vũ Khí 3D</span> • <span>8 Quân Nhân</span> • <span>Ghép Phòng Bạn Bè</span> • <span>Vercel Ready</span>
       </div>
     </div>
   </div>
@@ -74,8 +74,8 @@
       <nav class="main-nav">
         <button class="nav-btn active" data-tab="home">SẢNH CHÍNH</button>
         <button class="nav-btn" data-tab="rooms">PHÒNG ĐẤU & BẠN BÈ</button>
-        <button class="nav-btn" data-tab="operators">NHÂN VẬT (6)</button>
-        <button class="nav-btn" data-tab="armory">KHO VŨ KHÍ (12)</button>
+        <button class="nav-btn" data-tab="operators">NHÂN VẬT (8)</button>
+        <button class="nav-btn" data-tab="armory">KHO VŨ KHÍ (30)</button>
         <button class="nav-btn" data-tab="ranked">XẾP HẠNG</button>
       </nav>
 
@@ -318,10 +318,10 @@
       </div>
     </section>
 
-    <!-- TAB 3: NHÂN VẬT (6 OPERATORS & 8 OUTFITS) -->
+    <!-- TAB 3: NHÂN VẬT (8 OPERATORS & 10 OUTFITS) -->
     <section id="tab-operators" class="tab-view hidden">
       <div class="side-panel-left glass-panel">
-        <div class="panel-tag">6 QUÂN NHÂN ĐẶC NHIỆM</div>
+        <div class="panel-tag">8 QUÂN NHÂN ĐẶC NHIỆM (NAM & NỮ)</div>
         <div id="operators-list" class="stack-list"></div>
       </div>
 
@@ -331,15 +331,15 @@
 
       <div class="side-panel-right glass-panel">
         <div id="operator-detail-box"></div>
-        <div class="panel-tag" style="margin-top:14px;">8 TRANG PHỤC NGỤY TRANG (OUTFITS)</div>
+        <div class="panel-tag" style="margin-top:14px;">10 TRANG PHỤC ĐẶC BIỆT (OUTFITS)</div>
         <div id="outfits-list" class="stack-list"></div>
       </div>
     </section>
 
-    <!-- TAB 4: KHO VŨ KHÍ (12 WEAPONS, SUBCLASS FILTER, ATTACHMENTS & 8 SKINS) -->
+    <!-- TAB 4: KHO VŨ KHÍ (30 WEAPONS, SUBCLASS FILTER, ATTACHMENTS & 8 SKINS) -->
     <section id="tab-armory" class="tab-view hidden">
       <div class="side-panel-left glass-panel">
-        <div class="panel-tag">PHÂN LOẠI VŨ KHÍ (12 KHẨU)</div>
+        <div class="panel-tag">PHÂN LOẠI VŨ KHÍ (30 KHẨU)</div>
         <div id="armory-subclass-tabs" class="subclass-pills"></div>
         <div id="armory-weapons-list" class="stack-list" style="margin-top:8px;flex:1;overflow-y:auto;"></div>
       </div>
@@ -505,12 +505,31 @@
     <!-- Red/Purple Damage Vignette -->
     <div id="hud-damage-vignette" class="damage-vignette hidden"></div>
 
+    <!-- Subtle Focus Vignette for Iron / Holo ADS -->
+    <div id="ads-vignette-overlay" class="ads-vignette hidden"></div>
+
+    <!-- ACOG Optical Tactical Scope Overlay (3x) -->
+    <div id="acog-scope-overlay" class="acog-scope hidden">
+      <div class="acog-lens">
+        <div class="acog-line-h"></div>
+        <div class="acog-line-v"></div>
+        <div class="acog-stadia acol-s1"></div>
+        <div class="acog-stadia acol-s2"></div>
+        <div class="acog-stadia acol-s3"></div>
+        <div class="acog-chevron"></div>
+        <div id="acog-zoom-label" class="scope-zoom-badge">ACOG 3.1×</div>
+      </div>
+    </div>
+
     <!-- Sniper Dual-Zoom Reticle Overlay -->
     <div id="sniper-scope-overlay" class="sniper-scope hidden">
       <div class="scope-circle">
         <div class="scope-line-h"></div>
         <div class="scope-line-v"></div>
+        <div class="scope-ticks-h"></div>
+        <div class="scope-ticks-v"></div>
         <div class="scope-center-dot"></div>
+        <div id="sniper-zoom-label" class="scope-zoom-badge">4.0×</div>
       </div>
     </div>
 
@@ -553,8 +572,10 @@
       <span class="ch-blade ch-bottom"></span>
       <span class="ch-blade ch-left"></span>
       <span class="ch-blade ch-right"></span>
+      <span class="ch-holo-ring"></span>
       <span class="ch-dot"></span>
     </div>
+    <div id="ads-mode-badge" class="ads-mode-badge hidden">NGẮM CHUẨN • 1.9×</div>
     <div id="hud-hitmarker" class="hitmarker hidden"></div>
     <div id="hud-hit-dmg" class="hit-dmg-float hidden">-36</div>
 

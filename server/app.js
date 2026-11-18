@@ -209,6 +209,17 @@ app.post('/api/relay/:code/host-sync', (req, res) => {
         return;
       }
     }
+    if (payload.type === 'voice_audio') {
+      let count = 0;
+      let firstIdx = -1;
+      for (let i = 0; i < inbox.length; i++) {
+        if (inbox[i]?.type === 'voice_audio' && inbox[i].fromId === payload.fromId) {
+          if (firstIdx < 0) firstIdx = i;
+          count++;
+        }
+      }
+      if (count >= 3 && firstIdx >= 0) inbox.splice(firstIdx, 1);
+    }
     inbox.push(payload);
     if (inbox.length > 160) inbox.shift();
   };
@@ -271,6 +282,17 @@ app.post('/api/relay/:code/client-sync', (req, res) => {
           activeQ.toHost[idx] = { from: clientId, payload };
           continue;
         }
+      }
+      if (payload.type === 'voice_audio') {
+        let count = 0;
+        let firstIdx = -1;
+        for (let i = 0; i < activeQ.toHost.length; i++) {
+          if (activeQ.toHost[i]?.from === clientId && activeQ.toHost[i]?.payload?.type === 'voice_audio') {
+            if (firstIdx < 0) firstIdx = i;
+            count++;
+          }
+        }
+        if (count >= 3 && firstIdx >= 0) activeQ.toHost.splice(firstIdx, 1);
       }
       activeQ.toHost.push({ from: clientId, payload });
       if (activeQ.toHost.length > 240) activeQ.toHost.shift();

@@ -372,6 +372,16 @@ wss.on('connection', (ws) => {
         if (p) room.changeInMatchPrimary(p, msg.primaryId);
         break;
       }
+
+      case 'voice_signal': {
+        rooms.get(client.roomId)?.handleVoiceSignal(client.id, msg);
+        break;
+      }
+
+      case 'voice_audio': {
+        rooms.get(client.roomId)?.handleVoiceAudio(client.id, msg);
+        break;
+      }
     }
   });
 

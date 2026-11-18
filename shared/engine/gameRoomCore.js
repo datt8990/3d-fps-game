@@ -644,10 +644,12 @@ export class GameRoomCore {
       player.secondary = weaponId;
       const sStats = getEffectiveWeaponStats(weaponId, player.attachments[weaponId], player.operator);
       player.weaponsState[2] = { id: weaponId, ammo: sStats.magSize, reserve: sStats.reserveAmmo, magSize: sStats.magSize };
-      if (player.slot === 2) {
+      if (player.slot === 2 || this.mode === 'practice') {
+        player.slot = 2;
         player.weaponId = weaponId;
         player.ammo = sStats.magSize;
         player.reserveAmmo = sStats.reserveAmmo;
+        player.reloadingUntil = 0;
       }
       this.sendTo(player.id, {
         type: 'weapon_switched',
@@ -1720,6 +1722,45 @@ export class GameRoomCore {
     this.chatLog.push(msg);
     if (this.chatLog.length > 50) this.chatLog.shift();
     this.broadcast({ type: 'chat_msg', msg });
+  }
+
+  handleVoiceSignal(senderId, msg = {}) {
+    if (!this.modeConfig?.teamBased) return;
+    const sender = this.combatants.get(senderId);
+    const target = this.combatants.get(msg.targetId);
+    if (!sender || !target || target.isBot || sender.id === target.id) return;
+    if (sender.team !== target.team) return;
+
+    this.sendTo(target.id, {
+      type: 'voice_signal',
+      fromId: sender.id,
+      kind: msg.kind,
+      sessionId: msg.sessionId,
+      sdp: msg.sdp,
+      candidate: msg.candidate
+    });
+  }
+
+  handleVoiceAudio(senderId, msg = {}) {
+    if (!this.modeConfig?.teamBased) return;
+    const sender = this.combatants.get(senderId);
+    if (!sender) return;
+    if (typeof msg.audio !== 'string' || !msg.audio.length || msg.audio.length > 16000) return;
+
+    const targetFilter = Array.isArray(msg.targetIds) && msg.targetIds.length ? new Set(msg.targetIds) : null;
+    const payload = {
+      type: 'voice_audio',
+      fromId: sender.id,
+      audio: msg.audio,
+      sr: Number(msg.sr) || 12000,
+      seq: Number(msg.seq) || 0
+    };
+
+    for (const p of this.getHumanPlayers()) {
+      if (p.id === sender.id || p.team !== sender.team) continue;
+      if (targetFilter && !targetFilter.has(p.id)) continue;
+      this.sendTo(p.id, payload);
+    }
   }
 
   sendTo(playerId, data) {

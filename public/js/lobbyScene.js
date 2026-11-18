@@ -1,6 +1,7 @@
 // Interactive 3D Military Hangar Showcase for Main Lobby, Operator Select & Weapon Armory
 import * as THREE from 'three';
 import { createOperatorRig, animateOperatorRig, createWeaponModel } from './models.js';
+import { getStudioEnvMap } from './textures.js';
 
 export class LobbyShowcase {
   constructor(canvas) {
@@ -14,6 +15,8 @@ export class LobbyShowcase {
     this.renderer.toneMappingExposure = 1.15;
 
     this.scene = new THREE.Scene();
+    this.scene.environment = getStudioEnvMap();
+    this.scene.environmentIntensity = 0.9;
     this.camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 60);
     this.camera.position.set(0, 1.35, 3.6);
     this.camera.lookAt(0, 1.05, 0);
@@ -164,7 +167,9 @@ export class LobbyShowcase {
     }
     const holder = new THREE.Group();
     const gun = createWeaponModel(weaponId, skinId, attachments);
-    const scale = weaponId === 'deagle' || weaponId === 'usps' ? 2.25 : (weaponId === 'awp' || weaponId === 'barrett' ? 1.55 : 1.85);
+    const isPistol = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven'].includes(weaponId);
+    const isLong = ['awp', 'barrett', 'svd', 'm249', 'rpk', 'kar98k', 'm200', 'm16a4'].includes(weaponId);
+    const scale = isPistol ? 2.25 : (isLong ? 1.50 : 1.85);
     gun.scale.setScalar(scale);
     gun.rotation.y = Math.PI * 0.5;
     holder.position.set(0, 1.15, 0);

@@ -17,6 +17,7 @@ import {
   createGrenadeMesh
 } from './models.js';
 import { soundEngine } from './audio.js';
+import { getStudioEnvMap } from './textures.js';
 
 function shortestAngleDiff(from, to) {
   let diff = (to - from + Math.PI) % (Math.PI * 2);
@@ -43,6 +44,8 @@ export class FPSGameClient {
     this.renderer.toneMappingExposure = 1.12;
 
     this.scene = new THREE.Scene();
+    this.scene.environment = getStudioEnvMap();
+    this.scene.environmentIntensity = 0.72;
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.08, 320);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
@@ -93,6 +96,7 @@ export class FPSGameClient {
     this.keys = {};
     this.mouseDownLeft = false;
     this.adsActive = false;
+    this.adsBlend = 0;
     this.sniperZoomStage = 0;
     this.pointerLocked = false;
     this.uiModalOpen = false;
@@ -212,6 +216,7 @@ export class FPSGameClient {
           soundEngine.playMetallicClick(1050, 0.04, 0.18);
         } else {
           this.adsActive = !this.adsActive;
+          soundEngine.playMetallicClick(780, 0.03, 0.09);
         }
       }
     });
@@ -226,7 +231,10 @@ export class FPSGameClient {
 
     window.addEventListener('mousemove', (e) => {
       if (!this.active || !this.pointerLocked || this.uiModalOpen || this.local.dead) return;
-      const zoomScale = this.sniperZoomStage === 2 ? 0.22 : (this.adsActive ? 0.55 : 1.0);
+      const zoomScale = Math.max(
+        0.15,
+        Math.min(1.0, Math.tan((this.camera.fov * Math.PI) / 360) / Math.tan((this.baseFov * Math.PI) / 360))
+      );
       const dx = e.movementX || 0;
       const dy = e.movementY || 0;
       const pitchDelta = dy * this.sensitivity * zoomScale;
@@ -447,10 +455,13 @@ export class FPSGameClient {
     this.active = false;
     this.mouseDownLeft = false;
     this.adsActive = false;
+    this.adsBlend = 0;
     this.sniperZoomStage = 0;
     this.uiModalOpen = false;
     this.radioOpen = false;
+    soundEngine.cancelReloadSequence();
     this.hud.toggleRadioMenu(false);
+    this.hud.updateCrosshair(6, false, false, 'iron', 0, 1.0);
     document.exitPointerLock?.();
     this.canvas.style.display = 'none';
 
@@ -484,7 +495,9 @@ export class FPSGameClient {
     if (!roomPayload?.players) return;
     for (const p of roomPayload.players) {
       this.rosterMeta.set(p.id, p);
-      if (p.id === this.localId) this.localMeta = p;
+      if (p.id === this.localId) {
+        this.localMeta = p;
+      }
     }
   }
 
@@ -496,8 +509,9 @@ export class FPSGameClient {
     const skinId = this.localMeta?.skins?.[weaponId] || 'default';
     const att = this.localMeta?.attachments?.[weaponId] || {};
     const outfitId = this.localMeta?.outfit || 'urban';
+    const operatorId = this.localMeta?.operator || 'vanguard';
 
-    this.fpRig = createFirstPersonRig(weaponId, skinId, att, outfitId);
+    this.fpRig = createFirstPersonRig(weaponId, skinId, att, outfitId, operatorId);
     this.fpRig.position.set(0.22, -0.22, -0.38);
     this.camera.add(this.fpRig);
   }
@@ -512,8 +526,10 @@ export class FPSGameClient {
   requestWeaponSwitch(slot) {
     if (this.local.dead || slot === this.local.slot) return;
     this.adsActive = false;
+    this.adsBlend = 0;
     this.sniperZoomStage = 0;
-    soundEngine.playMetallicClick(860, 0.045, 0.16);
+    soundEngine.cancelReloadSequence();
+    soundEngine.ensureContext();
     this.net.send({ type: 'switch_weapon', slot });
   }
 
@@ -524,6 +540,7 @@ export class FPSGameClient {
     if (performance.now() < this.local.reloadingEnd) return;
     this.adsActive = false;
     this.sniperZoomStage = 0;
+    soundEngine.ensureContext();
     this.net.send({ type: 'reload' });
   }
 
@@ -557,6 +574,7 @@ export class FPSGameClient {
       this.local.ammo = Math.max(0, this.local.ammo - 1);
       this.refreshHudWeapon();
     }
+    soundEngine.playGunshot(st.id, st.suppressed, 0);
 
     const horizSpeed = Math.hypot(this.local.vx, this.local.vz);
     let spread = this.adsActive ? st.spreadAds : st.spreadStand;
@@ -582,15 +600,15 @@ export class FPSGameClient {
     });
 
     // Smooth, low-recoil kick with ADS/crouch stabilization & soft spray ceiling
-    const recoilScale = (this.adsActive ? 0.65 : 1.0) * (this.local.crouching ? 0.72 : 1.0);
+    const recoilScale = (this.adsActive ? 0.52 : 1.0) * (this.local.crouching ? 0.72 : 1.0);
     const sprayDamp = this.recoilAccumPitch > 0.045 ? 0.25 : 1.0;
     const pitchKick = st.recoilPitch * recoilScale * sprayDamp;
 
     this.local.pitch = Math.min(1.50, this.local.pitch + pitchKick);
     this.recoilAccumPitch = Math.min(0.068, this.recoilAccumPitch + pitchKick);
     this.local.yaw += (Math.random() - 0.5) * st.recoilYaw * recoilScale * 1.4;
-    this.vmKickZ = st.isMelee ? -0.11 : (this.adsActive ? 0.018 : 0.032);
-    this.vmKickPitch = st.isMelee ? -0.26 : (this.adsActive ? 0.020 : 0.042);
+    this.vmKickZ = st.isMelee ? -0.11 : (this.adsActive ? 0.012 : 0.032);
+    this.vmKickPitch = st.isMelee ? -0.26 : (this.adsActive ? 0.014 : 0.042);
 
     if (!st.isMelee && !st.suppressed) {
       this.triggerMuzzleFlash();
@@ -643,6 +661,7 @@ export class FPSGameClient {
       this.local.grenades = msg.grenades ?? 1;
       this.local.reloadingEnd = 0;
       this.adsActive = false;
+      this.adsBlend = 0;
       this.sniperZoomStage = 0;
 
       this.rebuildFirstPersonRig(this.local.weaponId);
@@ -671,7 +690,10 @@ export class FPSGameClient {
       this.local.reserveAmmo = msg.reserveAmmo;
       this.local.reloadingEnd = 0;
       this.adsActive = false;
+      this.adsBlend = 0;
       this.sniperZoomStage = 0;
+      soundEngine.cancelReloadSequence();
+      soundEngine.playWeaponDraw(msg.weaponId);
       this.rebuildFirstPersonRig(msg.weaponId);
       this.refreshHudWeapon();
     } else {
@@ -689,8 +711,9 @@ export class FPSGameClient {
       this.local.reloadingStart = now;
       this.local.reloadingEnd = now + msg.durationMs;
       this.adsActive = false;
+      this.adsBlend = 0;
       this.sniperZoomStage = 0;
-      soundEngine.playReloadSequence(msg.durationMs);
+      soundEngine.playReloadSequence(msg.durationMs, msg.weaponId || this.local.weaponId);
     }
   }
 
@@ -708,7 +731,6 @@ export class FPSGameClient {
       this.local.ammo = msg.ammo;
       this.local.reserveAmmo = msg.reserveAmmo;
       this.refreshHudWeapon();
-      soundEngine.playGunshot(msg.weaponId, msg.suppressed, 0);
     } else {
       const dist = Math.hypot((msg.origin?.x || 0) - this.local.x, (msg.origin?.z || 0) - this.local.z);
       soundEngine.playGunshot(msg.weaponId, msg.suppressed, dist);
@@ -783,7 +805,9 @@ export class FPSGameClient {
       this.local.dead = true;
       this.local.respawnUntil = msg.respawnSec > 0 ? performance.now() + msg.respawnSec * 1000 : 0;
       this.adsActive = false;
+      this.adsBlend = 0;
       this.sniperZoomStage = 0;
+      soundEngine.cancelReloadSequence();
       if (this.fpRig) this.fpRig.visible = false;
     }
   }
@@ -846,7 +870,11 @@ export class FPSGameClient {
         this.local.dead = Boolean(ps.dead);
         this.local.hasBomb = Boolean(ps.hasBomb);
         this.local.kills = ps.k || 0;
-        if (this.fpRig) this.fpRig.visible = !this.local.dead && this.sniperZoomStage === 0;
+        if (this.fpRig) {
+          const wSt = this.getLocalWeaponStats();
+          const acogHidden = this.adsActive && wSt.opticId === 'acog' && this.adsBlend > 0.62;
+          this.fpRig.visible = !this.local.dead && this.sniperZoomStage === 0 && !acogHidden;
+        }
         this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
         continue;
       }
@@ -1163,11 +1191,14 @@ export class FPSGameClient {
     this.camera.rotation.y = this.local.yaw;
     this.camera.rotation.x = this.local.pitch;
 
-    const scopeFovs = wStats.scopeFovs || [26, 11];
+    const scopeFovs = wStats.scopeFovs || [24, 10];
+    const wantsAds = this.adsActive && !wStats.isMelee;
+    this.adsBlend += ((wantsAds ? 1 : 0) - this.adsBlend) * expSmooth(16, dt);
+
     let targetFov = this.baseFov;
     if (this.sniperZoomStage === 1) targetFov = scopeFovs[0];
     else if (this.sniperZoomStage === 2) targetFov = scopeFovs[1];
-    else if (this.adsActive) targetFov = wStats.adsFov || 54;
+    else if (wantsAds) targetFov = wStats.adsFov || 44;
     else if (sprint) targetFov = this.baseFov + 5;
 
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
@@ -1175,25 +1206,38 @@ export class FPSGameClient {
       this.camera.updateProjectionMatrix();
     }
 
+    const zoomFactor = Math.tan((this.baseFov * Math.PI) / 360) / Math.tan((Math.max(5, this.camera.fov) * Math.PI) / 360);
     const spreadPx = 4 + horizSpeed * 1.2 + (this.local.onGround ? 0 : 6) + this.vmKickZ * 38;
-    this.hud.updateCrosshair(spreadPx, this.sniperZoomStage > 0, this.adsActive);
+    this.hud.updateCrosshair(spreadPx, this.sniperZoomStage > 0, wantsAds, wStats.opticId, this.adsBlend, zoomFactor);
 
     if (this.fpRig) {
-      this.fpRig.visible = this.sniperZoomStage === 0;
+      const gunData = this.fpRig.userData.gun?.userData;
+      const isAcogScoped = wantsAds && wStats.opticId === 'acog' && this.adsBlend > 0.62;
+      this.fpRig.visible = this.sniperZoomStage === 0 && !isAcogScoped;
+
       this.vmKickZ += (0 - this.vmKickZ) * expSmooth(18, dt);
       this.vmKickPitch += (0 - this.vmKickPitch) * expSmooth(16, dt);
       this.swayX += (0 - this.swayX) * expSmooth(12, dt);
       this.swayY += (0 - this.swayY) * expSmooth(12, dt);
 
-      const targetX = this.adsActive ? 0.0 : 0.22;
-      const targetY = this.adsActive ? -0.142 : -0.22;
-      const targetZ = this.adsActive ? -0.30 : -0.39;
+      const sightPos = gunData?.aimSightLocalPos;
+      const hipX = 0.22;
+      const hipY = -0.22;
+      const hipZ = -0.39;
+      const adsX = sightPos ? -sightPos.x : 0.0;
+      const adsY = sightPos ? -sightPos.y : -0.095;
+      const adsZ = gunData?.aimDistanceZ ?? -0.28;
 
-      this.fpRig.position.x += (targetX + this.swayX + bobX - this.fpRig.position.x) * expSmooth(16, dt);
-      this.fpRig.position.y += (targetY + this.swayY + bobY * 0.6 - this.fpRig.position.y) * expSmooth(16, dt);
+      const b = this.adsBlend;
+      const swayScale = 1 - b * 0.78;
+      const targetX = hipX + (adsX - hipX) * b;
+      const targetY = hipY + (adsY - hipY) * b;
+      const targetZ = hipZ + (adsZ - hipZ) * b;
+
+      this.fpRig.position.x = targetX + (this.swayX + bobX) * swayScale;
+      this.fpRig.position.y = targetY + (this.swayY + bobY * 0.55) * swayScale;
       this.fpRig.position.z = targetZ + this.vmKickZ;
 
-      const gunData = this.fpRig.userData.gun?.userData;
       if (gunData?.boltMesh && gunData.boltBaseZ !== undefined) {
         gunData.boltMesh.position.z = gunData.boltBaseZ + Math.max(0, this.vmKickZ * 0.75);
       }
@@ -1204,6 +1248,7 @@ export class FPSGameClient {
         this.hud.updateReloadProgress(ratio);
         this.fpRig.rotation.z = Math.sin(ratio * Math.PI) * 0.42;
         this.fpRig.rotation.x = -Math.sin(ratio * Math.PI) * 0.22;
+        this.fpRig.rotation.y = 0;
 
         if (gunData?.magMesh && gunData?.magBasePos) {
           const dropOffset = ratio < 0.5 ? Math.sin(ratio * Math.PI) * 0.22 : Math.cos((ratio - 0.5) * Math.PI) * 0.22;
@@ -1211,8 +1256,9 @@ export class FPSGameClient {
         }
       } else {
         this.hud.updateReloadProgress(0);
-        this.fpRig.rotation.z += ((sprint ? 0.18 : 0) - this.fpRig.rotation.z) * expSmooth(12, dt);
-        this.fpRig.rotation.x = this.vmKickPitch - (sprint ? 0.18 : 0);
+        this.fpRig.rotation.y = 0.025 * (1 - b);
+        this.fpRig.rotation.z += ((sprint ? 0.18 : 0) * (1 - b) - this.fpRig.rotation.z) * expSmooth(12, dt);
+        this.fpRig.rotation.x = this.vmKickPitch - (sprint ? 0.18 * (1 - b) : 0);
         if (gunData?.magMesh && gunData?.magBasePos) {
           gunData.magMesh.position.copy(gunData.magBasePos);
         }
