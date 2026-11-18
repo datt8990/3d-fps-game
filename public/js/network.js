@@ -581,12 +581,18 @@ export class NetworkClient {
       });
     });
 
-    this.clientPeer.on('error', () => {
+    this.clientPeer.on('error', (err) => {
       clearTimeout(failTimer);
+      console.warn('PeerJS Join Error:', err?.type, err);
       if (!connectedOnce) {
         this.cleanupP2PSession();
         if (onFailFallback) onFailFallback();
-        else this.emit('error_msg', { text: `Không tìm thấy phòng #${code}. Kiểm tra lại Mã Phòng bạn bè gửi!` });
+        else {
+          const reason = err?.type === 'peer-unavailable'
+            ? 'Chủ phòng đã thoát hoặc chưa mở kết nối P2P'
+            : (err?.type ? `Lỗi WebRTC (${err.type})` : 'Không thể bắt tay kết nối NAT');
+          this.emit('error_msg', { text: `Không vào được phòng #${code}: ${reason}.` });
+        }
       }
     });
   }
