@@ -41,11 +41,11 @@ export class FPSGameClient {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 1.24;
 
     this.scene = new THREE.Scene();
     this.scene.environment = getStudioEnvMap();
-    this.scene.environmentIntensity = 0.72;
+    this.scene.environmentIntensity = 1.0;
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.08, 320);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
@@ -110,8 +110,6 @@ export class FPSGameClient {
     this.swayY = 0;
     this.bobTimer = 0;
     this.footstepTimer = 0;
-    this.muzzleLight = new THREE.PointLight('#fbbf24', 0, 7);
-    this.camera.add(this.muzzleLight);
 
     this.remoteEntities = new Map();
     this.rosterMeta = new Map();
@@ -610,10 +608,6 @@ export class FPSGameClient {
     this.vmKickZ = st.isMelee ? -0.11 : (this.adsActive ? 0.012 : 0.032);
     this.vmKickPitch = st.isMelee ? -0.26 : (this.adsActive ? 0.014 : 0.042);
 
-    if (!st.isMelee && !st.suppressed) {
-      this.triggerMuzzleFlash();
-    }
-
     // Bolt-action AWP unscopes briefly; semi-auto Barrett M82 stays scoped!
     if (st.fireMode === 'bolt' && this.sniperZoomStage > 0) {
       const prevStage = this.sniperZoomStage;
@@ -626,17 +620,6 @@ export class FPSGameClient {
         }
       }, 950);
     }
-  }
-
-  triggerMuzzleFlash() {
-    const flash = this.fpRig?.userData?.flashGroup;
-    if (flash) {
-      flash.visible = true;
-      flash.rotation.z = Math.random() * Math.PI;
-      setTimeout(() => { flash.visible = false; }, 45);
-    }
-    this.muzzleLight.intensity = 2.6;
-    setTimeout(() => { this.muzzleLight.intensity = 0; }, 50);
   }
 
   onPlayerSpawned(msg) {
@@ -982,21 +965,23 @@ export class FPSGameClient {
   spawnTracerAndImpact(start, end, hitType) {
     const p1 = new THREE.Vector3(start.x, start.y, start.z);
     const p2 = new THREE.Vector3(end.x, end.y, end.z);
-    if (p1.distanceTo(p2) < 0.2) return;
+    if (p1.distanceTo(p2) < 0.25) return;
 
+    // Start tracer cleanly past muzzle tip with subtle air-trail tint so sights stay completely clear
+    p1.lerp(p2, 0.06);
     const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-    const mat = new THREE.LineBasicMaterial({ color: '#fde047', transparent: true, opacity: 0.85 });
+    const mat = new THREE.LineBasicMaterial({ color: '#e2e8f0', transparent: true, opacity: 0.36 });
     const line = new THREE.Line(geo, mat);
     this.scene.add(line);
-    this.activeEffects.push({ mesh: line, mat, life: 0.075, maxLife: 0.075 });
+    this.activeEffects.push({ mesh: line, mat, life: 0.055, maxLife: 0.055 });
 
     if (hitType === 'wall' || hitType === 'player') {
-      const sparkColor = hitType === 'player' ? '#ef4444' : '#fbbf24';
-      const sparkMat = new THREE.MeshBasicMaterial({ color: sparkColor, transparent: true, opacity: 0.95 });
-      const spark = new THREE.Mesh(new THREE.SphereGeometry(hitType === 'player' ? 0.08 : 0.055, 6, 6), sparkMat);
+      const sparkColor = hitType === 'player' ? '#ef4444' : '#f59e0b';
+      const sparkMat = new THREE.MeshBasicMaterial({ color: sparkColor, transparent: true, opacity: 0.90 });
+      const spark = new THREE.Mesh(new THREE.SphereGeometry(hitType === 'player' ? 0.075 : 0.05, 6, 6), sparkMat);
       spark.position.copy(p2);
       this.scene.add(spark);
-      this.activeEffects.push({ mesh: spark, mat: sparkMat, life: 0.16, maxLife: 0.16, scaleUp: true });
+      this.activeEffects.push({ mesh: spark, mat: sparkMat, life: 0.14, maxLife: 0.14, scaleUp: true });
     }
   }
 

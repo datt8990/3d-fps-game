@@ -1,15 +1,36 @@
-// AAA-Grade 3D Sculpted Soldier Rigs (Male Tactical & Female/Beach Specs), 30 Detailed Weapons & Transparent Optics
+// AAA-Grade Rigged GLB Character System (Stylized Military & Spec-Ops) + 30 Detailed 3D Weapons
 import * as THREE from 'three';
 import { OUTFITS, OPERATORS, WEAPONS, WEAPON_SKINS } from '/shared/constants.js';
 import {
   getWeaponSkinTexture,
   getOutfitTextures,
-  getMolleVestTextures,
-  getBalaclavaTexture,
   getWatchFaceTexture
 } from './textures.js';
+import {
+  resolveCharacterArchetype,
+  preloadCharacterModels,
+  getLoadedCharacterSync,
+  loadCharacterArchetype,
+  instantiateGlbInstance
+} from './characterLoader.js';
+
+export { preloadCharacterModels };
 
 const UP_VEC = new THREE.Vector3(0, 1, 0);
+const RIGHT_VEC = new THREE.Vector3(1, 0, 0);
+const _v0 = new THREE.Vector3();
+const _v1 = new THREE.Vector3();
+const _v2 = new THREE.Vector3();
+const _q0 = new THREE.Quaternion();
+const _q1 = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _q3 = new THREE.Quaternion();
+const _q4 = new THREE.Quaternion();
+
+if (typeof window !== 'undefined') {
+  // Kick off background GLB character preloading early
+  preloadCharacterModels();
+}
 
 // Extrudes a 2D side-profile (px = forward toward muzzle -Z, py = up +Y) symmetrically across X.
 function extrudeSideProfile(points, thickness = 0.04, bevel = 0.003, mat) {
@@ -1672,29 +1693,9 @@ export function createFirstPersonRig(weaponId, skinId, attachments, outfitId = '
 
   lArmGroup.add(lCuff, watchBand, watchScreen, lHand, lKnuckle, lThumb);
 
-  // Volumetric 3-Plane Star Muzzle Flash
-  const flashMat = new THREE.MeshBasicMaterial({
-    color: '#fef08a',
-    transparent: true,
-    opacity: 0.94,
-    depthTest: false,
-    side: THREE.DoubleSide
-  });
-  const coreMat = new THREE.MeshBasicMaterial({
-    color: '#f97316',
-    transparent: true,
-    opacity: 0.85,
-    depthTest: false,
-    side: THREE.DoubleSide
-  });
-  const flashGroup = new THREE.Group();
-  const p1 = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.065), flashMat);
-  const p2 = new THREE.Mesh(new THREE.PlaneGeometry(0.065, 0.24), flashMat);
-  const p3 = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.18), coreMat);
-  p3.rotation.z = Math.PI / 4;
-  flashGroup.add(p1, p2, p3);
+  // Invisible barrel tip anchor for bullet tracer spawn (no obstructive yellow muzzle flash)
+  const flashGroup = new THREE.Object3D();
   flashGroup.position.copy(gun.userData.muzzlePos);
-  flashGroup.visible = false;
 
   root.add(gun, rArmGroup, lArmGroup, flashGroup);
   root.userData = { gun, flashGroup, lArm: lArmGroup, rArm: rArmGroup };
@@ -1731,6 +1732,405 @@ function makeNameplateSprite(name, team, isAlly) {
   return sprite;
 }
 
+function mountWeaponOnGroup(weaponMount, weaponId, skinId, attachments) {
+  while (weaponMount.children.length > 0) {
+    weaponMount.remove(weaponMount.children[0]);
+  }
+  const gunMesh = createWeaponModel(weaponId, skinId, attachments);
+  const isMelee = weaponId === 'knife' || weaponId === 'karambit';
+  const isPistol = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven'].includes(weaponId);
+  gunMesh.scale.setScalar(0.92);
+  if (isMelee) {
+    gunMesh.position.set(0, 0.01, -0.055);
+  } else if (isPistol) {
+    gunMesh.position.set(0, 0.048, -0.048);
+  } else {
+    gunMesh.position.set(0, 0.052, -0.095);
+  }
+  weaponMount.add(gunMesh);
+}
+
+// World-space bone segment orientation solver (invariant to Mixamo/Quaternius/RPM rest axes)
+function aimBoneSegmentWorld(bone, childBone, desiredWorldDir, blend = 1.0) {
+  if (!bone || !childBone || blend <= 0.001) return;
+  bone.updateMatrixWorld(true);
+  bone.getWorldPosition(_v0);
+  childBone.getWorldPosition(_v1);
+  _v1.sub(_v0);
+  if (_v1.lengthSq() < 1e-8) return;
+  _v1.normalize();
+
+  _v2.copy(desiredWorldDir).normalize();
+  _q0.setFromUnitVectors(_v1, _v2);
+  bone.getWorldQuaternion(_q1);
+  _q2.multiplyQuaternions(_q0, _q1);
+
+  if (bone.parent) {
+    bone.parent.getWorldQuaternion(_q1);
+    _q1.invert();
+    _q2.premultiply(_q1);
+  }
+  bone.quaternion.slerp(_q2, blend);
+  bone.updateMatrixWorld(true);
+}
+
+function clearTacticalMounts(rig) {
+  if (!rig?.tacticalMounts?.length) return;
+  for (const tm of rig.tacticalMounts) {
+    if (tm.node?.parent) tm.node.parent.remove(tm.node);
+  }
+  rig.tacticalMounts = [];
+}
+
+function attachBoneTrackedGear(rig, boneKey, gearGroup, offsetFromBone) {
+  const bone = rig.bones?.[boneKey];
+  if (!bone || !rig.bodyRoot) return;
+  rig.bodyRoot.updateMatrixWorld(true);
+
+  const bodyWorldQ = new THREE.Quaternion();
+  rig.bodyRoot.getWorldQuaternion(bodyWorldQ);
+  const bodyInvQ = bodyWorldQ.clone().invert();
+
+  const boneWorldQ = new THREE.Quaternion();
+  bone.getWorldQuaternion(boneWorldQ);
+  const restBoneRelQ = boneWorldQ.premultiply(bodyInvQ);
+
+  const bonePosLocal = new THREE.Vector3();
+  bone.getWorldPosition(bonePosLocal);
+  rig.bodyRoot.worldToLocal(bonePosLocal);
+
+  gearGroup.position.copy(bonePosLocal).add(offsetFromBone);
+  gearGroup.quaternion.set(0, 0, 0, 1);
+  rig.bodyRoot.add(gearGroup);
+
+  if (!rig.tacticalMounts) rig.tacticalMounts = [];
+  rig.tacticalMounts.push({
+    node: gearGroup,
+    boneKey,
+    bone,
+    offsetFromBone: offsetFromBone.clone(),
+    restBoneInvQ: restBoneRelQ.invert()
+  });
+}
+
+function makeQuadNvgAssembly(glowColor = '#10b981') {
+  const g = new THREE.Group();
+  const housingMat = new THREE.MeshStandardMaterial({ color: '#1b2230', metalness: 0.72, roughness: 0.28 });
+  const carbonMat = new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.45, roughness: 0.44 });
+  const lensMat = new THREE.MeshStandardMaterial({
+    color: glowColor,
+    emissive: glowColor,
+    emissiveIntensity: 2.1,
+    roughness: 0.12,
+    metalness: 0.35
+  });
+
+  // Forehead helmet shroud + folding bridge arm
+  const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.044, 0.022), carbonMat);
+  shroud.position.set(0, 0.032, 0.015);
+  g.add(shroud);
+
+  const bridgeArm = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.018, 0.052), housingMat);
+  bridgeArm.position.set(0, 0.022, -0.014);
+  bridgeArm.rotation.x = 0.25;
+  g.add(bridgeArm);
+
+  // Horizontal panoramic GPNVG-18 wing bar
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(0.165, 0.020, 0.024), housingMat);
+  wing.position.set(0, 0.008, -0.034);
+  g.add(wing);
+
+  // 4 optical tubes angled gently outward like real GPNVG-18
+  for (const [tx, ty, yaw] of [
+    [-0.056, -0.002, 0.16],
+    [-0.021, -0.002, 0.03],
+    [0.021, -0.002, -0.03],
+    [0.056, -0.002, -0.16]
+  ]) {
+    const pod = new THREE.Group();
+    pod.position.set(tx, ty, -0.052);
+    pod.rotation.y = yaw;
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.0145, 0.0165, 0.064, 14), carbonMat);
+    tube.rotation.x = Math.PI / 2;
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.0172, 0.0172, 0.012, 14), housingMat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.z = -0.026;
+    const optic = new THREE.Mesh(new THREE.CylinderGeometry(0.0125, 0.0125, 0.006, 14), lensMat);
+    optic.rotation.x = Math.PI / 2;
+    optic.position.z = -0.031;
+    pod.add(tube, ring, optic);
+    g.add(pod);
+  }
+
+  // Head tactical band + rear NVG battery pack counterweight
+  const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.104, 0.104, 0.024, 18, 1, true), carbonMat);
+  strap.position.set(0, 0.026, 0.115);
+  strap.scale.set(0.92, 1, 1.08);
+  g.add(strap);
+
+  const battery = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.048, 0.034), carbonMat);
+  battery.position.set(0, 0.020, 0.225);
+  const statusLed = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.006, 0.006), lensMat);
+  statusLed.position.set(0, 0.020, 0.244);
+  g.add(battery, statusLed);
+  return g;
+}
+
+function makePlateCarrierVest(primaryHex, accentHex, frontZ = -0.135, backZ = 0.088, width = 0.23, isFemaleContoured = false) {
+  const g = new THREE.Group();
+  const plateMat = new THREE.MeshStandardMaterial({ color: primaryHex, metalness: 0.36, roughness: 0.42 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.48, roughness: 0.36 });
+  const glowMat = new THREE.MeshStandardMaterial({ color: accentHex, emissive: accentHex, emissiveIntensity: 1.35, roughness: 0.2 });
+
+  // Sculpted front chest armor plate
+  const frontW = width * 0.92;
+  const frontH = isFemaleContoured ? 0.21 : 0.24;
+  const frontPlate = new THREE.Mesh(new THREE.BoxGeometry(frontW, frontH, 0.028), plateMat);
+  frontPlate.position.set(0, -0.015, frontZ);
+  g.add(frontPlate);
+
+  if (isFemaleContoured) {
+    const upperBevel = new THREE.Mesh(new THREE.BoxGeometry(frontW * 0.86, 0.075, 0.024), trimMat);
+    upperBevel.position.set(0, 0.045, frontZ - 0.012);
+    upperBevel.rotation.x = -0.18;
+    g.add(upperBevel);
+  }
+
+  // Triple tactical rifle mag pouches across abdomen
+  for (let i = -1; i <= 1; i++) {
+    const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.086, 0.026), trimMat);
+    pouch.position.set(i * 0.062, -0.078, frontZ - 0.018);
+    const flap = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.016, 0.028), plateMat);
+    flap.position.set(i * 0.062, -0.044, frontZ - 0.019);
+    g.add(pouch, flap);
+  }
+
+  // glowing ID / telemetry strip
+  const idStrip = new THREE.Mesh(new THREE.BoxGeometry(0.074, 0.012, 0.008), glowMat);
+  idStrip.position.set(0, 0.062, frontZ - 0.018);
+  g.add(idStrip);
+
+  // Rear ballistic pack + spine armor
+  const backPlate = new THREE.Mesh(new THREE.BoxGeometry(frontW * 0.88, frontH * 0.95, 0.036), plateMat);
+  backPlate.position.set(0, -0.01, backZ);
+  const backStrip = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.010, 0.008), glowMat);
+  backStrip.position.set(0, 0.06, backZ + 0.020);
+  g.add(backPlate, backStrip);
+
+  // Over-shoulder tactical straps connecting front to back
+  const strapDepth = Math.max(0.14, backZ - frontZ + 0.01);
+  const strapMidZ = (frontZ + backZ) * 0.5;
+  for (const side of [-1, 1]) {
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.020, strapDepth), trimMat);
+    strap.position.set(side * (frontW * 0.38), frontH * 0.49, strapMidZ);
+    g.add(strap);
+  }
+  return g;
+}
+
+function buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowColor) {
+  clearTacticalMounts(rig);
+  if (!rig?.bones) return;
+
+  const isSwimwear = Boolean(outCfg?.isSwimwear);
+  const opId = opCfg?.id || 'vanguard';
+  const accentHex = outCfg?.accent || teamGlowColor || '#38bdf8';
+  const darkArmor = outCfg?.id === 'arctic' ? '#334155' : (outCfg?.vest || '#18181b');
+
+  // 1. SHADOW NVG (on Avatar_Orion.glb): Quad-Tube Emerald GPNVG-18 + Stealth Chest Rig
+  if (opId === 'shadow') {
+    const nvgOffset = archetypeKey === 'orion'
+      ? new THREE.Vector3(0, 0.088, -0.142)
+      : new THREE.Vector3(0, 0.082, -0.135);
+    attachBoneTrackedGear(rig, 'head', makeQuadNvgAssembly('#10b981'), nvgOffset);
+    if (!isSwimwear) {
+      const rigVest = makePlateCarrierVest('#141923', '#10b981', -0.172, 0.122, 0.24, false);
+      attachBoneTrackedGear(rig, 'spine', rigVest, new THREE.Vector3(0, -0.02, 0));
+    }
+    return;
+  }
+
+  // 2. KAGURA (Female Tactical Black Armored Spec-Ops Operator on VitaFemale.glb)
+  if (opId === 'kagura') {
+    if (!isSwimwear) {
+      const suitArmor = (outCfg?.id === 'urban' || outCfg?.id === 'stealth_ops') ? '#151922' : darkArmor;
+      const armorGlow = outCfg?.id === 'urban' ? '#06b6d4' : accentHex;
+      const plateMat = new THREE.MeshStandardMaterial({ color: suitArmor, metalness: 0.56, roughness: 0.30 });
+      const glowMat = new THREE.MeshStandardMaterial({ color: armorGlow, emissive: armorGlow, emissiveIntensity: 1.5, roughness: 0.2 });
+
+      // Sleek contoured Black Tactical Plate Carrier Vest (cleared cleanly outside sculpted bust)
+      const vest = makePlateCarrierVest(suitArmor, armorGlow, -0.156, 0.092, 0.215, true);
+      attachBoneTrackedGear(rig, 'spine', vest, new THREE.Vector3(0, -0.025, 0));
+
+      // Carbon Shoulder Armor Pauldrons
+      for (const [bKey, xSign] of [['upperArmL', -1], ['upperArmR', 1]]) {
+        const pauldron = new THREE.Group();
+        const shell = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.082, 0.095), plateMat);
+        shell.rotation.z = xSign * -0.25;
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.056, 0.098), glowMat);
+        stripe.position.x = xSign * 0.032;
+        pauldron.add(shell, stripe);
+        attachBoneTrackedGear(rig, bKey, pauldron, new THREE.Vector3(xSign * 0.032, -0.035, 0));
+      }
+
+      // Armored Forearm Bracers & Carbon Combat Gloves
+      for (const [lKey, hKey, xSign] of [['lowerArmL', 'handL', -1], ['lowerArmR', 'handR', 1]]) {
+        const bracer = new THREE.Group();
+        const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.032, 0.145, 10), plateMat);
+        guard.rotation.z = Math.PI / 2;
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.010, 0.014), glowMat);
+        rail.position.set(0, 0.028, 0);
+        bracer.add(guard, rail);
+        attachBoneTrackedGear(rig, lKey, bracer, new THREE.Vector3(xSign * 0.11, 0, 0));
+
+        const glove = new THREE.Group();
+        const knuckle = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.036, 0.068), plateMat);
+        glove.add(knuckle);
+        attachBoneTrackedGear(rig, hKey, glove, new THREE.Vector3(xSign * 0.028, 0, 0));
+      }
+
+      // Drop-Leg Tactical Pistol Holster on Right Outer Thigh
+      if (rig.bones.upperLegR) {
+        const holster = new THREE.Group();
+        const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.066, 0.028, 12), plateMat);
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.135, 0.076), plateMat);
+        body.position.set(0.068, -0.01, 0.005);
+        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.048, 0.032), plateMat);
+        grip.position.set(0.068, 0.065, -0.016);
+        grip.rotation.x = 0.25;
+        holster.add(strap, body, grip);
+        attachBoneTrackedGear(rig, 'upperLegR', holster, new THREE.Vector3(0.01, -0.16, 0));
+      }
+
+      // Carbon Knee Armor Pads
+      for (const legKey of ['lowerLegL', 'lowerLegR']) {
+        if (!rig.bones[legKey]) continue;
+        const kPad = new THREE.Group();
+        const pad = new THREE.Mesh(new THREE.BoxGeometry(0.076, 0.088, 0.036), plateMat);
+        pad.rotation.x = 0.15;
+        kPad.add(pad);
+        attachBoneTrackedGear(rig, legKey, kPad, new THREE.Vector3(0, -0.025, -0.062));
+      }
+
+      // Spec-Ops Comms Headset & Cyan Half-Visor
+      const headset = new THREE.Group();
+      const ear = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.018, 12), plateMat);
+      ear.rotation.z = Math.PI / 2;
+      ear.position.set(0.086, 0.01, 0.01);
+      const micBoom = new THREE.Mesh(new THREE.BoxGeometry(0.010, 0.010, 0.085), plateMat);
+      micBoom.position.set(0.074, -0.015, -0.045);
+      micBoom.rotation.y = 0.24;
+      const visor = new THREE.Mesh(
+        new THREE.BoxGeometry(0.068, 0.026, 0.008),
+        new THREE.MeshStandardMaterial({ color: '#22d3ee', emissive: '#06b6d4', emissiveIntensity: 1.4, transparent: true, opacity: 0.72, roughness: 0.1 })
+      );
+      visor.position.set(0.034, 0.038, -0.118);
+      visor.rotation.y = -0.16;
+      headset.add(ear, micBoom, visor);
+      attachBoneTrackedGear(rig, 'head', headset, new THREE.Vector3(0, 0.042, -0.01));
+    }
+    return;
+  }
+
+  // 3. Female Bikini Mode: wear ONLY Bikini (zero vests, holsters, sunglasses, berets or visors)
+  if (isSwimwear) return;
+
+  if (opId === 'siren') {
+    // Stylish Sporty Tactical Aviator Shades in non-bikini outfits
+    const shades = new THREE.Group();
+    const frameMat = new THREE.MeshStandardMaterial({ color: '#18181b', metalness: 0.85, roughness: 0.2 });
+    const glassMat = new THREE.MeshStandardMaterial({ color: accentHex, emissive: accentHex, emissiveIntensity: 0.45, metalness: 0.9, roughness: 0.08 });
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.006, 0.010), frameMat);
+    for (const sx of [-0.032, 0.032]) {
+      const lens = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.024, 0.008), glassMat);
+      lens.position.set(sx, -0.004, -0.004);
+      shades.add(lens);
+    }
+    shades.add(bridge);
+    attachBoneTrackedGear(rig, 'head', shades, new THREE.Vector3(0, 0.068, -0.125));
+  } else if (opId === 'ghost') {
+    // Recon Tactical Plate Carrier + Radio Whip Antenna + Lower-Face Stealth Mask
+    const ghostVest = makePlateCarrierVest('#1e293b', '#38bdf8', -0.155, 0.135, 0.25, false);
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.006, 0.26, 8), new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.4 }));
+    ant.position.set(-0.095, 0.19, 0.145);
+    ghostVest.add(ant);
+    attachBoneTrackedGear(rig, 'spine', ghostVest, new THREE.Vector3(0, -0.015, 0));
+
+    const mask = new THREE.Group();
+    const maskShell = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.072, 0.072, 12), new THREE.MeshStandardMaterial({ color: '#18181b', roughness: 0.72 }));
+    maskShell.scale.set(0.95, 1, 1.08);
+    mask.add(maskShell);
+    attachBoneTrackedGear(rig, 'head', mask, new THREE.Vector3(0, 0.012, -0.052));
+  } else if (opId === 'titan') {
+    // Heavy Juggernaut Ballistic Reactor Chest + Massive Shoulder Pauldrons
+    const heavyMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.72, roughness: 0.24 });
+    const titanVest = makePlateCarrierVest('#334155', '#f59e0b', -0.155, 0.145, 0.28, false);
+    attachBoneTrackedGear(rig, 'spine', titanVest, new THREE.Vector3(0, 0.01, 0));
+    for (const [bKey, xSign] of [['upperArmL', -1], ['upperArmR', 1]]) {
+      const p = new THREE.Group();
+      p.add(new THREE.Mesh(new THREE.BoxGeometry(0.098, 0.105, 0.125), heavyMat));
+      attachBoneTrackedGear(rig, bKey, p, new THREE.Vector3(xSign * 0.036, -0.025, 0));
+    }
+  } else if (opId === 'phoenix') {
+    // Field Combat Medic Pack w/ Red Cross Emblem
+    const medPack = new THREE.Group();
+    const packMat = new THREE.MeshStandardMaterial({ color: '#f1f5f9', roughness: 0.48, metalness: 0.15 });
+    const redMat = new THREE.MeshStandardMaterial({ color: '#dc2626', emissive: '#ef4444', emissiveIntensity: 0.55, roughness: 0.3 });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.26, 0.095), packMat);
+    const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.032, 0.014), redMat);
+    crossH.position.z = 0.052;
+    const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.11, 0.014), redMat);
+    crossV.position.z = 0.052;
+    medPack.add(box, crossH, crossV);
+    attachBoneTrackedGear(rig, 'spine', medPack, new THREE.Vector3(0, -0.01, 0.165));
+  } else if (opId === 'vanguard') {
+    const radio = new THREE.Group();
+    const rMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.45, metalness: 0.4 });
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.09, 0.038), rMat);
+    const whip = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.005, 0.22, 6), rMat);
+    whip.position.set(0.02, 0.14, 0);
+    radio.add(box, whip);
+    attachBoneTrackedGear(rig, 'spine', radio, new THREE.Vector3(-0.075, -0.02, 0.185));
+  } else if (opId === 'aria') {
+    const hud = new THREE.Group();
+    const visor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.125, 0.032, 0.012),
+      new THREE.MeshStandardMaterial({ color: '#22d3ee', emissive: '#06b6d4', emissiveIntensity: 1.65, transparent: true, opacity: 0.78, roughness: 0.08 })
+    );
+    hud.add(visor);
+    attachBoneTrackedGear(rig, 'head', hud, new THREE.Vector3(0, 0.066, -0.124));
+  } else if (opId === 'valkyrie') {
+    const beret = new THREE.Group();
+    const clothMat = new THREE.MeshStandardMaterial({ color: '#7f1d1d', roughness: 0.65 });
+    const badgeMat = new THREE.MeshStandardMaterial({ color: '#facc15', metalness: 0.85, roughness: 0.2 });
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.088, 0.042, 16), clothMat);
+    cap.rotation.z = -0.22;
+    const badge = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.022, 0.008), badgeMat);
+    badge.position.set(-0.04, 0.005, -0.088);
+    beret.add(cap, badge);
+    attachBoneTrackedGear(rig, 'head', beret, new THREE.Vector3(0.016, 0.188, -0.010));
+  }
+}
+
+function hydrateGlbIntoRig(rig, loaded, archetypeKey, opCfg, outCfg, teamGlowColor) {
+  if (!loaded || !loaded.gltf || rig.disposed) return;
+  clearTacticalMounts(rig);
+  if (rig.modelRoot) {
+    rig.bodyRoot.remove(rig.modelRoot);
+  }
+  const inst = instantiateGlbInstance(loaded, opCfg, outCfg, teamGlowColor);
+  rig.modelRoot = inst.modelRoot;
+  rig.mixer = inst.mixer;
+  rig.actions = inst.actions;
+  rig.bones = inst.bones;
+  rig.restArmQuats = inst.restArmQuats;
+  rig.restHeadQuat = inst.restHeadQuat;
+  rig.activeAnim = inst.activeAnim;
+  rig.archetypeKey = archetypeKey;
+  rig.bodyRoot.add(inst.modelRoot);
+  buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowColor);
+}
+
 export function createOperatorRig({
   operator = 'vanguard',
   outfit = 'urban',
@@ -1747,805 +2147,20 @@ export function createOperatorRig({
 
   const opCfg = OPERATORS[operator] || OPERATORS.vanguard;
   const outCfg = OUTFITS[outfit] || OUTFITS.urban;
-  const isHeavy = opCfg.helmetStyle === 'heavy';
-  const isFemale = opCfg.gender === 'female';
-  const isSwimwear = Boolean(outCfg.isSwimwear);
   const teamGlowColor = team === 'alpha' ? '#0ea5e9' : (team === 'bravo' ? '#f97316' : (isAlly ? '#10b981' : '#ef4444'));
+  const archetypeKey = resolveCharacterArchetype(operator, outCfg);
 
-  const outfitTex = getOutfitTextures(outfit, outCfg.primary, outCfg.secondary, outCfg.accent);
-  const molleBump = getMolleVestTextures();
-
-  const clothMat = new THREE.MeshStandardMaterial({
-    map: outfitTex.map,
-    bumpMap: outfitTex.bumpMap,
-    bumpScale: 0.02,
-    roughness: 0.66
-  });
-  const secMat = new THREE.MeshStandardMaterial({
-    color: outCfg.secondary,
-    bumpMap: outfitTex.bumpMap,
-    bumpScale: 0.015,
-    roughness: 0.58
-  });
-  const swimPrimaryMat = new THREE.MeshStandardMaterial({
-    color: outCfg.primary,
-    roughness: 0.30,
-    metalness: 0.14
-  });
-  const swimAccentMat = new THREE.MeshStandardMaterial({
-    color: outCfg.secondary,
-    roughness: 0.32,
-    metalness: 0.16
-  });
-  const vestMat = new THREE.MeshStandardMaterial({
-    color: outCfg.vest,
-    bumpMap: molleBump,
-    bumpScale: 0.028,
-    roughness: 0.44,
-    metalness: 0.36
-  });
-  const pouchMat = new THREE.MeshStandardMaterial({
-    color: '#1e293b',
-    bumpMap: molleBump,
-    bumpScale: 0.02,
-    roughness: 0.54,
-    metalness: 0.25
-  });
-  const skinMat = new THREE.MeshStandardMaterial({ color: outCfg.skinTone, roughness: 0.44, metalness: 0.02 });
-  const accentTrim = new THREE.MeshStandardMaterial({
-    color: outCfg.accent || teamGlowColor,
-    emissive: teamGlowColor,
-    emissiveIntensity: 0.56,
-    roughness: 0.25
-  });
-  const goldMat = new THREE.MeshStandardMaterial({
-    color: outCfg.accent || '#fbbf24',
-    metalness: 0.86,
-    roughness: 0.18
-  });
-  const darkGearMat = new THREE.MeshStandardMaterial({ color: '#111827', roughness: 0.44, metalness: 0.42 });
-  const steelMat = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.22, metalness: 0.88 });
-  const visorMat = new THREE.MeshStandardMaterial({
-    color: '#0ea5e9',
-    emissive: '#0369a1',
-    emissiveIntensity: 0.28,
-    metalness: 0.94,
-    roughness: 0.06
-  });
-
-  // 1. Sculpted Pelvis & War-Belt / Swimwear Hip Silhouette
-  const hips = new THREE.Group();
-  hips.position.set(0, 0.88, 0);
-  if (isFemale) {
-    const pelvisMat = isSwimwear ? swimPrimaryMat : secMat;
-    const pelvisMesh = new THREE.Mesh(new THREE.SphereGeometry(0.136, 18, 14), pelvisMat);
-    pelvisMesh.scale.set(1.18, 0.78, 0.88);
-    pelvisMesh.position.set(0, -0.01, 0.005);
-    hips.add(pelvisMesh);
-
-    for (const gx of [-0.056, 0.056]) {
-      const curveHip = new THREE.Mesh(new THREE.SphereGeometry(0.082, 14, 12), pelvisMat);
-      curveHip.scale.set(0.95, 1.02, 1.05);
-      curveHip.position.set(gx, -0.024, 0.046);
-      hips.add(curveHip);
-    }
-
-    if (isSwimwear) {
-      for (const sx of [-0.156, 0.156]) {
-        const sideRing = new THREE.Mesh(new THREE.TorusGeometry(0.014, 0.0045, 8, 16), goldMat);
-        sideRing.rotation.y = Math.PI / 2;
-        sideRing.position.set(sx, 0.012, -0.012);
-        const sideTie = new THREE.Mesh(new THREE.CapsuleGeometry(0.006, 0.036, 4, 8), swimAccentMat);
-        sideTie.position.set(sx * 1.02, -0.014, -0.012);
-        hips.add(sideRing, sideTie);
-      }
-      const trimBand = new THREE.Mesh(new THREE.CylinderGeometry(0.152, 0.156, 0.024, 18), swimAccentMat);
-      trimBand.scale.set(1.18, 1.0, 0.84);
-      trimBand.position.set(0, 0.036, 0.005);
-      hips.add(trimBand);
-    } else {
-      const beltMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.168, 0.056, 16), darkGearMat);
-      beltMesh.scale.set(1.18, 1.0, 0.82);
-      beltMesh.position.y = 0.048;
-      const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.058, 0.022), accentTrim);
-      buckle.position.set(0, 0.048, -0.138);
-      const ifak = extrudeSideProfile([
-        [-0.12, -0.01], [-0.18, -0.01], [-0.175, 0.085], [-0.12, 0.085]
-      ], 0.13, 0.006, pouchMat);
-      hips.add(beltMesh, buckle, ifak);
-    }
-  } else {
-    const pelvisMat = isSwimwear ? swimPrimaryMat : secMat;
-    const pelvisMesh = new THREE.Mesh(new THREE.CapsuleGeometry(isHeavy ? 0.14 : 0.125, isHeavy ? 0.16 : 0.13, 6, 12), pelvisMat);
-    pelvisMesh.rotation.z = Math.PI / 2;
-    pelvisMesh.scale.set(1.0, 1.0, 0.95);
-    const beltMesh = new THREE.Mesh(new THREE.CylinderGeometry(isHeavy ? 0.21 : 0.188, isHeavy ? 0.21 : 0.188, 0.068, 14), darkGearMat);
-    beltMesh.scale.set(1.22, 1.0, 0.80);
-    beltMesh.position.y = 0.05;
-    const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.068, 0.024), accentTrim);
-    buckle.position.set(0, 0.05, -0.155);
-    hips.add(pelvisMesh, beltMesh, buckle);
-    if (!isSwimwear) {
-      const rearPouch = extrudeSideProfile([
-        [-0.14, -0.01], [-0.21, -0.01], [-0.20, 0.10], [-0.14, 0.10]
-      ], 0.16, 0.008, pouchMat);
-      hips.add(rearPouch);
-    }
-  }
-  bodyRoot.add(hips);
-
-  // 2. Smooth Articulated Legs (Tapered Sculpted Female Legs vs Tactical Male Cargo Trousers)
-  function makeArticulatedLeg(sideX, isRight) {
-    const legPivot = new THREE.Group();
-    legPivot.position.set(sideX, 0.84, 0);
-
-    const thighMat = isSwimwear ? skinMat : clothMat;
-    const shinMat = isSwimwear ? skinMat : secMat;
-
-    if (isFemale) {
-      const thighProfile = [
-        new THREE.Vector2(0.048, -0.39),
-        new THREE.Vector2(0.057, -0.28),
-        new THREE.Vector2(0.075, -0.14),
-        new THREE.Vector2(0.080, -0.04),
-        new THREE.Vector2(0.068, 0.02)
-      ];
-      const thigh = new THREE.Mesh(new THREE.LatheGeometry(thighProfile, 16), thighMat);
-      const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(0.049, 12, 10), thighMat);
-      kneeCap.position.set(0, -0.40, 0);
-      legPivot.add(thigh, kneeCap);
-
-      const strap = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.074, 0.072, isSwimwear ? 0.022 : 0.028, 14),
-        isSwimwear && !isRight ? goldMat : darkGearMat
-      );
-      strap.position.set(0, -0.17, 0);
-      legPivot.add(strap);
-
-      if (isRight) {
-        const holster = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.125, 0.080), darkGearMat);
-        holster.position.set(0.075, -0.17, 0);
-        const pistolGrip = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.052, 0.036), darkGearMat);
-        pistolGrip.position.set(0.078, -0.095, 0.015);
-        pistolGrip.rotation.x = 0.25;
-        legPivot.add(holster, pistolGrip);
-      } else if (!isSwimwear) {
-        const magRig = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.10, 0.095), pouchMat);
-        magRig.position.set(-0.074, -0.17, 0);
-        legPivot.add(magRig);
-      }
-    } else {
-      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.082, 0.27, 6, 12), thighMat);
-      thigh.position.set(0, -0.20, 0);
-      legPivot.add(thigh);
-      if (!isSwimwear) {
-        const cargoPocket = extrudeSideProfile([
-          [-0.06, -0.27], [0.06, -0.27], [0.05, -0.13], [-0.05, -0.13]
-        ], 0.042, 0.005, secMat);
-        cargoPocket.position.x = isRight ? 0.076 : -0.076;
-        legPivot.add(cargoPocket);
-      }
-      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.090, 0.088, 0.030, 12), darkGearMat);
-      strap.position.set(0, -0.19, 0);
-      legPivot.add(strap);
-
-      if (isRight) {
-        const holster = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.15, 0.10), darkGearMat);
-        holster.position.set(0.088, -0.19, 0);
-        const pistolGrip = new THREE.Mesh(new THREE.BoxGeometry(0.030, 0.062, 0.042), darkGearMat);
-        pistolGrip.position.set(0.092, -0.10, 0.02);
-        pistolGrip.rotation.x = 0.25;
-        legPivot.add(holster, pistolGrip);
-      } else if (!isSwimwear) {
-        const magRig = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.12, 0.12), pouchMat);
-        magRig.position.set(-0.088, -0.19, 0);
-        legPivot.add(magRig);
-      }
-    }
-
-    const kneePivot = new THREE.Group();
-    kneePivot.position.set(0, -0.40, 0);
-    legPivot.add(kneePivot);
-
-    if (isFemale) {
-      const calfProfile = [
-        new THREE.Vector2(0.038, -0.34),
-        new THREE.Vector2(0.037, -0.28),
-        new THREE.Vector2(0.055, -0.16),
-        new THREE.Vector2(0.054, -0.08),
-        new THREE.Vector2(0.048, 0.0)
-      ];
-      const shin = new THREE.Mesh(new THREE.LatheGeometry(calfProfile, 16), shinMat);
-      kneePivot.add(shin);
-
-      if (!isSwimwear) {
-        const kneePadStrap = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.053, 0.040, 12), darkGearMat);
-        const kneeShell = new THREE.Mesh(new THREE.SphereGeometry(0.050, 12, 10), vestMat);
-        kneeShell.scale.set(1.06, 0.90, 0.56);
-        kneeShell.position.set(0, 0.0, -0.048);
-        kneePivot.add(kneePadStrap, kneeShell);
-      }
-
-      const shoeColor = isSwimwear ? swimAccentMat : darkGearMat;
-      const bootAnkle = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.049, isSwimwear ? 0.08 : 0.13, 12), shoeColor);
-      bootAnkle.position.set(0, isSwimwear ? -0.36 : -0.33, 0);
-      const bootProfile = extrudeSideProfile([
-        [-0.068, -0.425], [0.145, -0.425], [0.138, -0.382], [0.055, -0.356], [-0.065, -0.356]
-      ], 0.096, 0.010, shoeColor);
-      const bootSole = new THREE.Mesh(new THREE.BoxGeometry(0.106, 0.022, 0.228), isSwimwear ? accentTrim : pouchMat);
-      bootSole.position.set(0, -0.432, -0.040);
-      kneePivot.add(bootAnkle, bootProfile, bootSole);
-    } else {
-      const kneePadStrap = new THREE.Mesh(new THREE.CylinderGeometry(0.078, 0.076, 0.05, 10), darkGearMat);
-      const kneeShell = new THREE.Mesh(new THREE.SphereGeometry(0.065, 12, 10), isSwimwear ? darkGearMat : vestMat);
-      kneeShell.scale.set(1.12, 0.96, 0.62);
-      kneeShell.position.set(0, 0.0, -0.070);
-
-      const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.066, 0.24, 6, 12), shinMat);
-      shin.position.set(0, -0.19, 0);
-
-      const bootAnkle = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.075, 0.11, 12), darkGearMat);
-      bootAnkle.position.set(0, -0.34, 0);
-      const bootProfile = extrudeSideProfile([
-        [-0.08, -0.425], [0.165, -0.425], [0.160, -0.375], [0.065, -0.350], [-0.075, -0.350]
-      ], 0.125, 0.010, darkGearMat);
-      const bootSole = new THREE.Mesh(new THREE.BoxGeometry(0.138, 0.028, 0.260), pouchMat);
-      bootSole.position.set(0, -0.432, -0.046);
-
-      if (isSwimwear) kneeShell.visible = false;
-      kneePivot.add(kneePadStrap, kneeShell, shin, bootAnkle, bootProfile, bootSole);
-    }
-
-    return { legPivot, kneePivot };
-  }
-
-  const legX = isFemale ? 0.104 : 0.12;
-  const leftLegData = makeArticulatedLeg(-legX, false);
-  const rightLegData = makeArticulatedLeg(legX, true);
-  const leftLeg = leftLegData.legPivot;
-  const rightLeg = rightLegData.legPivot;
-  const leftKnee = leftLegData.kneePivot;
-  const rightKnee = rightLegData.kneePivot;
-  bodyRoot.add(leftLeg, rightLeg);
-
-  // 3. Athletic Sculpted Torso (Female Hourglass + Bikini / Cropped Spec-Ops vs Armored Male)
-  const upperBody = new THREE.Group();
-  upperBody.position.set(0, 0.95, 0);
-  bodyRoot.add(upperBody);
-
-  const torsoW = isFemale ? 0.34 : (isHeavy ? 0.48 : 0.42);
-  let backpackGroup = new THREE.Group();
-
-  if (isFemale) {
-    const bodyBaseMat = isSwimwear ? skinMat : clothMat;
-    const femaleTorsoPts = [
-      new THREE.Vector2(0.001, -0.03),
-      new THREE.Vector2(0.136, -0.01),
-      new THREE.Vector2(0.110, 0.09),
-      new THREE.Vector2(0.126, 0.20),
-      new THREE.Vector2(0.145, 0.33),
-      new THREE.Vector2(0.136, 0.44),
-      new THREE.Vector2(0.066, 0.49),
-      new THREE.Vector2(0.001, 0.49)
-    ];
-    const torso = new THREE.Mesh(new THREE.LatheGeometry(femaleTorsoPts, 20), bodyBaseMat);
-    torso.scale.set(1.16, 1.0, 0.68);
-    upperBody.add(torso);
-
-    // Sculpted Feminine Bust Silhouette
-    const bustMat = isSwimwear ? swimPrimaryMat : clothMat;
-    for (const bx of [-0.056, 0.056]) {
-      const bustCup = new THREE.Mesh(new THREE.SphereGeometry(0.064, 16, 14), bustMat);
-      bustCup.scale.set(1.02, 0.96, 0.88);
-      bustCup.position.set(bx, 0.312, -0.072);
-      upperBody.add(bustCup);
-    }
-
-    if (isSwimwear) {
-      // Stylish Two-Piece Halter Bikini Top + Back Band + Center Clasp + Belly Chain
-      const claspRing = new THREE.Mesh(new THREE.TorusGeometry(0.013, 0.004, 8, 16), goldMat);
-      claspRing.position.set(0, 0.312, -0.118);
-      const backBand = new THREE.Mesh(new THREE.TorusGeometry(0.146, 0.011, 8, 24), swimAccentMat);
-      backBand.rotation.x = Math.PI / 2;
-      backBand.scale.set(1.16, 0.72, 1.0);
-      backBand.position.set(0, 0.305, 0.004);
-      const bellyChain = new THREE.Mesh(new THREE.TorusGeometry(0.118, 0.004, 8, 24), goldMat);
-      bellyChain.rotation.x = Math.PI / 2;
-      bellyChain.scale.set(1.16, 0.72, 1.0);
-      bellyChain.position.set(0, 0.055, 0);
-
-      for (const sx of [-1, 1]) {
-        connectLimbSegment(
-          upperBody,
-          new THREE.Vector3(sx * 0.056, 0.355, -0.100),
-          new THREE.Vector3(sx * 0.036, 0.475, -0.025),
-          0.008, 0.007, swimAccentMat, 8
-        );
-        connectLimbSegment(
-          upperBody,
-          new THREE.Vector3(sx * 0.036, 0.475, -0.025),
-          new THREE.Vector3(sx * 0.020, 0.460, 0.055),
-          0.007, 0.007, swimAccentMat, 8
-        );
-      }
-      upperBody.add(claspRing, backBand, bellyChain);
-    } else {
-      // Form-Fitting Cropped Female Spec-Ops Vest + Hydro Pack
-      const cropVest = new THREE.Mesh(new THREE.CylinderGeometry(0.162, 0.132, 0.26, 18), vestMat);
-      cropVest.scale.set(1.18, 1.0, 0.76);
-      cropVest.position.set(0, 0.31, 0);
-      const frontPlate = extrudeSideProfile([
-        [0.095, 0.19], [0.132, 0.21], [0.132, 0.39], [0.105, 0.43], [0.090, 0.43]
-      ], torsoW - 0.09, 0.007, darkGearMat);
-      const adminPatch = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.040, 0.014), accentTrim);
-      adminPatch.position.set(0, 0.375, -0.136);
-      for (const mx of [-0.072, 0, 0.072]) {
-        const pouch = extrudeSideProfile([
-          [0.115, 0.19], [0.155, 0.20], [0.155, 0.285], [0.115, 0.285]
-        ], 0.054, 0.004, pouchMat);
-        pouch.position.x = mx;
-        upperBody.add(pouch);
-      }
-      const sleekPack = extrudeSideProfile([
-        [-0.095, 0.16], [-0.185, 0.17], [-0.19, 0.40], [-0.15, 0.44], [-0.095, 0.43]
-      ], 0.20, 0.010, pouchMat);
-      backpackGroup.add(sleekPack);
-      upperBody.add(cropVest, frontPlate, adminPatch);
-    }
-  } else {
-    const torsoBaseMat = isSwimwear ? skinMat : clothMat;
-    const maleTorsoPts = [
-      new THREE.Vector2(0.001, -0.02),
-      new THREE.Vector2(isHeavy ? 0.176 : 0.152, 0.01),
-      new THREE.Vector2(isHeavy ? 0.185 : 0.158, 0.16),
-      new THREE.Vector2(isHeavy ? 0.218 : 0.195, 0.36),
-      new THREE.Vector2(isHeavy ? 0.220 : 0.196, 0.45),
-      new THREE.Vector2(0.088, 0.50),
-      new THREE.Vector2(0.001, 0.50)
-    ];
-    const torso = new THREE.Mesh(new THREE.LatheGeometry(maleTorsoPts, 18), torsoBaseMat);
-    torso.scale.set(1.24, 1.0, 0.72);
-    upperBody.add(torso);
-
-    if (!isSwimwear) {
-      const vest = new THREE.Mesh(
-        new THREE.CylinderGeometry(isHeavy ? 0.232 : 0.204, isHeavy ? 0.202 : 0.180, 0.38, 16),
-        vestMat
-      );
-      vest.scale.set(1.24, 1.0, 0.80);
-      vest.position.set(0, 0.255, 0);
-
-      const frontPlate = extrudeSideProfile([
-        [0.125, 0.125], [0.162, 0.140], [0.162, 0.385], [0.130, 0.435], [0.115, 0.435]
-      ], torsoW - 0.08, 0.008, darkGearMat);
-      const adminPatch = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.052, 0.016), accentTrim);
-      adminPatch.position.set(0, 0.37, -0.166);
-
-      for (const sx of [-0.14, 0.14]) {
-        const strapPad = new THREE.Mesh(new THREE.CapsuleGeometry(0.028, 0.16, 4, 8), pouchMat);
-        strapPad.rotation.x = Math.PI / 2;
-        strapPad.position.set(sx, 0.485, 0);
-        upperBody.add(strapPad);
-      }
-
-      for (const mx of [-0.095, 0, 0.095]) {
-        const pouch = extrudeSideProfile([
-          [0.145, 0.095], [0.195, 0.105], [0.195, 0.220], [0.145, 0.225]
-        ], 0.068, 0.005, pouchMat);
-        pouch.position.x = mx;
-        const magTop = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.036, 0.032), darkGearMat);
-        magTop.position.set(mx, 0.235, -0.162);
-        upperBody.add(pouch, magTop);
-      }
-
-      const chestGrenade = new THREE.Mesh(new THREE.SphereGeometry(0.034, 8, 8), new THREE.MeshStandardMaterial({ color: '#365314', roughness: 0.45 }));
-      chestGrenade.position.set(0.145, 0.31, -0.15);
-      const radioBox = new THREE.Mesh(new THREE.BoxGeometry(0.060, 0.110, 0.044), darkGearMat);
-      radioBox.position.set(-0.145, 0.37, -0.145);
-      const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.006, 0.26, 6), steelMat);
-      antenna.position.set(-0.155, 0.52, -0.14);
-
-      const lBadge = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.048, 0.15), accentTrim);
-      lBadge.position.set(-(torsoW * 0.5 + 0.045), 0.44, 0);
-      const rBadge = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.048, 0.15), accentTrim);
-      rBadge.position.set(torsoW * 0.5 + 0.045, 0.44, 0);
-
-      const mainPack = extrudeSideProfile([
-        [-0.12, 0.10], [-0.24, 0.11], [-0.25, 0.40], [-0.21, 0.45], [-0.12, 0.44]
-      ], 0.26, 0.012, pouchMat);
-      const lowerPack = extrudeSideProfile([
-        [-0.22, 0.12], [-0.30, 0.13], [-0.30, 0.24], [-0.22, 0.25]
-      ], 0.22, 0.008, vestMat);
-      const bedroll = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.27, 12), secMat);
-      bedroll.rotation.z = Math.PI / 2;
-      bedroll.position.set(0, 0.48, 0.19);
-      backpackGroup.add(mainPack, lowerPack, bedroll);
-
-      upperBody.add(vest, frontPlate, adminPatch, chestGrenade, radioBox, antenna, lBadge, rBadge);
-    } else {
-      // Male summer beach chest strap + dog tags
-      const dogTag = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.032, 0.006), steelMat);
-      dogTag.position.set(0, 0.34, -0.145);
-      upperBody.add(dogTag);
-    }
-  }
-  upperBody.add(backpackGroup);
+  const weaponMount = new THREE.Group();
+  weaponMount.position.set(0.16, 1.30, -0.32);
+  mountWeaponOnGroup(weaponMount, weaponId, skinId, attachments);
+  bodyRoot.add(weaponMount);
 
   const c4Pack = createC4Mesh();
-  c4Pack.position.set(0, 0.28, 0.27);
+  c4Pack.position.set(0, 1.24, 0.21);
   c4Pack.rotation.x = Math.PI / 2;
   c4Pack.scale.setScalar(0.82);
   c4Pack.visible = false;
-  upperBody.add(c4Pack);
-
-  // 4. Sculpted Head, Expressive Facial Details, Hairstyles & Stylish Operator Gear
-  const headGroup = new THREE.Group();
-  headGroup.position.set(0, 0.52, 0);
-  upperBody.add(headGroup);
-
-  const neck = new THREE.Mesh(
-    new THREE.CylinderGeometry(isFemale ? 0.050 : 0.072, isFemale ? 0.062 : 0.092, 0.11, 14),
-    isFemale || isSwimwear ? skinMat : darkGearMat
-  );
-  neck.position.set(0, 0.03, 0);
-
-  const head = new THREE.Mesh(new THREE.SphereGeometry(isFemale ? 0.114 : 0.122, 24, 18), skinMat);
-  head.scale.set(isFemale ? 0.86 : 0.92, isFemale ? 1.04 : 1.08, isFemale ? 0.94 : 0.98);
-  head.position.set(0, 0.165, 0);
-
-  const isGhost = opCfg.helmetStyle === 'hood';
-  const showFaceUnmasked = isFemale || isSwimwear;
-
-  if (!showFaceUnmasked) {
-    const balaclavaMat = new THREE.MeshStandardMaterial({
-      map: getBalaclavaTexture(isGhost),
-      roughness: 0.72
-    });
-    const balaclava = new THREE.Mesh(new THREE.CylinderGeometry(0.114, 0.104, 0.115, 16), balaclavaMat);
-    balaclava.scale.set(0.95, 1.0, 1.02);
-    balaclava.position.set(0, 0.118, -0.004);
-    balaclava.rotation.y = Math.PI;
-    headGroup.add(balaclava);
-  }
-
-  const browMat = isFemale
-    ? new THREE.MeshStandardMaterial({ color: opCfg.id === 'siren' ? '#926c2a' : '#231712', roughness: 0.65 })
-    : skinMat;
-  if (isFemale) {
-    for (const sx of [-1, 1]) {
-      const eyebrow = new THREE.Mesh(new THREE.BoxGeometry(0.030, 0.0055, 0.010), browMat);
-      eyebrow.position.set(sx * 0.034, 0.204, -0.097);
-      eyebrow.rotation.z = sx * -0.14;
-      headGroup.add(eyebrow);
-    }
-  } else {
-    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.142, 0.016, 0.030), skinMat);
-    brow.position.set(0, 0.204, -0.105);
-    headGroup.add(brow);
-  }
-
-  const nose = new THREE.Mesh(
-    new THREE.BoxGeometry(isFemale ? 0.014 : 0.020, isFemale ? 0.022 : 0.028, isFemale ? 0.018 : 0.026),
-    skinMat
-  );
-  nose.position.set(0, 0.172, isFemale ? -0.105 : -0.116);
-
-  const eyeWhiteMat = new THREE.MeshBasicMaterial({ color: '#f8fafc' });
-  const irisMat = new THREE.MeshBasicMaterial({
-    color: opCfg.id === 'aria' ? '#38bdf8' : (opCfg.id === 'siren' ? '#0ea5e9' : '#3b2416')
-  });
-  const pupilMat = new THREE.MeshBasicMaterial({ color: '#0f172a' });
-  const lashMat = new THREE.MeshBasicMaterial({ color: '#111827' });
-
-  for (const ex of isFemale ? [-0.033, 0.033] : [-0.038, 0.038]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(isFemale ? 0.014 : 0.016, 10, 8), eyeWhiteMat);
-    eye.scale.set(1.25, isFemale ? 0.72 : 0.65, 0.58);
-    eye.position.set(ex, 0.184, isFemale ? -0.098 : -0.110);
-    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.0085, 8, 8), irisMat);
-    iris.position.set(ex, 0.184, isFemale ? -0.104 : -0.116);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.0048, 6, 6), pupilMat);
-    pupil.position.set(ex, 0.184, isFemale ? -0.106 : -0.118);
-    headGroup.add(eye, iris, pupil);
-
-    if (isFemale) {
-      const lash = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.0045, 0.008), lashMat);
-      lash.position.set(ex, 0.193, -0.102);
-      headGroup.add(lash);
-    }
-  }
-
-  if (showFaceUnmasked) {
-    const lipsMat = new THREE.MeshStandardMaterial({
-      color: isFemale ? (opCfg.id === 'aria' ? '#ec4899' : '#e11d48') : '#b87664',
-      roughness: 0.34,
-      metalness: 0.08
-    });
-    const lips = new THREE.Mesh(new THREE.SphereGeometry(0.013, 10, 8), lipsMat);
-    lips.scale.set(1.75, 0.58, 0.62);
-    lips.position.set(0, 0.120, isFemale ? -0.098 : -0.109);
-    headGroup.add(lips);
-  }
-
-  if (!isFemale) {
-    const earL = new THREE.Mesh(new THREE.CylinderGeometry(0.050, 0.050, 0.042, 14), darkGearMat);
-    earL.rotation.z = Math.PI / 2;
-    earL.position.set(-0.122, 0.165, 0.01);
-    const earR = earL.clone();
-    earR.position.x = 0.122;
-    const headband = new THREE.Mesh(new THREE.TorusGeometry(0.128, 0.013, 8, 22, Math.PI), darkGearMat);
-    headband.position.set(0, 0.175, 0.01);
-    headGroup.add(earL, earR, headband);
-  }
-  headGroup.add(neck, head, nose);
-
-  function buildFastHelmet(domeMat) {
-    const hg = new THREE.Group();
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.145, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.56), domeMat);
-    dome.scale.set(0.96, 0.94, 1.06);
-    dome.position.set(0, 0.195, 0.008);
-    const rearShell = new THREE.Mesh(new THREE.CylinderGeometry(0.136, 0.140, 0.075, 16, 1, false, -Math.PI * 0.42, Math.PI * 0.84), domeMat);
-    rearShell.position.set(0, 0.165, 0.014);
-    const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.048, 0.052, 0.022), darkGearMat);
-    shroud.position.set(0, 0.228, -0.144);
-    const railL = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.024, 0.13), accentTrim);
-    railL.position.set(-0.138, 0.205, -0.01);
-    const railR = railL.clone();
-    railR.position.x = 0.138;
-    const batteryPack = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.048, 0.036), darkGearMat);
-    batteryPack.position.set(0, 0.195, 0.154);
-    hg.add(dome, rearShell, shroud, railL, railR, batteryPack);
-    return hg;
-  }
-
-  function buildFemaleHairBase(hairMat) {
-    const hg = new THREE.Group();
-    const crown = new THREE.Mesh(
-      new THREE.SphereGeometry(0.120, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.62),
-      hairMat
-    );
-    crown.scale.set(0.88, 1.04, 0.98);
-    crown.position.set(0, 0.172, 0.008);
-    const frontSwoop = new THREE.Mesh(new THREE.SphereGeometry(0.076, 14, 10), hairMat);
-    frontSwoop.scale.set(1.38, 0.52, 0.65);
-    frontSwoop.position.set(0.012, 0.238, -0.058);
-    frontSwoop.rotation.z = -0.18;
-    for (const sx of [-1, 1]) {
-      const sideLock = new THREE.Mesh(new THREE.CapsuleGeometry(0.022, 0.095, 6, 10), hairMat);
-      sideLock.position.set(sx * 0.090, 0.168, -0.028);
-      sideLock.rotation.z = sx * 0.18;
-      sideLock.rotation.x = 0.24;
-      const earStud = new THREE.Mesh(new THREE.TorusGeometry(0.011, 0.003, 6, 12), goldMat);
-      earStud.rotation.y = Math.PI / 2;
-      earStud.position.set(sx * 0.100, 0.145, 0.005);
-      hg.add(sideLock, earStud);
-    }
-    hg.add(crown, frontSwoop);
-    return hg;
-  }
-
-  if (opCfg.helmetStyle === 'beach_shades') {
-    const blondeMat = new THREE.MeshStandardMaterial({ color: '#e6b85c', roughness: 0.42, metalness: 0.15 });
-    const hair = buildFemaleHairBase(blondeMat);
-    const band = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.006, 8, 14), swimPrimaryMat);
-    band.position.set(0, 0.185, 0.112);
-    const tailUpper = new THREE.Mesh(new THREE.CapsuleGeometry(0.026, 0.11, 8, 12), blondeMat);
-    tailUpper.position.set(0, 0.125, 0.145);
-    tailUpper.rotation.x = -0.45;
-    const tailLower = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.16, 12), blondeMat);
-    tailLower.rotation.x = Math.PI - 0.18;
-    tailLower.position.set(0, -0.005, 0.168);
-
-    // Stylish Reflective Aviator Sunglasses
-    const lensMat = new THREE.MeshStandardMaterial({
-      color: outCfg.accent || '#06b6d4',
-      emissive: '#0891b2',
-      emissiveIntensity: 0.25,
-      metalness: 0.92,
-      roughness: 0.08
-    });
-    for (const gx of [-0.035, 0.035]) {
-      const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.029, 0.027, 0.007, 16), goldMat);
-      rim.rotation.x = Math.PI / 2;
-      rim.rotation.z = gx < 0 ? 0.10 : -0.10;
-      rim.position.set(gx, 0.184, -0.106);
-      const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.024, 0.009, 16), lensMat);
-      glass.rotation.x = Math.PI / 2;
-      glass.position.set(gx, 0.184, -0.106);
-      headGroup.add(rim, glass);
-    }
-    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.005, 0.006), goldMat);
-    bridge.position.set(0, 0.194, -0.109);
-    headGroup.add(hair, band, tailUpper, tailLower, bridge);
-  } else if (opCfg.helmetStyle === 'cyber_twintails') {
-    const violetHair = new THREE.MeshStandardMaterial({ color: '#1e1b4b', roughness: 0.38, metalness: 0.20 });
-    const tipHair = new THREE.MeshStandardMaterial({ color: '#22d3ee', emissive: '#0891b2', emissiveIntensity: 0.35, roughness: 0.35 });
-    const hair = buildFemaleHairBase(violetHair);
-
-    for (const sx of [-1, 1]) {
-      const tie = new THREE.Mesh(new THREE.TorusGeometry(0.020, 0.006, 8, 14), accentTrim);
-      tie.position.set(sx * 0.104, 0.202, 0.042);
-      tie.rotation.y = sx * -0.5;
-      connectLimbSegment(
-        headGroup,
-        new THREE.Vector3(sx * 0.106, 0.200, 0.045),
-        new THREE.Vector3(sx * 0.145, 0.06, 0.095),
-        0.024, 0.020, violetHair, 10
-      );
-      connectLimbSegment(
-        headGroup,
-        new THREE.Vector3(sx * 0.145, 0.06, 0.095),
-        new THREE.Vector3(sx * 0.155, -0.09, 0.125),
-        0.019, 0.008, tipHair, 10
-      );
-      headGroup.add(tie);
-    }
-    const cyberVisor = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.114, 0.114, 0.040, 18, 1, true, Math.PI * 0.72, Math.PI * 0.56),
-      new THREE.MeshBasicMaterial({ color: '#22d3ee', transparent: true, opacity: 0.58, side: THREE.DoubleSide })
-    );
-    cyberVisor.position.set(0, 0.186, -0.006);
-    const finL = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.042, 0.036), accentTrim);
-    finL.position.set(-0.102, 0.258, 0.01);
-    finL.rotation.z = 0.28;
-    const finR = finL.clone();
-    finR.position.x = 0.102;
-    finR.rotation.z = -0.28;
-    headGroup.add(hair, cyberVisor, finL, finR);
-  } else if (opCfg.helmetStyle === 'visor' || opCfg.helmetStyle === 'heavy') {
-    if (isHeavy) {
-      const blastCollar = new THREE.Mesh(new THREE.CylinderGeometry(0.175, 0.215, 0.115, 18, 1, true), vestMat);
-      blastCollar.position.set(0, 0.045, 0);
-      const helm = buildFastHelmet(darkGearMat);
-      helm.scale.setScalar(1.07);
-      const faceShield = new THREE.Mesh(new THREE.CylinderGeometry(0.136, 0.142, 0.145, 16, 1, false, Math.PI * 0.62, Math.PI * 0.76), vestMat);
-      faceShield.position.set(0, 0.165, 0);
-      const eyeSlit = new THREE.Mesh(new THREE.BoxGeometry(0.165, 0.024, 0.042), accentTrim);
-      eyeSlit.position.set(0, 0.184, -0.132);
-      headGroup.add(blastCollar, helm, faceShield, eyeSlit);
-    } else {
-      const helm = buildFastHelmet(vestMat);
-      const visor = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.136, 0.134, 0.082, 18, 1, false, Math.PI * 0.66, Math.PI * 0.68),
-        visorMat
-      );
-      visor.position.set(0, 0.182, -0.008);
-      headGroup.add(helm, visor);
-    }
-  } else if (opCfg.helmetStyle === 'nvg') {
-    const helm = buildFastHelmet(vestMat);
-    const nvgBridge = new THREE.Mesh(new THREE.BoxGeometry(0.145, 0.028, 0.048), darkGearMat);
-    nvgBridge.position.set(0, 0.215, -0.16);
-    const nvgMat = new THREE.MeshBasicMaterial({ color: '#22c55e' });
-    [-0.064, -0.022, 0.022, 0.064].forEach((nx) => {
-      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.018, 0.082, 12), darkGearMat);
-      tube.rotation.x = Math.PI / 2;
-      tube.position.set(nx, 0.192, -0.178);
-      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.015, 10), nvgMat);
-      lens.rotation.y = Math.PI;
-      lens.position.set(nx, 0.192, -0.220);
-      headGroup.add(tube, lens);
-    });
-    headGroup.add(helm, nvgBridge);
-  } else if (opCfg.helmetStyle === 'medic') {
-    const whiteHelmMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.30, metalness: 0.20 });
-    const helm = buildFastHelmet(whiteHelmMat);
-    const medVisor = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.136, 0.134, 0.068, 18, 1, false, Math.PI * 0.68, Math.PI * 0.64),
-      visorMat
-    );
-    medVisor.position.set(0, 0.184, -0.008);
-    const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.022, 0.018), new THREE.MeshBasicMaterial({ color: '#ef4444' }));
-    crossH.position.set(0, 0.265, -0.140);
-    const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.075, 0.018), new THREE.MeshBasicMaterial({ color: '#ef4444' }));
-    crossV.position.set(0, 0.265, -0.140);
-    headGroup.add(helm, medVisor, crossH, crossV);
-  } else if (opCfg.helmetStyle === 'hood') {
-    const hoodDome = new THREE.Mesh(new THREE.SphereGeometry(0.145, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.68), secMat);
-    hoodDome.scale.set(0.98, 1.05, 1.06);
-    hoodDome.position.set(0, 0.185, 0.012);
-    const hoodCowl = new THREE.Mesh(new THREE.CylinderGeometry(0.132, 0.155, 0.13, 16), secMat);
-    hoodCowl.position.set(0, 0.072, 0.015);
-    const hoodBrim = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.032, 0.075), secMat);
-    hoodBrim.position.set(0, 0.258, -0.105);
-    hoodBrim.rotation.x = 0.26;
-    const goggles = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.128, 0.128, 0.052, 16, 1, false, Math.PI * 0.72, Math.PI * 0.56),
-      accentTrim
-    );
-    goggles.position.set(0, 0.184, -0.006);
-    headGroup.add(hoodDome, hoodCowl, hoodBrim, goggles);
-  } else {
-    const brunetteMat = new THREE.MeshStandardMaterial({ color: '#3b2116', roughness: 0.55 });
-    const hair = buildFemaleHairBase(brunetteMat);
-    const hairBun = new THREE.Mesh(new THREE.SphereGeometry(0.048, 10, 10), brunetteMat);
-    hairBun.position.set(0, 0.142, 0.122);
-    const beretCrown = new THREE.Mesh(
-      new THREE.SphereGeometry(0.132, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
-      new THREE.MeshStandardMaterial({ color: '#991b1b', roughness: 0.74 })
-    );
-    beretCrown.scale.set(1.06, 0.62, 1.06);
-    beretCrown.position.set(0.018, 0.242, 0);
-    beretCrown.rotation.z = -0.18;
-    const beretBand = new THREE.Mesh(new THREE.CylinderGeometry(0.118, 0.118, 0.024, 16), darkGearMat);
-    beretBand.position.set(0, 0.235, 0);
-    beretBand.rotation.z = -0.08;
-    const flashBadge = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.040, 0.014), goldMat);
-    flashBadge.position.set(-0.042, 0.260, -0.114);
-    headGroup.add(hair, hairBun, beretCrown, beretBand, flashBadge);
-  }
-
-  // 5. Seamlessly Connected Joint-Chain Arms
-  const armsPivot = new THREE.Group();
-  armsPivot.position.set(0, 0.42, 0);
-  upperBody.add(armsPivot);
-
-  const armUpperMat = isSwimwear ? skinMat : clothMat;
-  const armForeMat = isSwimwear ? skinMat : (isFemale ? secMat : secMat);
-  const armShoulderR = isFemale ? torsoW * 0.5 + 0.012 : torsoW * 0.5 + 0.04;
-
-  const rShoulder = new THREE.Vector3(armShoulderR, 0.005, 0);
-  const lShoulder = new THREE.Vector3(-armShoulderR, 0.005, 0);
-
-  if (!isSwimwear) {
-    const pauldronMat = isHeavy ? darkGearMat : vestMat;
-    const rPauldron = new THREE.Mesh(new THREE.SphereGeometry(isFemale ? 0.056 : 0.092, 12, 10), pauldronMat);
-    rPauldron.scale.set(0.84, 0.96, 1.08);
-    rPauldron.position.copy(rShoulder);
-    const lPauldron = rPauldron.clone();
-    lPauldron.position.copy(lShoulder);
-    armsPivot.add(rPauldron, lPauldron);
-  } else {
-    const rShoulderSkin = new THREE.Mesh(new THREE.SphereGeometry(isFemale ? 0.044 : 0.058, 12, 10), skinMat);
-    rShoulderSkin.position.copy(rShoulder);
-    const lShoulderSkin = rShoulderSkin.clone();
-    lShoulderSkin.position.copy(lShoulder);
-    armsPivot.add(rShoulderSkin, lShoulderSkin);
-  }
-
-  const rElbow = new THREE.Vector3(isFemale ? 0.19 : 0.24, -0.14, -0.12);
-  const rHandPos = new THREE.Vector3(isFemale ? 0.10 : 0.12, -0.12, -0.20);
-  const lElbow = new THREE.Vector3(isFemale ? -0.18 : -0.22, -0.14, -0.16);
-  const lHandPos = new THREE.Vector3(isFemale ? 0.08 : 0.10, -0.07, -0.46);
-
-  const uArmR = isFemale ? 0.044 : 0.062;
-  const eArmR = isFemale ? 0.036 : 0.052;
-  const wArmR = isFemale ? 0.028 : 0.042;
-  connectLimbSegment(armsPivot, rShoulder, rElbow, uArmR, eArmR, armUpperMat);
-  connectLimbSegment(armsPivot, rElbow, rHandPos, eArmR, wArmR, armForeMat);
-  connectLimbSegment(armsPivot, lShoulder, lElbow, uArmR, eArmR, armUpperMat);
-  connectLimbSegment(armsPivot, lElbow, lHandPos, eArmR, wArmR, armForeMat);
-
-  const jointMat = isSwimwear ? skinMat : darkGearMat;
-  const rElbowSphere = new THREE.Mesh(new THREE.SphereGeometry(eArmR * 0.96, 10, 8), jointMat);
-  rElbowSphere.position.copy(rElbow);
-  const lElbowSphere = new THREE.Mesh(new THREE.SphereGeometry(eArmR * 0.96, 10, 8), jointMat);
-  lElbowSphere.position.copy(lElbow);
-
-  const gloveColMat = isSwimwear ? skinMat : darkGearMat;
-  const rGlove = new THREE.Mesh(new THREE.CapsuleGeometry(isFemale ? 0.026 : 0.032, 0.04, 6, 8), gloveColMat);
-  rGlove.rotation.x = Math.PI / 2;
-  rGlove.position.copy(rHandPos);
-  const lGlove = rGlove.clone();
-  lGlove.position.copy(lHandPos);
-
-  if (isSwimwear) {
-    const wristBangle = new THREE.Mesh(new THREE.CylinderGeometry(wArmR + 0.004, wArmR + 0.004, 0.016, 10), goldMat);
-    wristBangle.rotation.x = Math.PI / 2;
-    wristBangle.position.copy(lHandPos).add(new THREE.Vector3(-0.02, -0.01, 0.05));
-    armsPivot.add(wristBangle);
-  }
-
-  const weaponMount = new THREE.Group();
-  weaponMount.position.set(isFemale ? 0.10 : 0.12, -0.055, -0.30);
-  const gunMesh = createWeaponModel(weaponId, skinId, attachments);
-  gunMesh.scale.setScalar(0.95);
-  weaponMount.add(gunMesh);
-
-  armsPivot.add(
-    rElbowSphere, lElbowSphere,
-    rGlove, lGlove,
-    weaponMount
-  );
+  bodyRoot.add(c4Pack);
 
   const shieldMesh = new THREE.Mesh(
     new THREE.CylinderGeometry(0.58, 0.58, 1.88, 20, 1, true),
@@ -2558,46 +2173,72 @@ export function createOperatorRig({
   const nameplate = makeNameplateSprite(name, team, isAlly);
   group.add(nameplate);
 
-  bodyRoot.traverse((child) => {
-    if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
-    }
-  });
-
-  return {
+  const rig = {
     group,
     bodyRoot,
-    hips,
-    upperBody,
-    headGroup,
-    leftLeg,
-    rightLeg,
-    leftKnee,
-    rightKnee,
-    armsPivot,
     weaponMount,
     c4Pack,
     shieldMesh,
     nameplate,
     currentWeaponId: weaponId,
+    currentSkinId: skinId,
+    currentAttachments: attachments,
+    archetypeKey,
+    modelRoot: null,
+    mixer: null,
+    actions: {},
+    bones: {},
+    restArmQuats: {},
+    restHeadQuat: null,
+    tacticalMounts: [],
+    activeAnim: 'idle',
+    isDeadState: false,
     walkPhase: Math.random() * Math.PI * 2,
     smoothSpeed: 0,
     crouchBlend: 0,
     deathProgress: 0,
-    recoilKick: 0
+    recoilKick: 0,
+    disposed: false
   };
+
+  const syncLoaded = getLoadedCharacterSync(archetypeKey);
+  if (syncLoaded) {
+    hydrateGlbIntoRig(rig, syncLoaded, archetypeKey, opCfg, outCfg, teamGlowColor);
+  } else if (typeof window !== 'undefined') {
+    loadCharacterArchetype(archetypeKey).then((loaded) => {
+      if (loaded) hydrateGlbIntoRig(rig, loaded, archetypeKey, opCfg, outCfg, teamGlowColor);
+    });
+  }
+
+  return rig;
 }
 
 export function swapRigWeapon(rig, weaponId, skinId = 'default', attachments = {}) {
   if (!rig || rig.currentWeaponId === weaponId) return;
   rig.currentWeaponId = weaponId;
-  while (rig.weaponMount.children.length > 0) {
-    rig.weaponMount.remove(rig.weaponMount.children[0]);
+  rig.currentSkinId = skinId;
+  rig.currentAttachments = attachments;
+  mountWeaponOnGroup(rig.weaponMount, weaponId, skinId, attachments);
+}
+
+function transitionGlbAnimation(rig, targetKey, fadeSec = 0.16, timeScale = 1.0) {
+  if (!rig.actions) return;
+  const resolvedKey = rig.actions[targetKey] ? targetKey : (rig.actions.idle ? 'idle' : null);
+  if (!resolvedKey) return;
+
+  const nextAct = rig.actions[resolvedKey];
+  nextAct.timeScale = timeScale;
+
+  if (rig.activeAnim === resolvedKey) return;
+  const prevAct = rig.actions[rig.activeAnim];
+  rig.activeAnim = resolvedKey;
+
+  nextAct.reset();
+  nextAct.setEffectiveWeight(1);
+  nextAct.play();
+  if (prevAct && prevAct !== nextAct) {
+    prevAct.crossFadeTo(nextAct, fadeSec, true);
   }
-  const gunMesh = createWeaponModel(weaponId, skinId, attachments);
-  gunMesh.scale.setScalar(0.95);
-  rig.weaponMount.add(gunMesh);
 }
 
 export function animateOperatorRig(rig, state, dt, timeSec = 0) {
@@ -2605,24 +2246,42 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
   const clampedDt = Math.min(0.05, dt);
 
   if (state.dead) {
-    rig.deathProgress = Math.min(1, rig.deathProgress + clampedDt * 4.8);
-    const ease = 1 - Math.pow(1 - rig.deathProgress, 2);
-    rig.bodyRoot.rotation.x = -ease * (Math.PI * 0.47);
-    rig.bodyRoot.position.y = ease * 0.14;
-    rig.leftLeg.rotation.x *= 0.85;
-    rig.rightLeg.rotation.x *= 0.85;
-    if (rig.leftKnee) rig.leftKnee.rotation.x = ease * 0.35;
-    if (rig.rightKnee) rig.rightKnee.rotation.x = ease * 0.18;
     rig.shieldMesh.visible = false;
     rig.nameplate.visible = false;
+    rig.c4Pack.visible = false;
+    rig.deathProgress = Math.min(1, rig.deathProgress + clampedDt * 4.5);
+
+    if (rig.mixer) {
+      if (rig.actions.death) {
+        if (!rig.isDeadState) {
+          rig.isDeadState = true;
+          transitionGlbAnimation(rig, 'death', 0.12, 1.1);
+        }
+        rig.mixer.update(clampedDt);
+        rig.weaponMount.visible = false;
+        return;
+      }
+      rig.mixer.update(0);
+    }
+
+    // Fallback collapse for Mixamo rigs without embedded Death clip
+    const ease = 1 - Math.pow(1 - rig.deathProgress, 2);
+    rig.bodyRoot.rotation.x = -ease * (Math.PI * 0.46);
+    rig.bodyRoot.position.y = ease * 0.12;
+    rig.weaponMount.visible = false;
     return;
   }
 
-  if (rig.deathProgress > 0) {
-    rig.deathProgress = Math.max(0, rig.deathProgress - clampedDt * 7.0);
-    rig.bodyRoot.rotation.x = -rig.deathProgress * (Math.PI * 0.47);
+  if (rig.isDeadState || rig.deathProgress > 0) {
+    rig.isDeadState = false;
+    rig.deathProgress = 0;
+    rig.bodyRoot.rotation.x = 0;
+    rig.bodyRoot.position.y = 0;
+    rig.weaponMount.visible = true;
+    if (rig.actions?.death) rig.actions.death.stop();
   }
 
+  rig.weaponMount.visible = true;
   rig.nameplate.visible = state.showNameplate !== false;
   rig.c4Pack.visible = Boolean(state.hasBomb);
   rig.shieldMesh.visible = Boolean(state.shield);
@@ -2631,66 +2290,141 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
   const targetCrouch = state.crouch ? 1 : 0;
   rig.crouchBlend = (rig.crouchBlend || 0) + (targetCrouch - (rig.crouchBlend || 0)) * Math.min(1, 14 * clampedDt);
   const cb = rig.crouchBlend;
-
-  rig.upperBody.position.y = 0.95 - cb * 0.34;
-  if (rig.hips) rig.hips.position.y = 0.88 - cb * 0.30;
-  rig.leftLeg.position.y = 0.84 - cb * 0.28;
-  rig.rightLeg.position.y = 0.84 - cb * 0.28;
+  rig.bodyRoot.position.y = -cb * 0.34;
 
   const rawSpeed = state.moveSpeed || 0;
   rig.smoothSpeed = (rig.smoothSpeed || 0) + (rawSpeed - (rig.smoothSpeed || 0)) * Math.min(1, 12 * clampedDt);
-  const moveFactor = Math.min(1, rig.smoothSpeed / 4.2);
+  const speed = rig.smoothSpeed;
 
-  if (moveFactor > 0.04) {
-    rig.walkPhase += clampedDt * (state.sprint ? 13.2 : 9.2) * Math.max(0.55, moveFactor);
-    const p = rig.walkPhase;
-    const maxAmp = state.crouch ? 0.38 : (state.sprint ? 0.72 : 0.54);
-    const swing = Math.sin(p) * maxAmp * moveFactor;
-
-    rig.leftLeg.rotation.x = swing - cb * 0.52;
-    rig.rightLeg.rotation.x = -swing - cb * 0.52;
-
-    const kneeAmp = (state.sprint ? 0.95 : 0.68) * moveFactor;
-    const lKneeWalk = Math.max(0, -Math.cos(p)) * kneeAmp;
-    const rKneeWalk = Math.max(0, Math.cos(p)) * kneeAmp;
-    if (rig.leftKnee) rig.leftKnee.rotation.x = lKneeWalk + cb * 0.92;
-    if (rig.rightKnee) rig.rightKnee.rotation.x = rKneeWalk + cb * 0.92;
-
-    rig.bodyRoot.position.y = Math.abs(Math.cos(p)) * 0.036 * moveFactor;
-    rig.upperBody.rotation.y = Math.sin(p) * 0.085 * moveFactor;
-    rig.upperBody.rotation.x = (state.sprint ? 0.14 : 0.05) * moveFactor + cb * 0.14;
-    if (rig.hips) rig.hips.rotation.y = -Math.sin(p) * 0.06 * moveFactor;
-  } else {
-    const breath = Math.sin(timeSec * 2.4) * 0.012;
-    const restLeftHip = -cb * 0.58;
-    const restRightHip = -cb * 0.38;
-    const restLeftKnee = cb * 1.05;
-    const restRightKnee = cb * 0.85;
-
-    rig.leftLeg.rotation.x += (restLeftHip - rig.leftLeg.rotation.x) * Math.min(1, 12 * clampedDt);
-    rig.rightLeg.rotation.x += (restRightHip - rig.rightLeg.rotation.x) * Math.min(1, 12 * clampedDt);
-    if (rig.leftKnee) rig.leftKnee.rotation.x += (restLeftKnee - rig.leftKnee.rotation.x) * Math.min(1, 12 * clampedDt);
-    if (rig.rightKnee) rig.rightKnee.rotation.x += (restRightKnee - rig.rightKnee.rotation.x) * Math.min(1, 12 * clampedDt);
-
-    rig.bodyRoot.position.y += (breath - rig.bodyRoot.position.y) * Math.min(1, 10 * clampedDt);
-    rig.upperBody.rotation.y += (0 - rig.upperBody.rotation.y) * Math.min(1, 10 * clampedDt);
-    rig.upperBody.rotation.x += (cb * 0.14 - rig.upperBody.rotation.x) * Math.min(1, 10 * clampedDt);
-    if (rig.hips) rig.hips.rotation.y += (0 - rig.hips.rotation.y) * Math.min(1, 10 * clampedDt);
-  }
-
-  if (state.victoryPose) {
-    rig.upperBody.rotation.y = Math.sin(timeSec * 1.3) * 0.16;
-    rig.armsPivot.rotation.x = 0.22 + Math.sin(timeSec * 2.1) * 0.045;
-    rig.headGroup.rotation.y = Math.sin(timeSec * 0.95) * 0.22;
-    rig.headGroup.rotation.x = Math.cos(timeSec * 1.4) * 0.05;
-    return;
+  if (rig.mixer) {
+    if (state.victoryPose) {
+      const idleKey = rig.actions.victory ? 'victory' : 'idle';
+      transitionGlbAnimation(rig, idleKey, 0.25, 1.0);
+    } else if (speed >= 3.4) {
+      transitionGlbAnimation(rig, 'run', 0.15, Math.min(1.45, Math.max(0.85, speed / 4.8)));
+    } else if (speed >= 0.35) {
+      transitionGlbAnimation(rig, 'walk', 0.15, Math.min(1.35, Math.max(0.75, speed / 2.2)));
+    } else {
+      transitionGlbAnimation(rig, 'idle', 0.20, 1.0);
+    }
+    rig.mixer.update(clampedDt);
   }
 
   rig.recoilKick = Math.max(0, rig.recoilKick - clampedDt * 6.5);
-  const pitch = state.pitch || 0;
-  const walkArmBob = moveFactor > 0.04 ? Math.sin(rig.walkPhase * 2) * 0.025 * moveFactor : 0;
-  rig.armsPivot.rotation.x = pitch * 0.85 + rig.recoilKick + walkArmBob;
-  rig.headGroup.rotation.x = pitch * 0.55;
+  rig.group.updateMatrixWorld(true);
+
+  if (!rig.modelRoot || !rig.bones?.handR) {
+    return;
+  }
+
+  const bones = rig.bones;
+  const isVictory = Boolean(state.victoryPose);
+  const pitch = isVictory ? -0.14 : (state.pitch || 0);
+  const recoil = isVictory ? 0 : (rig.recoilKick || 0);
+  const isShort = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven', 'knife', 'karambit'].includes(rig.currentWeaponId);
+  const isMelee = rig.currentWeaponId === 'knife' || rig.currentWeaponId === 'karambit';
+
+  if (isVictory) {
+    rig.bodyRoot.rotation.y = Math.sin(timeSec * 0.75) * 0.08;
+  } else {
+    rig.bodyRoot.rotation.y = 0;
+  }
+
+  // Restore deterministic rest arm poses before full 1.0 solve so arms never fight keyframes or drift
+  if (rig.restArmQuats) {
+    for (const [k, q] of Object.entries(rig.restArmQuats)) {
+      if (bones[k]) bones[k].quaternion.copy(q);
+    }
+  }
+  rig.group.updateMatrixWorld(true);
+
+  // Convert bodyRoot-local aim vectors into world directions cleanly
+  const bodyWorldQ = _q0.clone();
+  rig.bodyRoot.getWorldQuaternion(bodyWorldQ);
+
+  // Gentle vertical pitch tilt on head preserving GLB rest quaternion across Mixamo/RPM/VRoid rigs
+  if (bones.head) {
+    if (!rig.mixer && rig.restHeadQuat) bones.head.quaternion.copy(rig.restHeadQuat);
+    const clampedPitch = Math.max(-0.50, Math.min(0.50, pitch));
+    const worldRight = _v0.copy(RIGHT_VEC).applyQuaternion(bodyWorldQ).normalize();
+    _q1.setFromAxisAngle(worldRight, clampedPitch * 0.35);
+    bones.head.getWorldQuaternion(_q2);
+    _q4.multiplyQuaternions(_q1, _q2);
+    if (bones.head.parent) {
+      bones.head.parent.getWorldQuaternion(_q3).invert();
+      _q4.premultiply(_q3);
+    }
+    bones.head.quaternion.copy(_q4);
+  }
+
+  const mountYaw = isVictory && !isShort ? 0.44 : 0.0;
+  const mountPitch = pitch + recoil * 0.42;
+
+  // Deterministic 2-bone tactical weapon grip solver (zero frame oscillation)
+  if (bones.upperArmR && bones.lowerArmR && bones.handR) {
+    const uRDir = isShort
+      ? new THREE.Vector3(0.28, -0.62 + recoil * 0.3, -0.73)
+      : (isVictory
+        ? new THREE.Vector3(0.32, -0.78, -0.54)
+        : new THREE.Vector3(0.28, -0.74 + pitch * 0.2, -0.61));
+    aimBoneSegmentWorld(bones.upperArmR, bones.lowerArmR, uRDir.applyQuaternion(bodyWorldQ), 1.0);
+
+    const lRDir = isShort
+      ? new THREE.Vector3(-0.20, 0.24 + pitch * 0.65 + recoil * 0.7, -0.95)
+      : (isVictory
+        ? new THREE.Vector3(-0.16, 0.26, -0.95)
+        : new THREE.Vector3(-0.28, 0.36 + pitch * 0.55 + recoil * 0.65, -0.89));
+    aimBoneSegmentWorld(bones.lowerArmR, bones.handR, lRDir.applyQuaternion(bodyWorldQ), 1.0);
+  }
+
+  if (bones.upperArmL && bones.lowerArmL && bones.handL && !isMelee) {
+    const uLDir = isShort
+      ? new THREE.Vector3(0.30, -0.58, -0.75)
+      : new THREE.Vector3(0.22, -0.64 + pitch * 0.2, -0.73);
+    aimBoneSegmentWorld(bones.upperArmL, bones.lowerArmL, uLDir.applyQuaternion(bodyWorldQ), 1.0);
+
+    const rHandW = new THREE.Vector3();
+    const lElbowW = new THREE.Vector3();
+    bones.handR.getWorldPosition(rHandW);
+    bones.lowerArmL.getWorldPosition(lElbowW);
+
+    const gunFwdLocal = new THREE.Vector3(
+      -Math.sin(mountYaw) * Math.cos(mountPitch),
+      Math.sin(mountPitch),
+      -Math.cos(mountYaw) * Math.cos(mountPitch)
+    ).normalize();
+    const fwdWorld = gunFwdLocal.applyQuaternion(bodyWorldQ);
+    const upWorld = new THREE.Vector3(0, 1, 0).applyQuaternion(bodyWorldQ);
+    const guardOffset = isShort ? 0.04 : 0.24;
+    const guardWorld = rHandW.clone()
+      .addScaledVector(fwdWorld, guardOffset)
+      .addScaledVector(upWorld, isShort ? -0.02 : 0.01);
+    aimBoneSegmentWorld(bones.lowerArmL, bones.handL, guardWorld.sub(lElbowW), 1.0);
+  }
+
+  // Sync weaponMount squarely inside HandR in bodyRoot uniform scale space
+  rig.group.updateMatrixWorld(true);
+  const handWorldPos = new THREE.Vector3();
+  bones.handR.getWorldPosition(handWorldPos);
+  rig.bodyRoot.worldToLocal(handWorldPos);
+  rig.weaponMount.position.copy(handWorldPos);
+  rig.weaponMount.rotation.set(mountPitch, mountYaw, 0);
+
+  // Sync scale-invariant bone-tracked tactical gear modules (NVG, vests, holsters, armor)
+  if (rig.tacticalMounts?.length) {
+    const bodyInvQ = _q3.copy(bodyWorldQ).invert();
+    for (const tm of rig.tacticalMounts) {
+      if (!tm.bone) continue;
+      tm.bone.getWorldPosition(_v0);
+      rig.bodyRoot.worldToLocal(_v0);
+      tm.bone.getWorldQuaternion(_q2);
+      _q2.premultiply(bodyInvQ);
+      _q0.multiplyQuaternions(_q2, tm.restBoneInvQ);
+      _v1.copy(tm.offsetFromBone).applyQuaternion(_q0).add(_v0);
+      tm.node.position.copy(_v1);
+      tm.node.quaternion.copy(_q0);
+    }
+  }
 }
 
 export function createC4Mesh() {

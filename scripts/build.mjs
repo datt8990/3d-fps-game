@@ -37,10 +37,22 @@ copyDirRecursive(path.join(ROOT, 'public'), DIST);
 // 2. Copy Shared Physics, Maps & GameRoomCore Engine -> dist/shared/
 copyDirRecursive(path.join(ROOT, 'shared'), path.join(DIST, 'shared'));
 
-// 3. Copy Local Vendor Bundles (Three.js & PeerJS WebRTC) -> dist/vendor/
+// 3. Copy Local Vendor Bundles (Three.js + GLTFLoader/SkeletonUtils & PeerJS WebRTC) -> dist/vendor/
 copySingleFile(
   path.join(ROOT, 'node_modules', 'three', 'build', 'three.module.min.js'),
   path.join(DIST, 'vendor', 'three', 'build', 'three.module.min.js')
+);
+copySingleFile(
+  path.join(ROOT, 'node_modules', 'three', 'examples', 'jsm', 'loaders', 'GLTFLoader.js'),
+  path.join(DIST, 'vendor', 'three', 'examples', 'jsm', 'loaders', 'GLTFLoader.js')
+);
+copySingleFile(
+  path.join(ROOT, 'node_modules', 'three', 'examples', 'jsm', 'utils', 'BufferGeometryUtils.js'),
+  path.join(DIST, 'vendor', 'three', 'examples', 'jsm', 'utils', 'BufferGeometryUtils.js')
+);
+copySingleFile(
+  path.join(ROOT, 'node_modules', 'three', 'examples', 'jsm', 'utils', 'SkeletonUtils.js'),
+  path.join(DIST, 'vendor', 'three', 'examples', 'jsm', 'utils', 'SkeletonUtils.js')
 );
 copySingleFile(
   path.join(ROOT, 'node_modules', 'peerjs', 'dist', 'peerjs.min.js'),

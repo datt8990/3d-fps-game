@@ -346,14 +346,14 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
 
   // 2. Balanced Three-Point Environment Lighting + Directional Sun Shadows
   const hemi = new THREE.HemisphereLight(
-    mapData.theme === 'urban_dusk' ? '#93c5fd' : '#f1f5f9',
-    mapData.theme === 'desert_military' ? '#785c38' : '#1e293b',
-    0.95
+    mapData.theme === 'urban_dusk' ? '#bfdbfe' : '#f8fafc',
+    mapData.theme === 'desert_military' ? '#8c6b42' : '#475569',
+    1.22
   );
   worldGroup.add(hemi);
 
   const sunColor = mapData.theme === 'urban_dusk' ? '#fed7aa' : (mapData.theme === 'desert_military' ? '#fef08a' : '#fffbeb');
-  const sun = new THREE.DirectionalLight(sunColor, 1.48);
+  const sun = new THREE.DirectionalLight(sunColor, 1.90);
   sun.position.set(38, 62, 30);
   if (quality !== 'low') {
     sun.castShadow = true;
@@ -370,8 +370,8 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   }
   worldGroup.add(sun);
 
-  // Subtle fill light from opposite horizon so shaded faces retain rich metallic detail
-  const fillLight = new THREE.DirectionalLight('#60a5fa', 0.35);
+  // Crisp horizon fill light so shaded sides of characters & gear keep sharp contrast
+  const fillLight = new THREE.DirectionalLight('#bae6fd', 0.78);
   fillLight.position.set(-35, 28, -30);
   worldGroup.add(fillLight);
 

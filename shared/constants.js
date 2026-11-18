@@ -180,8 +180,8 @@ export const OPERATORS = {
     id: 'shadow',
     name: 'SHADOW NVG',
     role: 'Điệp Viên Bóng Đêm',
-    perkLabel: '+5% Tốc chạy & Kính nhìn đêm 3 mắt',
-    desc: 'Đặc vụ tác chiến ngầm trang bị kính nhìn đêm 3 ống kính lục bảo, chuyên phục kích bất ngờ.',
+    perkLabel: '+5% Tốc chạy & Kính nhìn đêm GPNVG-18',
+    desc: 'Đặc vụ tác chiến ngầm mặc chiến giáp công nghệ tàng hình và kính nhìn đêm 4 mắt GPNVG-18 lục bảo, chuyên đột kích trong bóng tối.',
     speedMult: 1.05,
     maxArmor: 95,
     reloadBonus: 0.06,
@@ -229,6 +229,20 @@ export const OPERATORS = {
     regenPerSec: 0,
     helmetStyle: 'cyber_twintails',
     unlockCost: 550
+  },
+  kagura: {
+    id: 'kagura',
+    name: 'KAGURA (NỮ)',
+    gender: 'female',
+    role: 'Nữ Đặc Nhiệm Giáp Đen',
+    perkLabel: '+12 Giáp & +7% Tốc độ thay đạn',
+    desc: 'Nữ chiến binh đặc nhiệm phong cách Anime mặc chiến giáp đen, áo giáp chống đạn chiến thuật, găng tay carbon và kính chiến đấu.',
+    speedMult: 1.03,
+    maxArmor: 112,
+    reloadBonus: 0.07,
+    regenPerSec: 0,
+    helmetStyle: 'tactical_black',
+    unlockCost: 900
   }
 };
 

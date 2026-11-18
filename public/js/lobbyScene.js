@@ -1,22 +1,23 @@
 // Interactive 3D Military Hangar Showcase for Main Lobby, Operator Select & Weapon Armory
 import * as THREE from 'three';
-import { createOperatorRig, animateOperatorRig, createWeaponModel } from './models.js';
+import { createOperatorRig, animateOperatorRig, createWeaponModel, preloadCharacterModels } from './models.js';
 import { getStudioEnvMap } from './textures.js';
 
 export class LobbyShowcase {
   constructor(canvas) {
     this.canvas = canvas;
+    preloadCharacterModels();
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = 1.26;
 
     this.scene = new THREE.Scene();
     this.scene.environment = getStudioEnvMap();
-    this.scene.environmentIntensity = 0.9;
+    this.scene.environmentIntensity = 1.15;
     this.camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 60);
     this.camera.position.set(0, 1.35, 3.6);
     this.camera.lookAt(0, 1.05, 0);
@@ -40,20 +41,24 @@ export class LobbyShowcase {
   }
 
   setupStage() {
-    const hemi = new THREE.HemisphereLight('#93c5fd', '#0f172a', 1.05);
+    const hemi = new THREE.HemisphereLight('#e0f2fe', '#334155', 1.32);
     this.scene.add(hemi);
 
-    const keyLight = new THREE.DirectionalLight('#f8fafc', 1.85);
-    keyLight.position.set(3, 5, 4);
+    const keyLight = new THREE.DirectionalLight('#ffffff', 2.35);
+    keyLight.position.set(2.8, 5.2, 4.2);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(1024, 1024);
     this.scene.add(keyLight);
 
-    const rimCyan = new THREE.PointLight('#06b6d4', 2.8, 12);
+    const frontFill = new THREE.DirectionalLight('#f8fafc', 1.10);
+    frontFill.position.set(-1.5, 2.2, 4.4);
+    this.scene.add(frontFill);
+
+    const rimCyan = new THREE.PointLight('#38bdf8', 3.4, 12);
     rimCyan.position.set(-2.5, 2.2, -1.8);
     this.scene.add(rimCyan);
 
-    const rimAmber = new THREE.PointLight('#f97316', 2.2, 12);
+    const rimAmber = new THREE.PointLight('#fb923c', 2.6, 12);
     rimAmber.position.set(2.5, 1.5, -1.5);
     this.scene.add(rimAmber);
 
@@ -90,9 +95,9 @@ export class LobbyShowcase {
     this.outerRingMesh.position.y = -0.035;
     this.stageGroup.add(this.outerRingMesh);
 
-    // Background Hangar Pillars & Tactical Grid Floor
-    const grid = new THREE.GridHelper(18, 24, '#1e3a8a', '#0f172a');
-    grid.position.y = -0.14;
+    // Background Hangar Pillars & Subtle Tactical Grid Floor
+    const grid = new THREE.GridHelper(18, 24, '#0f294a', '#0a1426');
+    grid.position.y = -0.15;
     this.scene.add(grid);
 
     const pillarMat = new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.75, roughness: 0.35 });

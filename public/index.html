@@ -12,7 +12,8 @@
   <script type="importmap">
     {
       "imports": {
-        "three": "/vendor/three/build/three.module.min.js"
+        "three": "/vendor/three/build/three.module.min.js",
+        "three/addons/": "/vendor/three/examples/jsm/"
       }
     }
   </script>
@@ -321,12 +322,16 @@
     <!-- TAB 3: NHÂN VẬT (8 OPERATORS & 10 OUTFITS) -->
     <section id="tab-operators" class="tab-view hidden">
       <div class="side-panel-left glass-panel">
-        <div class="panel-tag">8 QUÂN NHÂN ĐẶC NHIỆM (NAM & NỮ)</div>
+        <div class="panel-tag">9 QUÂN NHÂN ĐẶC NHIỆM (NAM & NỮ)</div>
         <div id="operators-list" class="stack-list"></div>
       </div>
 
       <div class="home-center-hint">
-        <div class="drag-hint">⟲ Kéo chuột xoay xem Quân nhân, Mũ chiến thuật & Trang phục 3D</div>
+        <div class="drag-hint">⟲ Kéo chuột xoay xem Quân nhân, Mũ chiến thuật &amp; Trang phục 3D</div>
+        <div id="operator-center-actions" class="armory-center-actions glass-panel">
+          <button id="btn-action-operator" class="btn-primary btn-xl">✓ ĐANG DÙNG QUÂN NHÂN</button>
+          <button id="btn-action-outfit" class="btn-secondary btn-xl">✓ ĐANG MẶC TRANG PHỤC</button>
+        </div>
       </div>
 
       <div class="side-panel-right glass-panel">

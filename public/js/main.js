@@ -26,6 +26,11 @@ const state = {
   selectedQuickMap: 'warehouse',
   selectedArmorySubclass: 'all',
   selectedArmoryWeapon: 'ak47',
+  previewOperator: null,
+  previewOutfit: null,
+  previewWeaponSkins: {},
+  previewWeaponAttachments: {},
+  previewAttachmentSelection: null,
   currentRoom: null,
   roomsList: [],
   friendsList: [],
@@ -165,9 +170,12 @@ function refreshProfileUI() {
 function sync3DShowcase() {
   if (!state.user) return;
   const lo = state.user.loadout;
+  const viewOperator = (state.activeTab === 'operators' && state.previewOperator) ? state.previewOperator : lo.operator;
+  const viewOutfit = (state.activeTab === 'operators' && state.previewOutfit) ? state.previewOutfit : lo.outfit;
+
   lobbyShowcase.updateOperator({
-    operator: lo.operator,
-    outfit: lo.outfit,
+    operator: viewOperator,
+    outfit: viewOutfit,
     primary: lo.primary,
     skinId: lo.skins?.[lo.primary] || 'default',
     attachments: lo.attachments?.[lo.primary] || {},
@@ -175,10 +183,15 @@ function sync3DShowcase() {
   });
 
   const wId = state.selectedArmoryWeapon;
+  const viewSkinId = state.previewWeaponSkins[wId] || lo.skins?.[wId] || 'default';
+  const viewAttachments = {
+    ...(lo.attachments?.[wId] || { optic: 'iron', muzzle: 'none', mag: 'standard' }),
+    ...(state.previewWeaponAttachments[wId] || {})
+  };
   lobbyShowcase.updateWeapon({
     weaponId: wId,
-    skinId: lo.skins?.[wId] || 'default',
-    attachments: lo.attachments?.[wId] || {}
+    skinId: viewSkinId,
+    attachments: viewAttachments
   });
 }
 
@@ -219,8 +232,13 @@ function switchTab(tabId) {
     lobbyShowcase.setMode('weapon');
     renderArmoryTab();
   } else {
+    if (tabId !== 'operators') {
+      state.previewOperator = null;
+      state.previewOutfit = null;
+    }
     lobbyShowcase.setMode('operator');
   }
+  sync3DShowcase();
 
   if (tabId === 'rooms') {
     net.send({ type: 'list_rooms' });
@@ -263,20 +281,26 @@ function renderOperatorsTab() {
   const detailBox = document.getElementById('operator-detail-box');
   const outfitList = document.getElementById('outfits-list');
 
-  const currentOp = OPERATORS[u.loadout.operator] || OPERATORS.vanguard;
+  const viewOpId = state.previewOperator || u.loadout.operator;
+  const viewOutId = state.previewOutfit || u.loadout.outfit;
+  const currentOp = OPERATORS[viewOpId] || OPERATORS.vanguard;
+  const currentOut = OUTFITS[viewOutId] || OUTFITS.urban;
 
   if (opList) {
     opList.innerHTML = Object.values(OPERATORS).map((op) => {
       const unlocked = u.unlocked.operators.includes(op.id);
       const equipped = u.loadout.operator === op.id;
+      const previewing = viewOpId === op.id;
       const badge = equipped
         ? '<span class="item-badge equipped">ĐANG DÙNG</span>'
-        : (unlocked
-          ? '<span class="item-badge owned">TRANG BỊ</span>'
-          : `<span class="item-badge locked">◈ ${op.unlockCost} GP</span>`);
+        : (previewing
+          ? '<span class="item-badge previewing">ĐANG XEM</span>'
+          : (unlocked
+            ? '<span class="item-badge owned">ĐÃ SỞ HỮU</span>'
+            : `<span class="item-badge locked">◈ ${op.unlockCost} GP</span>`));
 
       return `
-        <button class="item-card ${equipped ? 'active' : ''}" data-op="${op.id}">
+        <button class="item-card ${previewing ? 'active' : ''} ${previewing && !equipped ? 'previewing' : ''}" data-op="${op.id}">
           <div>
             <div style="font-weight:700;">${op.name}</div>
             <div class="muted">${op.role}</div>
@@ -288,23 +312,29 @@ function renderOperatorsTab() {
     }).join('');
 
     opList.querySelectorAll('.item-card').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const opId = btn.dataset.op;
-        if (u.unlocked.operators.includes(opId)) {
-          const res = await apiCall('/api/loadout', 'POST', { operator: opId });
-          if (res.user) updateUserData(res.user, `Đã chọn quân nhân ${OPERATORS[opId].name}`);
-        } else {
-          const res = await apiCall('/api/unlock', 'POST', { category: 'operator', itemId: opId });
-          if (res.error) return showToast(res.error);
-          if (res.user) updateUserData(res.user, `Đã mở khóa & trang bị ${OPERATORS[opId].name}!`);
-        }
+      btn.addEventListener('click', () => {
+        state.previewOperator = btn.dataset.op;
+        soundEngine.playMetallicClick(920, 0.05, 0.2);
+        sync3DShowcase();
+        renderOperatorsTab();
       });
     });
   }
 
+  const opUnlocked = u.unlocked.operators.includes(viewOpId);
+  const opEquipped = u.loadout.operator === viewOpId;
+  const outUnlocked = u.unlocked.outfits.includes(viewOutId);
+  const outEquipped = u.loadout.outfit === viewOutId;
+
   if (detailBox) {
+    const statusText = opEquipped
+      ? '<span class="item-badge equipped">ĐANG DÙNG</span>'
+      : (opUnlocked ? '<span class="item-badge previewing">ĐANG XEM • CHƯA CHỌN</span>' : `<span class="item-badge locked">XEM TRƯỚC • ${currentOp.unlockCost} GP</span>`);
     detailBox.innerHTML = `
-      <div class="panel-tag">THÔNG SỐ QUÂN NHÂN: ${currentOp.name}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+        <div class="panel-tag" style="margin:0;">THÔNG SỐ: ${currentOp.name}</div>
+        ${statusText}
+      </div>
       <div style="font-size:12px;color:#facc15;font-weight:700;margin-bottom:4px;">Kỹ năng nội tại: ${currentOp.perkLabel}</div>
       <p class="muted" style="margin-bottom:10px;">${currentOp.desc}</p>
       <div class="stat-row">
@@ -326,14 +356,17 @@ function renderOperatorsTab() {
     outfitList.innerHTML = Object.values(OUTFITS).map((o) => {
       const unlocked = u.unlocked.outfits.includes(o.id);
       const equipped = u.loadout.outfit === o.id;
+      const previewing = viewOutId === o.id;
       const badge = equipped
         ? '<span class="item-badge equipped">ĐANG MẶC</span>'
-        : (unlocked
-          ? '<span class="item-badge owned">MẶC</span>'
-          : `<span class="item-badge locked">◈ ${o.cost} GP</span>`);
+        : (previewing
+          ? '<span class="item-badge previewing">ĐANG XEM</span>'
+          : (unlocked
+            ? '<span class="item-badge owned">ĐÃ SỞ HỮU</span>'
+            : `<span class="item-badge locked">◈ ${o.cost} GP</span>`));
 
       return `
-        <button class="item-card ${equipped ? 'active' : ''}" data-outfit="${o.id}">
+        <button class="item-card ${previewing ? 'active' : ''} ${previewing && !equipped ? 'previewing' : ''}" data-outfit="${o.id}">
           <div style="display:flex;align-items:center;gap:9px;">
             <span style="width:16px;height:16px;border-radius:4px;background:${o.primary};border:2px solid ${o.accent};"></span>
             <strong>${o.name}</strong>
@@ -344,18 +377,35 @@ function renderOperatorsTab() {
     }).join('');
 
     outfitList.querySelectorAll('.item-card').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const outId = btn.dataset.outfit;
-        if (u.unlocked.outfits.includes(outId)) {
-          const res = await apiCall('/api/loadout', 'POST', { outfit: outId });
-          if (res.user) updateUserData(res.user, `Đã mặc trang phục ${OUTFITS[outId].name}`);
-        } else {
-          const res = await apiCall('/api/unlock', 'POST', { category: 'outfit', itemId: outId });
-          if (res.error) return showToast(res.error);
-          if (res.user) updateUserData(res.user, `Đã mở khóa ${OUTFITS[outId].name}!`);
-        }
+      btn.addEventListener('click', () => {
+        state.previewOutfit = btn.dataset.outfit;
+        soundEngine.playUiTone(820, 0.05);
+        sync3DShowcase();
+        renderOperatorsTab();
       });
     });
+  }
+
+  const btnActionOp = document.getElementById('btn-action-operator');
+  if (btnActionOp) {
+    if (!opUnlocked) {
+      btnActionOp.textContent = `🔓 MUA & CHỌN ${currentOp.name} (${currentOp.unlockCost} GP)`;
+    } else if (opEquipped) {
+      btnActionOp.textContent = `✓ ĐANG DÙNG ${currentOp.name}`;
+    } else {
+      btnActionOp.textContent = `✓ CHỌN QUÂN NHÂN ${currentOp.name}`;
+    }
+  }
+
+  const btnActionOut = document.getElementById('btn-action-outfit');
+  if (btnActionOut) {
+    if (!outUnlocked) {
+      btnActionOut.textContent = `🔓 MUA & MẶC ${currentOut.name} (${currentOut.cost} GP)`;
+    } else if (outEquipped) {
+      btnActionOut.textContent = `✓ ĐANG MẶC ${currentOut.name}`;
+    } else {
+      btnActionOut.textContent = `👕 MẶC ${currentOut.name}`;
+    }
   }
 }
 
@@ -384,7 +434,8 @@ function renderArmoryTab() {
   const wId = state.selectedArmoryWeapon;
   const gun = WEAPONS[wId] || WEAPONS.ak47;
   const curAtt = u.loadout.attachments?.[wId] || { optic: 'iron', muzzle: 'none', mag: 'standard' };
-  const eff = getEffectiveWeaponStats(wId, curAtt, u.loadout.operator);
+  const viewAtt = { ...curAtt, ...(state.previewWeaponAttachments[wId] || {}) };
+  const eff = getEffectiveWeaponStats(wId, viewAtt, u.loadout.operator);
 
   // 2. Filtered Weapons List
   const gunListEl = document.getElementById('armory-weapons-list');
@@ -468,7 +519,7 @@ function renderArmoryTab() {
     `;
   }
 
-  // 4. Attachments Selector
+  // 4. Attachments Selector (Preview before Buy / Install)
   const attBox = document.getElementById('armory-attachments-box');
   if (attBox) {
     if (gun.isMelee) {
@@ -482,85 +533,169 @@ function renderArmoryTab() {
             { key: 'mag', label: 'Băng Đạn' }
           ];
 
-      attBox.innerHTML = slots.map((s) => {
-        const items = Object.values(ATTACHMENTS[s.key]);
-        return `
-          <div style="margin-bottom:9px;">
-            <div class="muted" style="margin-bottom:4px;font-weight:600;">${s.label}</div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;">
-              ${items.map((it) => {
-                const unlockKey = `${s.key}:${it.id}`;
-                const unlocked = u.unlocked.attachments.includes(unlockKey);
-                const active = curAtt[s.key] === it.id;
-                return `
-                  <button class="hud-slot-btn ${active ? 'active' : ''}" data-slot="${s.key}" data-item="${it.id}">
-                    ${it.name}<br/>
-                    <span style="font-size:10px;color:#facc15;">${unlocked ? (active ? 'Đang lắp' : 'Lắp') : `${it.cost} GP`}</span>
-                  </button>
-                `;
-              }).join('')}
-            </div>
+      const sel = (state.previewAttachmentSelection?.weaponId === wId && slots.some((s) => s.key === state.previewAttachmentSelection.slot))
+        ? state.previewAttachmentSelection
+        : { weaponId: wId, slot: slots[0].key, itemId: viewAtt[slots[0].key] || Object.keys(ATTACHMENTS[slots[0].key])[0] };
+
+      const selAtt = ATTACHMENTS[sel.slot]?.[sel.itemId];
+      const selUnlockKey = `${sel.slot}:${sel.itemId}`;
+      const selUnlocked = u.unlocked.attachments.includes(selUnlockKey);
+      const selEquipped = curAtt[sel.slot] === sel.itemId;
+      const hasAttPreviewDiff = slots.some((s) => viewAtt[s.key] !== curAtt[s.key]);
+
+      const actionLabel = !selUnlocked
+        ? `🔓 MUA & LẮP ${selAtt.name} (${selAtt.cost} GP)`
+        : (selEquipped ? `✓ ĐANG LẮP ${selAtt.name}` : `🔧 LẮP ${selAtt.name}`);
+
+      attBox.innerHTML = `
+        <div class="preview-action-bar">
+          <div class="preview-action-title">
+            <span>Đang xem: <strong style="color:#38bdf8;">${selAtt?.name || ''}</strong></span>
+            ${hasAttPreviewDiff ? '<button type="button" id="btn-reset-att-preview" class="voice-toggle-btn">↺ Hoàn tác xem</button>' : ''}
           </div>
-        `;
-      }).join('');
+          <button type="button" id="btn-confirm-attachment" class="${!selUnlocked || !selEquipped ? 'btn-primary' : 'btn-secondary'} btn-sm full-w">${actionLabel}</button>
+        </div>
+        ${slots.map((s) => {
+          const items = Object.values(ATTACHMENTS[s.key]);
+          return `
+            <div style="margin-bottom:9px;">
+              <div class="muted" style="margin-bottom:4px;font-weight:600;">${s.label}</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;">
+                ${items.map((it) => {
+                  const unlockKey = `${s.key}:${it.id}`;
+                  const unlocked = u.unlocked.attachments.includes(unlockKey);
+                  const active = curAtt[s.key] === it.id;
+                  const previewing = viewAtt[s.key] === it.id;
+                  const tagText = active
+                    ? 'Đang lắp'
+                    : (previewing ? 'Đang xem' : (unlocked ? 'Đã có' : `${it.cost} GP`));
+                  return `
+                    <button class="hud-slot-btn ${previewing ? 'active' : ''}" data-slot="${s.key}" data-item="${it.id}">
+                      ${it.name}<br/>
+                      <span style="font-size:10px;color:${active ? '#4ade80' : (previewing ? '#38bdf8' : '#facc15')};">${tagText}</span>
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      `;
 
       attBox.querySelectorAll('button[data-slot]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => {
           const slot = btn.dataset.slot;
           const itemId = btn.dataset.item;
-          const unlockKey = `${slot}:${itemId}`;
-          if (!u.unlocked.attachments.includes(unlockKey)) {
-            const un = await apiCall('/api/unlock', 'POST', { category: 'attachment', slot, itemId });
-            if (un.error) return showToast(un.error);
-            state.user = un.user;
-          }
-          const eq = await apiCall('/api/loadout', 'POST', {
-            weaponAttachment: { weaponId: wId, slot, itemId }
-          });
-          if (eq.user) updateUserData(eq.user, `Đã lắp ${ATTACHMENTS[slot][itemId].name}`);
+          if (!state.previewWeaponAttachments[wId]) state.previewWeaponAttachments[wId] = {};
+          state.previewWeaponAttachments[wId][slot] = itemId;
+          state.previewAttachmentSelection = { weaponId: wId, slot, itemId };
+          soundEngine.playMetallicClick(1020, 0.05, 0.2);
+          sync3DShowcase();
+          renderArmoryTab();
         });
       });
-    }
-  }
 
-  // 5. Weapon Skins Selector (8 Skins)
-  const skinList = document.getElementById('armory-skins-list');
-  if (skinList) {
-    const activeSkin = u.loadout.skins?.[wId] || 'default';
-    skinList.innerHTML = Object.values(WEAPON_SKINS).map((sk) => {
-      const unlocked = u.unlocked.skins.includes(sk.id);
-      const equipped = activeSkin === sk.id;
-      const badge = equipped
-        ? '<span class="item-badge equipped">ĐANG DÙNG</span>'
-        : (unlocked ? '<span class="item-badge owned">ÁP DỤNG</span>' : `<span class="item-badge locked">◈ ${sk.cost} GP</span>`);
+      attBox.querySelector('#btn-reset-att-preview')?.addEventListener('click', () => {
+        delete state.previewWeaponAttachments[wId];
+        state.previewAttachmentSelection = null;
+        sync3DShowcase();
+        renderArmoryTab();
+      });
 
-      return `
-        <button class="item-card ${equipped ? 'active' : ''}" data-skin="${sk.id}">
-          <div style="display:flex;align-items:center;gap:9px;">
-            <span style="width:16px;height:16px;border-radius:4px;background:${sk.bodyColor};border:2px solid ${sk.accentColor};"></span>
-            <div>
-              <div style="font-weight:700;">${sk.name}</div>
-              <div class="muted" style="color:${sk.rarityColor || '#94a3b8'};">${sk.rarity}</div>
-            </div>
-          </div>
-          ${badge}
-        </button>
-      `;
-    }).join('');
-
-    skinList.querySelectorAll('.item-card').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const skinId = btn.dataset.skin;
-        if (!u.unlocked.skins.includes(skinId)) {
-          const un = await apiCall('/api/unlock', 'POST', { category: 'skin', itemId: skinId });
+      attBox.querySelector('#btn-confirm-attachment')?.addEventListener('click', async () => {
+        if (!selAtt) return;
+        if (curAtt[sel.slot] === sel.itemId) return showToast(`Đang lắp sẵn ${selAtt.name} trên ${gun.name}!`);
+        if (!u.unlocked.attachments.includes(selUnlockKey)) {
+          const un = await apiCall('/api/unlock', 'POST', { category: 'attachment', slot: sel.slot, itemId: sel.itemId });
           if (un.error) return showToast(un.error);
           state.user = un.user;
         }
         const eq = await apiCall('/api/loadout', 'POST', {
-          weaponSkin: { weaponId: wId, skinId }
+          weaponAttachment: { weaponId: wId, slot: sel.slot, itemId: sel.itemId }
         });
-        if (eq.user) updateUserData(eq.user, `Đã trang bị skin ${WEAPON_SKINS[skinId].name}!`);
+        if (eq.user) {
+          if (state.previewWeaponAttachments[wId]) delete state.previewWeaponAttachments[wId][sel.slot];
+          updateUserData(eq.user, `Đã lắp ${selAtt.name} cho ${gun.name}!`);
+        }
       });
+    }
+  }
+
+  // 5. Weapon Skins Selector (Preview before Buy / Apply)
+  const skinList = document.getElementById('armory-skins-list');
+  if (skinList) {
+    const activeSkin = u.loadout.skins?.[wId] || 'default';
+    const viewSkinId = state.previewWeaponSkins[wId] || activeSkin;
+    const viewSk = WEAPON_SKINS[viewSkinId] || WEAPON_SKINS.default;
+    const viewSkUnlocked = u.unlocked.skins.includes(viewSkinId);
+    const viewSkEquipped = activeSkin === viewSkinId;
+
+    const skinActionText = !viewSkUnlocked
+      ? `🔓 MUA & ÁP DỤNG ${viewSk.name} (${viewSk.cost} GP)`
+      : (viewSkEquipped ? `✓ ĐANG DÙNG ${viewSk.name}` : `🎨 ÁP DỤNG SKIN ${viewSk.name}`);
+
+    skinList.innerHTML = `
+      <div class="preview-action-bar">
+        <div class="preview-action-title">
+          <span>Skin đang xem: <strong style="color:${viewSk.rarityColor || '#38bdf8'};">${viewSk.name}</strong></span>
+          ${!viewSkEquipped ? '<button type="button" id="btn-reset-skin-preview" class="voice-toggle-btn">↺ Hoàn tác</button>' : ''}
+        </div>
+        <button type="button" id="btn-confirm-skin" class="${!viewSkUnlocked || !viewSkEquipped ? 'btn-primary' : 'btn-secondary'} btn-sm full-w">${skinActionText}</button>
+      </div>
+      ${Object.values(WEAPON_SKINS).map((sk) => {
+        const unlocked = u.unlocked.skins.includes(sk.id);
+        const equipped = activeSkin === sk.id;
+        const previewing = viewSkinId === sk.id;
+        const badge = equipped
+          ? '<span class="item-badge equipped">ĐANG DÙNG</span>'
+          : (previewing
+            ? '<span class="item-badge previewing">ĐANG XEM</span>'
+            : (unlocked ? '<span class="item-badge owned">ĐÃ SỞ HỮU</span>' : `<span class="item-badge locked">◈ ${sk.cost} GP</span>`));
+
+        return `
+          <button class="item-card ${previewing ? 'active' : ''} ${previewing && !equipped ? 'previewing' : ''}" data-skin="${sk.id}">
+            <div style="display:flex;align-items:center;gap:9px;">
+              <span style="width:16px;height:16px;border-radius:4px;background:${sk.bodyColor};border:2px solid ${sk.accentColor};"></span>
+              <div>
+                <div style="font-weight:700;">${sk.name}</div>
+                <div class="muted" style="color:${sk.rarityColor || '#94a3b8'};">${sk.rarity}</div>
+              </div>
+            </div>
+            ${badge}
+          </button>
+        `;
+      }).join('')}
+    `;
+
+    skinList.querySelectorAll('.item-card').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.previewWeaponSkins[wId] = btn.dataset.skin;
+        soundEngine.playUiTone(880, 0.05);
+        sync3DShowcase();
+        renderArmoryTab();
+      });
+    });
+
+    skinList.querySelector('#btn-reset-skin-preview')?.addEventListener('click', () => {
+      delete state.previewWeaponSkins[wId];
+      sync3DShowcase();
+      renderArmoryTab();
+    });
+
+    skinList.querySelector('#btn-confirm-skin')?.addEventListener('click', async () => {
+      if (activeSkin === viewSkinId) return showToast(`Đang dùng sẵn skin ${viewSk.name}!`);
+      if (!u.unlocked.skins.includes(viewSkinId)) {
+        const un = await apiCall('/api/unlock', 'POST', { category: 'skin', itemId: viewSkinId });
+        if (un.error) return showToast(un.error);
+        state.user = un.user;
+      }
+      const eq = await apiCall('/api/loadout', 'POST', {
+        weaponSkin: { weaponId: wId, skinId: viewSkinId }
+      });
+      if (eq.user) {
+        delete state.previewWeaponSkins[wId];
+        updateUserData(eq.user, `Đã trang bị skin ${viewSk.name}!`);
+      }
     });
   }
 }
@@ -1354,6 +1489,55 @@ function bindUIEvents() {
     if (!input || !input.value.trim()) return;
     net.send({ type: 'room_chat', text: input.value.trim(), scope: 'all' });
     input.value = '';
+  });
+
+  // Operator & Outfit Confirm Buy/Equip Buttons (Preview-Before-Buy)
+  document.getElementById('btn-action-operator')?.addEventListener('click', async () => {
+    if (!state.user) return;
+    const opId = state.previewOperator || state.user.loadout.operator;
+    const op = OPERATORS[opId];
+    if (!op) return;
+    if (state.user.loadout.operator === opId && state.user.unlocked.operators.includes(opId)) {
+      return showToast(`Bạn đang sử dụng quân nhân ${op.name}.`);
+    }
+    if (!state.user.unlocked.operators.includes(opId)) {
+      const res = await apiCall('/api/unlock', 'POST', { category: 'operator', itemId: opId });
+      if (res.error) return showToast(res.error);
+      if (res.user) {
+        state.previewOperator = null;
+        updateUserData(res.user, `Đã mở khóa & chọn quân nhân ${op.name}!`);
+      }
+      return;
+    }
+    const res = await apiCall('/api/loadout', 'POST', { operator: opId });
+    if (res.user) {
+      state.previewOperator = null;
+      updateUserData(res.user, `Đã chọn quân nhân ${op.name}`);
+    }
+  });
+
+  document.getElementById('btn-action-outfit')?.addEventListener('click', async () => {
+    if (!state.user) return;
+    const outId = state.previewOutfit || state.user.loadout.outfit;
+    const out = OUTFITS[outId];
+    if (!out) return;
+    if (state.user.loadout.outfit === outId && state.user.unlocked.outfits.includes(outId)) {
+      return showToast(`Bạn đang mặc trang phục ${out.name}.`);
+    }
+    if (!state.user.unlocked.outfits.includes(outId)) {
+      const res = await apiCall('/api/unlock', 'POST', { category: 'outfit', itemId: outId });
+      if (res.error) return showToast(res.error);
+      if (res.user) {
+        state.previewOutfit = null;
+        updateUserData(res.user, `Đã mở khóa & mặc ${out.name}!`);
+      }
+      return;
+    }
+    const res = await apiCall('/api/loadout', 'POST', { outfit: outId });
+    if (res.user) {
+      state.previewOutfit = null;
+      updateUserData(res.user, `Đã mặc trang phục ${out.name}`);
+    }
   });
 
   // Armory Unlock / Equip Button

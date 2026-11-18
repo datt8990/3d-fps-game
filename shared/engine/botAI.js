@@ -25,7 +25,8 @@ const BOT_LOADOUTS = [
   { operator: 'phoenix', outfit: 'crimson', primary: 'famas', secondary: 'deagle', melee: 'knife', skin: 'magma_core' },
   { operator: 'valkyrie', outfit: 'jungle', primary: 'galil', secondary: 'usps', melee: 'knife', skin: 'imperial_jade' },
   { operator: 'ghost', outfit: 'desert', primary: 'ump45', secondary: 'magnum', melee: 'knife', skin: 'default' },
-  { operator: 'shadow', outfit: 'cyber', primary: 'kar98k', secondary: 'glock18', melee: 'karambit', skin: 'crimson_web' }
+  { operator: 'shadow', outfit: 'stealth_ops', primary: 'kar98k', secondary: 'glock18', melee: 'karambit', skin: 'crimson_web' },
+  { operator: 'kagura', outfit: 'urban', primary: 'scarh', secondary: 'fiveseven', melee: 'karambit', skin: 'neon_cyber' }
 ];
 
 const DIFFICULTY_PRESETS = {
