@@ -1,0 +1,21 @@
+{
+  "name": "fps-online-battle-strike",
+  "version": "2.0.0",
+  "description": "FPS ONLINE - BATTLE STRIKE: Full-Stack 3D Browser Multiplayer FPS (Local WS + Vercel Cloud WebRTC P2P)",
+  "type": "module",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "peerjs": "^1.5.5",
+    "three": "^0.170.0",
+    "ws": "^8.18.0"
+  }
+}

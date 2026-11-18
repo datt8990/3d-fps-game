@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FPS ONLINE – BATTLE STRIKE v2.0 | 3D Multiplayer Tactical Shooter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=Chakra+Petch:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles/main.css" />
+  <script src="/vendor/peerjs/peerjs.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three/build/three.module.min.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- 3D WebGL Canvases -->
+  <canvas id="lobby-canvas"></canvas>
+  <canvas id="game-canvas" style="display:none;"></canvas>
+
+  <!-- Toast & Squad Invite Popup -->
+  <div id="toast-container"></div>
+  <div id="invite-popup" class="invite-popup glass-panel hidden">
+    <div class="invite-title">⚡ LỜI MỜI TỔ ĐỘI CHIẾN ĐẤU</div>
+    <div id="invite-desc" class="invite-desc">Chiến binh mời bạn vào phòng đấu!</div>
+    <div class="row-gap" style="margin-top:8px;">
+      <button id="btn-accept-invite" class="btn-primary btn-sm">Tham Gia Ngay</button>
+      <button id="btn-decline-invite" class="btn-secondary btn-sm">Bỏ Qua</button>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- 1. AUTH / CALLSIGN MODAL                                              -->
+  <!-- ===================================================================== -->
+  <div id="auth-overlay" class="modal-backdrop">
+    <div class="auth-card glass-panel">
+      <div class="brand-emblem">⚡ FPS ONLINE • V2.0 CLOUD & LOCAL</div>
+      <h1 class="auth-title">BATTLE STRIKE</h1>
+      <p class="auth-sub">Đấu Trường Bắn Súng Góc Nhìn Thứ Nhất 3D • Ghép Trận Cùng Bạn Bè</p>
+      <form id="auth-form">
+        <label class="field-label">Tên Chiến Binh (Callsign)</label>
+        <input id="auth-username" type="text" maxlength="18" placeholder="VD: SoiDem_VN, XaThu_99..." required />
+        <label class="field-label">Mật Khẩu Bảo Vệ Tài Khoản <span class="muted">(Tùy chọn)</span></label>
+        <input id="auth-password" type="password" maxlength="32" placeholder="Để trống nếu muốn vào chơi nhanh" />
+        <div id="auth-error" class="error-banner hidden"></div>
+        <button type="submit" class="btn-primary btn-xl full-w pulse-glow" style="margin-top:14px;">
+          ▶ VÀO CHIẾN TRƯỜNG NGAY
+        </button>
+      </form>
+      <div class="auth-features">
+        <span>12 Vũ Khí 3D</span> • <span>6 Quân Nhân</span> • <span>Ghép Phòng Bạn Bè</span> • <span>Vercel Ready</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- 2. MAIN LOBBY SHELL (5 TABS + FRIEND DRAWER)                          -->
+  <!-- ===================================================================== -->
+  <div id="lobby-shell" class="hidden">
+    <!-- Top Esports Header -->
+    <header class="topbar glass-panel">
+      <div class="brand-box">
+        <span class="brand-badge">BS</span>
+        <div>
+          <div class="brand-title">BATTLE STRIKE <span class="v-tag">2.0</span></div>
+          <div id="top-transport-mode" class="brand-caption">ONLINE MULTIPLAYER</div>
+        </div>
+      </div>
+
+      <nav class="main-nav">
+        <button class="nav-btn active" data-tab="home">SẢNH CHÍNH</button>
+        <button class="nav-btn" data-tab="rooms">PHÒNG ĐẤU & BẠN BÈ</button>
+        <button class="nav-btn" data-tab="operators">NHÂN VẬT (6)</button>
+        <button class="nav-btn" data-tab="armory">KHO VŨ KHÍ (12)</button>
+        <button class="nav-btn" data-tab="ranked">XẾP HẠNG</button>
+      </nav>
+
+      <div class="profile-strip">
+        <div class="net-pill">
+          <span class="dot-online"></span>
+          <span id="top-online-count">1 Online</span> • <span id="top-ping">14ms</span>
+        </div>
+        <div class="gp-pill" title="Điểm Chiến Công GP dùng mở khóa Súng, Phụ kiện, Nhân vật & Skin">
+          <span class="gp-icon">◈</span>
+          <span id="top-gp">4,500</span> GP
+        </div>
+        <div class="user-pill">
+          <span id="top-rank-badge" class="rank-mini">II</span>
+          <div>
+            <div id="top-username" class="user-name">Chiến Binh</div>
+            <div id="top-rank-text" class="user-rank">Bạc Đoàn • 1200 RP</div>
+          </div>
+        </div>
+        <button id="btn-toggle-friends" class="btn-secondary btn-sm" title="Mở Danh sách Bạn bè & Tổ đội">
+          👥 Bạn Bè
+        </button>
+        <button id="btn-open-settings" class="icon-btn" title="Cài đặt Đồ họa & Chuột">⚙</button>
+        <button id="btn-logout" class="icon-btn" title="Đổi Tài Khoản">⇄</button>
+      </div>
+    </header>
+
+    <!-- FRIEND & SQUAD SLIDE-OVER DRAWER -->
+    <aside id="friends-drawer" class="friends-drawer glass-panel hidden">
+      <div class="panel-header-row" style="margin-bottom:8px;">
+        <div>
+          <div class="panel-tag" style="margin-bottom:2px;">TỔ ĐỘI & BẠN BÈ ONLINE</div>
+          <div class="muted">Mã kết bạn của bạn: <strong id="my-friend-code" style="color:#facc15;">VN-0000</strong></div>
+        </div>
+        <button id="btn-close-friends" class="icon-btn">✕</button>
+      </div>
+
+      <form id="add-friend-form" class="chat-input-row" style="margin-bottom:10px;">
+        <input id="add-friend-input" type="text" maxlength="20" placeholder="Nhập Tên hoặc Mã VN-xxxx..." />
+        <button type="submit" class="btn-primary btn-sm">+ Kết Bạn</button>
+      </form>
+
+      <div class="panel-tag">VÀO NHANH BẰNG MÃ PHÒNG BẠN BÈ</div>
+      <form id="drawer-join-code-form" class="chat-input-row" style="margin-bottom:12px;">
+        <input id="drawer-room-code-input" type="text" maxlength="10" placeholder="Nhập Mã Phòng (VD: BS1001)..." />
+        <button type="submit" class="btn-primary btn-sm">Vào Ngay</button>
+      </form>
+
+      <div class="panel-tag">DANH SÁCH BẠN BÈ</div>
+      <div id="friends-list-box" class="stack-list" style="flex:1;overflow-y:auto;"></div>
+    </aside>
+
+    <!-- TAB 1: SẢNH CHÍNH (HOME + QUICK PLAY + CODE JOIN + GLOBAL CHAT) -->
+    <section id="tab-home" class="tab-view active">
+      <div class="home-left glass-panel">
+        <div class="panel-tag">CHỌN CHẾ ĐỘ CHIẾN ĐẤU</div>
+        <div id="quick-mode-list" class="mode-cards"></div>
+
+        <div class="panel-tag" style="margin-top:10px;">CHỌN BẢN ĐỒ 3D</div>
+        <select id="quick-map-select" class="tactical-select"></select>
+
+        <button id="btn-quick-play" class="btn-primary btn-xl full-w pulse-glow" style="margin-top:12px;">
+          ▶ TÌM TRẬN / BẮT ĐẦU NGAY
+        </button>
+
+        <div class="two-col" style="margin-top:8px;">
+          <button id="btn-go-rooms" class="btn-secondary full-w">☰ Tạo Phòng Bạn Bè</button>
+          <button id="btn-practice-range" class="btn-secondary full-w">🔫 Phòng Tập Thử Súng</button>
+        </div>
+      </div>
+
+      <div class="home-center-hint">
+        <div class="quick-code-bar glass-panel">
+          <span>🔗 Có Mã Phòng của bạn bè?</span>
+          <input id="home-room-code-input" type="text" maxlength="10" placeholder="VD: BS1001" style="width:120px;padding:6px 10px;" />
+          <button id="btn-home-join-code" class="btn-primary btn-sm">Vào Phòng</button>
+        </div>
+
+        <div class="center-bottom-group">
+          <div class="drag-hint">⟲ Kéo chuột để xoay Quân nhân 3D</div>
+          <div id="home-loadout-summary" class="loadout-chip glass-panel"></div>
+        </div>
+      </div>
+
+      <div class="home-right">
+        <div class="controls-card glass-panel">
+          <div class="panel-tag">PHÍM TẮT CHIẾN THUẬT</div>
+          <div class="key-grid">
+            <div><kbd>WASD</kbd> Di chuyển</div>
+            <div><kbd>Shift</kbd> Chạy nhanh</div>
+            <div><kbd>Space</kbd> Nhảy</div>
+            <div><kbd>Ctrl / C</kbd> Ngồi nấp</div>
+            <div><kbd>Chuột Trái</kbd> Bắn</div>
+            <div><kbd>Chuột Phải</kbd> Ngắm ADS / Scope</div>
+            <div><kbd>1 / 2 / 3</kbd> Đổi vũ khí</div>
+            <div><kbd>G</kbd> Ném Lựu Đạn Nổ</div>
+            <div><kbd>R</kbd> Nạp đạn</div>
+            <div><kbd>E</kbd> Đặt / Gỡ bom C4</div>
+            <div><kbd>B</kbd> Đổi súng nhanh</div>
+            <div><kbd>Z</kbd> Radio Tổ Đội</div>
+          </div>
+        </div>
+
+        <div class="chat-card glass-panel">
+          <div class="panel-tag">KÊNH CHAT SẢNH CHUNG & TÌM ĐỒNG ĐỘI</div>
+          <div id="global-chat-log" class="chat-log"></div>
+          <form id="global-chat-form" class="chat-input-row">
+            <input id="global-chat-input" type="text" maxlength="140" placeholder="Rủ bạn bè hoặc gửi Mã Phòng..." />
+            <button type="submit" class="btn-primary btn-sm">Gửi</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: PHÒNG ĐẤU & GHÉP TRẬN BẠN BÈ -->
+    <section id="tab-rooms" class="tab-view hidden">
+      <!-- Room Browser View -->
+      <div id="room-browser-panel" class="full-panel glass-panel">
+        <div class="panel-header-row">
+          <div>
+            <h2 class="section-title">PHÒNG ĐẤU ONLINE & GHÉP TRẬN BẠN BÈ</h2>
+            <p class="muted">Tạo phòng lấy <strong>Mã Phòng 6 ký tự</strong> hoặc <strong>Link Mời</strong> gửi cho bạn bè vào bắn chung ngay lập tức!</p>
+          </div>
+          <div class="row-gap">
+            <input id="browser-code-input" type="text" maxlength="10" placeholder="Nhập Mã Phòng (VD: BS1001)..." style="width:210px;" />
+            <button id="btn-browser-join-code" class="btn-secondary">Vào Bằng Mã</button>
+            <button id="btn-refresh-rooms" class="btn-secondary">↻ Làm mới</button>
+            <button id="btn-open-create-room" class="btn-primary pulse-glow">+ TẠO PHÒNG CÙNG BẠN BÈ</button>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table class="tactical-table">
+            <thead>
+              <tr>
+                <th>Mã Phòng</th>
+                <th>Tên Phòng Đấu</th>
+                <th>Chế Độ</th>
+                <th>Bản Đồ</th>
+                <th>Quân Số</th>
+                <th>Trạng Thái</th>
+                <th>Hành Động</th>
+              </tr>
+            </thead>
+            <tbody id="rooms-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Inside Room Waiting Lobby View -->
+      <div id="room-waiting-panel" class="full-panel glass-panel hidden">
+        <div class="panel-header-row">
+          <div class="row-gap">
+            <span id="room-lobby-badge" class="mode-pill">5v5</span>
+            <h2 id="room-lobby-title" class="section-title">Phòng Đấu</h2>
+            <div class="room-code-box">
+              <span>MÃ PHÒNG:</span>
+              <strong id="room-lobby-code">#BS1001</strong>
+            </div>
+          </div>
+          <div class="row-gap">
+            <button id="btn-copy-room-code" class="btn-secondary">📋 Sao Chép Mã</button>
+            <button id="btn-copy-invite-link" class="btn-primary">🔗 Copy Link Mời Bạn Bè</button>
+            <button id="btn-switch-team" class="btn-secondary">⇄ Đổi Đội Alpha/Bravo</button>
+            <button id="btn-leave-room" class="btn-danger">✕ Rời Phòng</button>
+          </div>
+        </div>
+
+        <div class="room-lobby-grid">
+          <div class="teams-columns">
+            <div class="team-box alpha-box">
+              <div class="team-box-header">ĐỘI ALPHA (ĐẶC NHIỆM)</div>
+              <div id="room-team-alpha" class="roster-list"></div>
+            </div>
+            <div class="team-box bravo-box">
+              <div class="team-box-header">ĐỘI BRAVO (LÍNH ĐÁNH THUÊ)</div>
+              <div id="room-team-bravo" class="roster-list"></div>
+            </div>
+          </div>
+
+          <div class="room-side-controls">
+            <div class="room-settings-box">
+              <div class="panel-tag">THIẾT LẬP PHÒNG ĐẤU</div>
+              <div class="two-col">
+                <div>
+                  <label class="field-label">Chế độ chơi</label>
+                  <select id="room-edit-mode" class="tactical-select"></select>
+                </div>
+                <div>
+                  <label class="field-label">Bản đồ 3D</label>
+                  <select id="room-edit-map" class="tactical-select"></select>
+                </div>
+              </div>
+              <label class="field-label">Độ khó AI Bot hỗ trợ</label>
+              <select id="room-edit-botdiff" class="tactical-select">
+                <option value="easy">Dễ (Tập luyện)</option>
+                <option value="normal" selected>Thường (Cân bằng)</option>
+                <option value="hard">Khó (Xạ thủ tinh nhuệ)</option>
+              </select>
+              <label class="checkbox-row">
+                <input id="room-edit-fillbots" type="checkbox" checked />
+                <span>Tự động lấp đầy vị trí trống bằng AI Bot</span>
+              </label>
+              <button id="btn-start-match" class="btn-primary btn-xl full-w pulse-glow" style="margin-top:12px;">
+                ⚡ BẮT ĐẦU TRẬN ĐẤU
+              </button>
+            </div>
+
+            <div class="room-chat-box">
+              <div class="panel-tag">CHAT PHÒNG ĐẤU</div>
+              <div id="room-chat-log" class="chat-log"></div>
+              <form id="room-chat-form" class="chat-input-row">
+                <input id="room-chat-input" type="text" maxlength="140" placeholder="Nhập tin nhắn phòng..." />
+                <button type="submit" class="btn-primary btn-sm">Gửi</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: NHÂN VẬT (6 OPERATORS & 8 OUTFITS) -->
+    <section id="tab-operators" class="tab-view hidden">
+      <div class="side-panel-left glass-panel">
+        <div class="panel-tag">6 QUÂN NHÂN ĐẶC NHIỆM</div>
+        <div id="operators-list" class="stack-list"></div>
+      </div>
+
+      <div class="home-center-hint">
+        <div class="drag-hint">⟲ Kéo chuột xoay xem Quân nhân, Mũ chiến thuật & Trang phục 3D</div>
+      </div>
+
+      <div class="side-panel-right glass-panel">
+        <div id="operator-detail-box"></div>
+        <div class="panel-tag" style="margin-top:14px;">8 TRANG PHỤC NGỤY TRANG (OUTFITS)</div>
+        <div id="outfits-list" class="stack-list"></div>
+      </div>
+    </section>
+
+    <!-- TAB 4: KHO VŨ KHÍ (12 WEAPONS, SUBCLASS FILTER, ATTACHMENTS & 8 SKINS) -->
+    <section id="tab-armory" class="tab-view hidden">
+      <div class="side-panel-left glass-panel">
+        <div class="panel-tag">PHÂN LOẠI VŨ KHÍ (12 KHẨU)</div>
+        <div id="armory-subclass-tabs" class="subclass-pills"></div>
+        <div id="armory-weapons-list" class="stack-list" style="margin-top:8px;flex:1;overflow-y:auto;"></div>
+      </div>
+
+      <div class="home-center-hint">
+        <div class="drag-hint">⟲ Kéo chuột xoay 360° xem Súng, Phụ kiện & Skin 3D</div>
+        <div class="armory-center-actions glass-panel">
+          <button id="btn-equip-weapon" class="btn-primary btn-xl">TRANG BỊ VÀO BALO</button>
+          <button id="btn-test-weapon-range" class="btn-secondary btn-xl">🔫 THỬ SÚNG NÀY TRONG PHÒNG TẬP</button>
+        </div>
+      </div>
+
+      <div class="side-panel-right glass-panel">
+        <div class="panel-tag">THÔNG SỐ KỸ THUẬT</div>
+        <div class="weapon-stats-card" id="armory-stats-box"></div>
+
+        <div class="panel-tag" style="margin-top:12px;">PHỤ KIỆN NÂNG CẤP (ATTACHMENTS)</div>
+        <div id="armory-attachments-box"></div>
+
+        <div class="panel-tag" style="margin-top:12px;">8 SKIN VŨ KHÍ ĐẶC BIỆT</div>
+        <div id="armory-skins-list" class="stack-list"></div>
+      </div>
+    </section>
+
+    <!-- TAB 5: XẾP HẠNG (RANKED LEADERBOARD & CAREER STATS) -->
+    <section id="tab-ranked" class="tab-view hidden">
+      <div class="ranked-layout">
+        <div class="career-card glass-panel">
+          <div class="panel-tag">HỒ SƠ CHIẾN TÍCH CÁ NHÂN</div>
+          <div id="career-rank-summary"></div>
+          <div class="panel-tag" style="margin-top:16px;">LỊCH SỬ TRẬN ĐẤU GẦN ĐÂY</div>
+          <div id="career-history-list" class="history-list"></div>
+        </div>
+
+        <div class="leaderboard-card glass-panel">
+          <div class="panel-header-row">
+            <div>
+              <h2 class="section-title">BẢNG XẾP HẠNG HUYỀN THOẠI</h2>
+              <p class="muted">Thi đấu chế độ Đấu Rank 5v5 để tích lũy RP từ Đồng Đoàn tới Huyền Thoại</p>
+            </div>
+            <button id="btn-queue-ranked" class="btn-primary pulse-glow">★ ĐẤU RANK NGAY</button>
+          </div>
+          <div class="table-scroll">
+            <table class="tactical-table">
+              <thead>
+                <tr>
+                  <th>Hạng</th>
+                  <th>Chiến Binh</th>
+                  <th>Bậc Rank</th>
+                  <th>Điểm RP</th>
+                  <th>K / D</th>
+                  <th>Thắng / Trận</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- CREATE ROOM MODAL -->
+  <div id="create-room-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-panel">
+      <h3 class="section-title">TẠO PHÒNG ĐẤU CÙNG BẠN BÈ</h3>
+      <form id="create-room-form">
+        <label class="field-label">Tên Phòng Đấu</label>
+        <input id="cr-name" type="text" maxlength="30" placeholder="Phòng Bắn Giao Hữu 5v5" required />
+
+        <label class="field-label">Chế Độ Chơi</label>
+        <select id="cr-mode" class="tactical-select"></select>
+
+        <label class="field-label">Bản Đồ Chiến Đấu 3D</label>
+        <select id="cr-map" class="tactical-select"></select>
+
+        <div class="two-col">
+          <div>
+            <label class="field-label">Số Người Tối Đa</label>
+            <select id="cr-max" class="tactical-select">
+              <option value="10" selected>10 Chiến binh (5v5)</option>
+              <option value="8">8 Chiến binh (4v4 / FFA)</option>
+              <option value="6">6 Chiến binh (3v3)</option>
+              <option value="2">2 Chiến binh (1v1 Solo Bạn Bè)</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Độ Khó AI Bot</label>
+            <select id="cr-botdiff" class="tactical-select">
+              <option value="easy">Dễ</option>
+              <option value="normal" selected>Thường</option>
+              <option value="hard">Khó</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="checkbox-row" style="margin-top:10px;">
+          <input id="cr-fillbots" type="checkbox" checked />
+          <span>Tự động thêm AI Bot vào chỗ trống (Tắt nếu chỉ muốn bắn 1v1 cùng bạn bè)</span>
+        </label>
+
+        <div class="row-gap" style="margin-top:16px;justify-content:flex-end;">
+          <button type="button" id="btn-cancel-create-room" class="btn-secondary">Hủy</button>
+          <button type="submit" class="btn-primary">Tạo Phòng & Lấy Mã</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-panel">
+      <h3 class="section-title">CÀI ĐẶT HỆ THỐNG & HIỆU NĂNG</h3>
+      <label class="field-label">Độ Nhạy Chuột (Mouse Sensitivity): <span id="lbl-sens">50%</span></label>
+      <input id="set-sens" type="range" min="0.1" max="1.0" step="0.05" value="0.5" class="full-w" />
+
+      <label class="field-label">Âm Lượng Súng & Hiệu Ứng: <span id="lbl-vol">75%</span></label>
+      <input id="set-vol" type="range" min="0" max="1" step="0.05" value="0.75" class="full-w" />
+
+      <label class="field-label">Chất Lượng Đồ Họa 3D</label>
+      <select id="set-quality" class="tactical-select">
+        <option value="high" selected>Cao (Đổ bóng mềm + Độ phân giải sắc nét)</option>
+        <option value="medium">Trung Bình (Cân bằng FPS)</option>
+        <option value="low">Thấp (Tối ưu tối đa cho máy yếu)</option>
+      </select>
+
+      <div class="row-gap" style="margin-top:18px;justify-content:flex-end;">
+        <button id="btn-close-settings" class="btn-primary">Lưu & Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- 3. IN-MATCH TACTICAL HUD                                              -->
+  <!-- ===================================================================== -->
+  <div id="match-hud" class="hidden">
+    <!-- Red/Purple Damage Vignette -->
+    <div id="hud-damage-vignette" class="damage-vignette hidden"></div>
+
+    <!-- Sniper Dual-Zoom Reticle Overlay -->
+    <div id="sniper-scope-overlay" class="sniper-scope hidden">
+      <div class="scope-circle">
+        <div class="scope-line-h"></div>
+        <div class="scope-line-v"></div>
+        <div class="scope-center-dot"></div>
+      </div>
+    </div>
+
+    <!-- Top Left: Rotating Radar Minimap + FPS/Ping + Room Code -->
+    <div class="hud-top-left">
+      <canvas id="minimap-canvas" width="172" height="172"></canvas>
+      <div id="hud-fps-ping" class="hud-fps-ping">FPS: 60 | PING: 14ms</div>
+      <div id="hud-room-code" class="hud-fps-ping" style="color:#facc15;"></div>
+    </div>
+
+    <!-- Top Center: Two-Team Scoreboard, Match Timer & Kill Streak Banner -->
+    <div class="hud-top-center">
+      <div class="score-strip glass-hud">
+        <div class="team-score alpha">
+          <span id="hud-label-alpha" class="ts-label">ALPHA</span>
+          <span id="hud-score-alpha" class="ts-num">0</span>
+        </div>
+        <div class="timer-center">
+          <div id="hud-match-timer" class="match-clock">05:00</div>
+          <div id="hud-mode-sub" class="mode-sub">ĐẤU ĐỘI 5V5</div>
+        </div>
+        <div class="team-score bravo">
+          <span id="hud-score-bravo" class="ts-num">0</span>
+          <span id="hud-label-bravo" class="ts-label">BRAVO</span>
+        </div>
+      </div>
+      <div id="hud-bomb-banner" class="bomb-alert-banner hidden"></div>
+      <div id="hud-streak-banner" class="streak-banner hidden"></div>
+    </div>
+
+    <!-- Top Right: Kill Feed & Leave Button -->
+    <div class="hud-top-right">
+      <button id="btn-leave-match" class="hud-exit-btn" title="Rời trận về sảnh">✕ Rời Trận</button>
+      <div id="hud-killfeed" class="killfeed-list"></div>
+    </div>
+
+    <!-- Center Screen: Dynamic Crosshair, Hitmarker, Round Banner, Lock Prompt -->
+    <div id="hud-crosshair" class="crosshair">
+      <span class="ch-blade ch-top"></span>
+      <span class="ch-blade ch-bottom"></span>
+      <span class="ch-blade ch-left"></span>
+      <span class="ch-blade ch-right"></span>
+      <span class="ch-dot"></span>
+    </div>
+    <div id="hud-hitmarker" class="hitmarker hidden"></div>
+    <div id="hud-hit-dmg" class="hit-dmg-float hidden">-36</div>
+
+    <div id="hud-round-banner" class="hud-round-banner hidden"></div>
+
+    <div id="hud-lock-prompt" class="lock-prompt">
+      🎯 Nhấp chuột khóa tâm ngắm • <kbd>G</kbd> Lựu đạn • <kbd>B</kbd> Kho súng • <kbd>Z</kbd> Radio • <kbd>ESC</kbd> Mở chuột
+    </div>
+
+    <!-- Radio Quick Callouts Menu [Z] -->
+    <div id="hud-radio-menu" class="radio-menu glass-hud hidden">
+      <div class="panel-tag">RADIO CHIẾN THUẬT [Z]</div>
+      <div><kbd>1</kbd> ⚡ Tấn công Khu A ngay!</div>
+      <div><kbd>2</kbd> ⚡ Tập hợp đánh Khu B!</div>
+      <div><kbd>3</kbd> ⚠ Phát hiện kẻ địch phía trước!</div>
+      <div><kbd>4</kbd> 🛡 Cần đồng đội chi viện!</div>
+      <div><kbd>5</kbd> 🎯 Giữ vững vị trí phòng thủ!</div>
+      <div><kbd>6</kbd> 🔥 Bắn đỉnh lắm đồng đội!</div>
+    </div>
+
+    <!-- Contextual [E] Bomb Plant/Defuse Hint & Progress Bar -->
+    <div id="hud-interact-hint" class="interact-hint hidden"></div>
+    <div id="hud-bomb-progress-wrap" class="bomb-progress-wrap hidden">
+      <div id="hud-bomb-progress-label" class="bomb-progress-label">ĐANG ĐẶT BOM C4...</div>
+      <div class="bomb-progress-track">
+        <div id="hud-bomb-progress-fill" class="bomb-progress-fill"></div>
+      </div>
+    </div>
+
+    <!-- Respawn Overlay -->
+    <div id="hud-respawn-overlay" class="respawn-banner hidden">
+      <div class="respawn-title">BẠN ĐÃ BỊ HẠ GỤC</div>
+      <div id="hud-respawn-sec" class="respawn-sub">Hồi sinh sau 3.0s...</div>
+    </div>
+
+    <!-- Bottom Left: Health, Armor & In-Match Chat -->
+    <div class="hud-bottom-left">
+      <div class="ingame-chat-panel">
+        <div id="ingame-chat-messages" class="ingame-chat-messages"></div>
+        <form id="ingame-chat-form" class="ingame-chat-form hidden">
+          <input id="ingame-chat-input" type="text" maxlength="120" placeholder="Nhấn Enter để gửi tin nhắn..." />
+        </form>
+      </div>
+
+      <div class="vitals-box glass-hud">
+        <div class="vital-row">
+          <span class="vital-tag hp">✚ MÁU</span>
+          <div class="vital-bar-bg">
+            <div id="hud-hp-bar" class="vital-bar-fill hp" style="width:100%"></div>
+          </div>
+          <span id="hud-hp-val" class="vital-num">100</span>
+        </div>
+        <div class="vital-row">
+          <span class="vital-tag armor">🛡 GIÁP</span>
+          <div class="vital-bar-bg">
+            <div id="hud-armor-bar" class="vital-bar-fill armor" style="width:100%"></div>
+          </div>
+          <span id="hud-armor-val" class="vital-num">100</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Right: Ammo, Grenades, Reload Progress, Weapon Slots & Action Buttons -->
+    <div class="hud-bottom-right">
+      <div id="hud-reload-wrap" class="reload-bar-wrap hidden">
+        <span>ĐANG NẠP ĐẠN...</span>
+        <div class="reload-track"><div id="hud-reload-fill" class="reload-fill"></div></div>
+      </div>
+
+      <div class="ammo-box glass-hud">
+        <div class="ammo-top">
+          <div>
+            <span id="hud-weapon-name" class="weapon-title">AK-47</span>
+            <span class="grenade-badge" title="Nhấn phím G để ném Lựu đạn nổ">💣 <strong id="hud-grenade-count">1</strong> <kbd>G</kbd></span>
+          </div>
+          <div class="ammo-numbers">
+            <span id="hud-ammo-mag" class="ammo-mag">30</span>
+            <span id="hud-ammo-res" class="ammo-res">/ 90</span>
+          </div>
+        </div>
+        <div class="weapon-slots-row">
+          <button class="hud-slot-btn active" data-slot="1"><kbd>1</kbd> <span id="hud-slot1-name">AK-47</span></button>
+          <button class="hud-slot-btn" data-slot="2"><kbd>2</kbd> <span id="hud-slot2-name">Desert Eagle</span></button>
+          <button class="hud-slot-btn" data-slot="3"><kbd>3</kbd> <span id="hud-slot3-name">M9 Bayonet</span></button>
+        </div>
+        <div class="hud-action-btns">
+          <button id="hud-btn-reload" class="hud-mini-btn"><kbd>R</kbd> Nạp Đạn</button>
+          <button id="hud-btn-grenade" class="hud-mini-btn"><kbd>G</kbd> Ném Lựu Đạn</button>
+          <button id="hud-btn-swap-primary" class="hud-mini-btn"><kbd>B</kbd> Kho Súng</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-Game [B] Expanded Tactical Arsenal Selector Modal -->
+    <div id="ingame-weapon-modal" class="modal-backdrop hidden">
+      <div class="modal-card glass-panel" style="width:min(680px,94vw);">
+        <h3 class="section-title">KHO VŨ KHÍ TÁC CHIẾN TRONG TRẬN <kbd>B</kbd></h3>
+        <p class="muted">Đổi súng tức thì trong Phòng Tập hoặc 10s đầu hồi sinh (ngoài thời gian đó sẽ áp dụng ở lần hồi sinh kế tiếp).</p>
+        <div id="ingame-buy-grid" class="buy-weapons-grid two-col"></div>
+        <button id="btn-close-buy-modal" class="btn-secondary full-w" style="margin-top:14px;">Đóng (Quay lại chiến đấu)</button>
+      </div>
+    </div>
+
+    <!-- Tab Scoreboard Overlay -->
+    <div id="hud-scoreboard" class="scoreboard-overlay hidden">
+      <div class="scoreboard-card glass-panel">
+        <h3 class="section-title">BẢNG ĐIỂM TRẬN ĐẤU</h3>
+        <table class="tactical-table">
+          <thead>
+            <tr>
+              <th>Chiến Binh</th>
+              <th>Đội</th>
+              <th>Hạ (K)</th>
+              <th>Nằm (D)</th>
+              <th>Hỗ Trợ (A)</th>
+              <th>Điểm</th>
+            </tr>
+          </thead>
+          <tbody id="hud-scoreboard-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- 4. POST-MATCH SUMMARY & REWARDS MODAL                                 -->
+  <!-- ===================================================================== -->
+  <div id="postmatch-modal" class="modal-backdrop hidden">
+    <div class="postmatch-card glass-panel">
+      <div id="pm-outcome-badge" class="pm-badge win">CHIẾN THẮNG</div>
+      <h2 id="pm-subtitle" class="pm-sub">ALPHA 40 - 28 BRAVO</h2>
+      <div id="pm-rewards-row" class="pm-rewards"></div>
+      <div id="pm-mvp-box" class="pm-mvp"></div>
+
+      <div class="table-scroll" style="max-height:240px;margin-top:12px;">
+        <table class="tactical-table">
+          <thead>
+            <tr>
+              <th>Chiến Binh</th>
+              <th>Đội</th>
+              <th>K</th>
+              <th>D</th>
+              <th>A</th>
+              <th>Headshot</th>
+              <th>Điểm</th>
+            </tr>
+          </thead>
+          <tbody id="pm-scoreboard-body"></tbody>
+        </table>
+      </div>
+
+      <div class="row-gap" style="margin-top:16px;justify-content:center;">
+        <button id="btn-pm-rematch" class="btn-primary btn-xl">⚡ CHƠI TIẾP TRONG PHÒNG</button>
+        <button id="btn-pm-lobby" class="btn-secondary btn-xl">Về Sảnh Chính</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
