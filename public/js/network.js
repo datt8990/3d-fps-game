@@ -6,28 +6,8 @@ import { GameRoomCore, generateRoomCode } from '/shared/engine/gameRoomCore.js';
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: 'stun:stun.relay.metered.ca:80' },
-  {
-    urls: 'turn:global.relay.metered.ca:80',
-    username: 'e8dd65b92f6212101d3b9286',
-    credential: '8W7f5d2H4tQ8wQ+3'
-  },
-  {
-    urls: 'turn:global.relay.metered.ca:80?transport=tcp',
-    username: 'e8dd65b92f6212101d3b9286',
-    credential: '8W7f5d2H4tQ8wQ+3'
-  },
-  {
-    urls: 'turn:global.relay.metered.ca:443',
-    username: 'e8dd65b92f6212101d3b9286',
-    credential: '8W7f5d2H4tQ8wQ+3'
-  },
-  {
-    urls: 'turns:global.relay.metered.ca:443?transport=tcp',
-    username: 'e8dd65b92f6212101d3b9286',
-    credential: '8W7f5d2H4tQ8wQ+3'
-  }
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' }
 ];
 
 function makeSessionClientId() {
@@ -57,6 +37,10 @@ export class NetworkClient {
 
     this.clientPeer = null;
     this.hostConn = null; // DataConnection to remote host
+
+    // Direct WebRTC DataChannels signaled over /api/relay (Zero PeerJS broker dependency!)
+    this.rtcPeers = new Map(); // playerId -> { pc, relDc, fastDc, ready, pendingIce }
+    this.clientRtc = null;     // { pc, relDc, fastDc, ready, pendingIce }
 
     // Cloud HTTP Room Relay (100% reliable fallback & fast join across any NAT/Firewall)
     this.relayClientIds = new Set();
@@ -220,6 +204,8 @@ export class NetworkClient {
     this.pingTimer = setInterval(() => {
       if (this.transportMode === 'ws' && this.ws?.readyState === WebSocket.OPEN && !this.hostConn?.open && !this.relayRoomCode) {
         this.ws.send(JSON.stringify({ type: 'ping_check', clientSentAt: performance.now(), lastRtt: this.pingMs }));
+      } else if (this.clientRtc?.ready && this.sendViaRtc(this.clientRtc, { type: 'ping_check', clientSentAt: performance.now() })) {
+        // Direct WebRTC ping sent
       } else if (this.hostConn?.open) {
         this.hostConn.send({ type: 'ping_check', clientSentAt: performance.now() });
       } else if (this.hostRoom) {
@@ -236,7 +222,25 @@ export class NetworkClient {
     }
   }
 
+  sendViaRtc(entry, payload) {
+    if (!entry) return false;
+    const isVolatile = payload?.type === 'world_state' || payload?.type === 'input';
+    const dc = (isVolatile && entry.fastDc?.readyState === 'open')
+      ? entry.fastDc
+      : (entry.relDc?.readyState === 'open' ? entry.relDc : null);
+    if (!dc) return false;
+    try {
+      dc.send(JSON.stringify(payload));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   sendToRemoteHost(obj) {
+    if (this.clientRtc?.ready && this.sendViaRtc(this.clientRtc, obj)) {
+      return;
+    }
     if (this.hostConn?.open) {
       this.hostConn.send(obj);
       return;
@@ -251,7 +255,7 @@ export class NetworkClient {
     }
 
     this.clientRelayOutbox.push(obj);
-    this.scheduleClientRelay(12);
+    this.scheduleClientRelay(10);
   }
 
   // Unified Outgoing Command Dispatcher (Identical API for WS & P2P!)
@@ -259,8 +263,8 @@ export class NetworkClient {
     if (this.transportMode === 'ws') {
       if (this.hostConn?.open || this.relayRoomCode) {
         if (obj.type === 'leave_room') {
-          if (this.relayRoomCode && !this.hostConn?.open) {
-            this.clientRelayOutbox.push({ type: 'p2p_leave' });
+          if (this.relayRoomCode) {
+            this.sendToRemoteHost({ type: 'p2p_leave' });
             this.flushClientRelayOnce().catch(() => {});
           }
           this.cleanupP2PSession().then(() => {
@@ -390,12 +394,19 @@ export class NetworkClient {
 
   enqueueHostRelay(targetId, payload) {
     if (!this.hostRoom || !targetId) return;
+    if (payload?.type === 'world_state') {
+      const idx = this.relayOutbox.findIndex((x) => x.to === targetId && x.payload?.type === 'world_state');
+      if (idx >= 0) {
+        this.relayOutbox[idx].payload = payload;
+        return;
+      }
+    }
     this.relayOutbox.push({ to: targetId, payload });
     if (this.relayOutbox.length > 260) {
       this.relayOutbox.splice(0, this.relayOutbox.length - 260);
     }
     if (payload?.type && payload.type !== 'world_state') {
-      this.scheduleHostRelay(12);
+      this.scheduleHostRelay(10);
     }
   }
 
@@ -409,7 +420,7 @@ export class NetworkClient {
         return;
       }
     }
-    const wait = delayMs !== null ? delayMs : (this.hostRoom.status === 'playing' ? 65 : 260);
+    const wait = delayMs !== null ? delayMs : (this.hostRoom.status === 'playing' ? 28 : 240);
     this.hostRelayTimer = setTimeout(() => {
       this.hostRelayTimer = null;
       this.flushHostRelayOnce();
@@ -443,13 +454,85 @@ export class NetworkClient {
     } finally {
       this.hostRelayInFlight = false;
       if (this.hostRoom === activeRoom) {
-        this.scheduleHostRelay(this.relayOutbox.length ? 15 : null);
+        this.scheduleHostRelay(this.relayOutbox.length ? 12 : null);
       }
+    }
+  }
+
+  async handleHostDirectRtcOffer(fromId, sdp) {
+    if (!window.RTCPeerConnection || !this.hostRoom) return;
+    const existing = this.rtcPeers.get(fromId);
+    if (existing?.pc) {
+      try { existing.pc.close(); } catch {}
+    }
+
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 });
+    const entry = { pc, relDc: null, fastDc: null, ready: false, pendingIce: [] };
+    this.rtcPeers.set(fromId, entry);
+
+    const bindChannel = (dc) => {
+      if (dc.label === 'bs_fast') entry.fastDc = dc;
+      else entry.relDc = dc;
+
+      dc.onopen = () => {
+        if (dc.label !== 'bs_fast') {
+          entry.ready = true;
+        }
+      };
+      dc.onmessage = (ev) => {
+        if (!this.hostRoom) return;
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (!msg || typeof msg.type !== 'string') return;
+        if (msg.type === 'ping_check') {
+          this.sendViaRtc(entry, { type: 'pong_check', clientSentAt: msg.clientSentAt });
+          return;
+        }
+        this.handleRelayHostIncomingPacket(fromId, msg);
+      };
+      dc.onclose = () => {
+        if (dc === entry.relDc) entry.ready = false;
+      };
+    };
+
+    pc.ondatachannel = (ev) => bindChannel(ev.channel);
+    pc.onicecandidate = (ev) => {
+      if (ev.candidate && this.hostRoom) {
+        this.enqueueHostRelay(fromId, { type: 'rtc_ice', candidate: ev.candidate });
+      }
+    };
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      for (const c of entry.pendingIce.splice(0)) {
+        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+      }
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      this.enqueueHostRelay(fromId, { type: 'rtc_answer', sdp: pc.localDescription });
+    } catch (err) {
+      console.warn('Host Direct RTC offer error:', err);
     }
   }
 
   handleRelayHostIncomingPacket(fromId, msg) {
     if (!fromId || !msg || typeof msg.type !== 'string' || !this.hostRoom) return;
+
+    if (msg.type === 'rtc_offer' && msg.sdp) {
+      this.handleHostDirectRtcOffer(fromId, msg.sdp);
+      return;
+    }
+    if (msg.type === 'rtc_ice' && msg.candidate) {
+      const entry = this.rtcPeers.get(fromId);
+      if (entry?.pc) {
+        if (entry.pc.remoteDescription) {
+          entry.pc.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(() => {});
+        } else {
+          entry.pendingIce.push(msg.candidate);
+        }
+      }
+      return;
+    }
 
     if (msg.type === 'p2p_hello') {
       if (this.hostRoom.combatants.has(fromId)) {
@@ -482,6 +565,11 @@ export class NetworkClient {
 
     if (msg.type === 'p2p_leave') {
       this.relayClientIds.delete(fromId);
+      const rtc = this.rtcPeers.get(fromId);
+      if (rtc) {
+        try { rtc.pc.close(); } catch {}
+        this.rtcPeers.delete(fromId);
+      }
       if (!this.peerConns.get(fromId)?.open) {
         this.hostRoom.removeHumanPlayer(fromId);
       }
@@ -518,6 +606,10 @@ export class NetworkClient {
             this.handleIncomingHostLoopback(payload);
             return;
           }
+          const rtc = this.rtcPeers.get(targetId);
+          if (rtc?.ready && this.sendViaRtc(rtc, payload)) {
+            return;
+          }
           const c = this.peerConns.get(targetId);
           if (c?.open) {
             c.send(payload);
@@ -527,11 +619,14 @@ export class NetworkClient {
         },
         broadcast: (payload) => {
           this.handleIncomingHostLoopback(payload);
-          for (const c of this.peerConns.values()) {
-            if (c?.open) c.send(payload);
+          for (const [cid, rtc] of this.rtcPeers.entries()) {
+            if (rtc?.ready) this.sendViaRtc(rtc, payload);
+          }
+          for (const [cid, c] of this.peerConns.entries()) {
+            if (c?.open && !this.rtcPeers.get(cid)?.ready) c.send(payload);
           }
           for (const cid of this.relayClientIds) {
-            if (!this.peerConns.get(cid)?.open) {
+            if (!this.rtcPeers.get(cid)?.ready && !this.peerConns.get(cid)?.open) {
               this.enqueueHostRelay(cid, payload);
             }
           }
@@ -553,34 +648,9 @@ export class NetworkClient {
     this.emit('joined_room', { room: this.hostRoom.getLobbyPayload() });
     this.startPingLoop();
 
-    // Start Cloud Room Relay + PeerJS Broker so friends on ANY network can join reliably!
+    // Start Cloud Room Relay + Direct WebRTC Signaling over /api/relay
     if (options.mode !== 'practice') {
       this.flushHostRelayOnce();
-
-      if (window.Peer) {
-        try {
-          this.hostPeer = new window.Peer(peerHostId, {
-            config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }
-          });
-          this.hostPeer.on('open', () => {
-            this.publishRoomHeartbeat();
-          });
-          this.hostPeer.on('connection', (conn) => {
-            this.setupIncomingFriendConnection(conn);
-          });
-          this.hostPeer.on('disconnected', () => {
-            if (this.hostRoom && this.hostPeer && !this.hostPeer.destroyed) {
-              try { this.hostPeer.reconnect(); } catch {}
-            }
-          });
-          this.hostPeer.on('error', (err) => {
-            console.warn('PeerJS Host notice (Relay remains active):', err?.type || err);
-          });
-        } catch (err) {
-          console.warn('PeerJS Host warning:', err);
-        }
-      }
-
       this.hostHeartbeatTimer = setInterval(() => this.publishRoomHeartbeat(), 10000);
       this.publishRoomHeartbeat();
     }
@@ -699,11 +769,52 @@ export class NetworkClient {
         return;
       }
     }
-    const wait = delayMs !== null ? delayMs : (this.inP2PMatch ? 65 : 260);
+    const wait = delayMs !== null ? delayMs : (this.inP2PMatch ? 28 : 240);
     this.clientRelayTimer = setTimeout(() => {
       this.clientRelayTimer = null;
       this.flushClientRelayOnce();
     }, wait);
+  }
+
+  async handleClientIncomingP2PMessage(msg) {
+    if (!msg?.type) return;
+    if (msg.type === 'pong_check') {
+      this.pingMs = Math.max(2, Math.round(performance.now() - (msg.clientSentAt || performance.now())));
+      this.emit('ping_updated', { pingMs: this.pingMs, onlineCount: this.onlineCount });
+      return;
+    }
+    if (msg.type === 'rtc_answer' && msg.sdp && this.clientRtc?.pc) {
+      try {
+        await this.clientRtc.pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        for (const c of this.clientRtc.pendingIce.splice(0)) {
+          await this.clientRtc.pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Client RTC answer error:', err);
+      }
+      return;
+    }
+    if (msg.type === 'rtc_ice' && msg.candidate && this.clientRtc?.pc) {
+      if (this.clientRtc.pc.remoteDescription) {
+        this.clientRtc.pc.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(() => {});
+      } else {
+        this.clientRtc.pendingIce.push(msg.candidate);
+      }
+      return;
+    }
+    if (msg.type === 'joined_room' || msg.type === 'match_started') {
+      this.relayJoinedOnce = true;
+      if (this._joinGuardTimer) {
+        clearTimeout(this._joinGuardTimer);
+        this._joinGuardTimer = null;
+      }
+    }
+    if (msg.type === 'match_started') this.inP2PMatch = true;
+    if (msg.type === 'match_ended') {
+      this.inP2PMatch = false;
+      await this.submitCloudMatchReward(msg);
+    }
+    this.emit(msg.type, msg);
   }
 
   async flushClientRelayOnce(onFailFallback = null) {
@@ -740,16 +851,7 @@ export class NetworkClient {
 
       if (Array.isArray(res?.packets)) {
         for (const msg of res.packets) {
-          if (!msg?.type) continue;
-          if (msg.type === 'joined_room' || msg.type === 'match_started') {
-            this.relayJoinedOnce = true;
-          }
-          if (msg.type === 'match_started') this.inP2PMatch = true;
-          if (msg.type === 'match_ended') {
-            this.inP2PMatch = false;
-            await this.submitCloudMatchReward(msg);
-          }
-          this.emit(msg.type, msg);
+          await this.handleClientIncomingP2PMessage(msg);
         }
       }
     } catch {
@@ -760,8 +862,63 @@ export class NetworkClient {
     } finally {
       this.clientRelayInFlight = false;
       if (this.relayRoomCode === code && !this.p2pDirectReady) {
-        this.scheduleClientRelay(this.clientRelayOutbox.length ? 15 : null);
+        this.scheduleClientRelay(this.clientRelayOutbox.length ? 12 : null);
       }
+    }
+  }
+
+  async startClientDirectRtc(cleanCode) {
+    if (!window.RTCPeerConnection || this.relayRoomCode !== cleanCode) return;
+    try {
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 });
+      const relDc = pc.createDataChannel('bs_rel', { ordered: true });
+      const fastDc = pc.createDataChannel('bs_fast', { ordered: false, maxRetransmits: 0 });
+      const entry = { pc, relDc, fastDc, ready: false, pendingIce: [] };
+      this.clientRtc = entry;
+
+      const onMsg = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        this.handleClientIncomingP2PMessage(msg);
+      };
+
+      relDc.onmessage = onMsg;
+      fastDc.onmessage = onMsg;
+      relDc.onopen = () => {
+        if (this.relayRoomCode !== cleanCode || this.clientRtc !== entry) return;
+        entry.ready = true;
+        this.p2pDirectReady = true;
+        this.relayJoinedOnce = true;
+        if (this._joinGuardTimer) {
+          clearTimeout(this._joinGuardTimer);
+          this._joinGuardTimer = null;
+        }
+        this.sendViaRtc(entry, { type: 'ping_check', clientSentAt: performance.now() });
+        this.startPingLoop();
+      };
+      relDc.onclose = () => {
+        entry.ready = false;
+        if (this.clientRtc === entry) {
+          this.p2pDirectReady = false;
+          if (this.relayRoomCode === cleanCode) this.scheduleClientRelay(12);
+        }
+      };
+
+      pc.onicecandidate = (ev) => {
+        if (ev.candidate && this.relayRoomCode === cleanCode && this.clientRtc === entry && !entry.ready) {
+          this.clientRelayOutbox.push({ type: 'rtc_ice', candidate: ev.candidate });
+          this.scheduleClientRelay(12);
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      if (this.relayRoomCode === cleanCode) {
+        this.clientRelayOutbox.push({ type: 'rtc_offer', sdp: pc.localDescription });
+        this.scheduleClientRelay(10);
+      }
+    } catch (err) {
+      console.warn('Direct WebRTC upgrade skipped (Cloud Relay active):', err);
     }
   }
 
@@ -785,6 +942,7 @@ export class NetworkClient {
       }
     ];
     this.flushClientRelayOnce(onFailFallback);
+    this.startClientDirectRtc(cleanCode);
 
     const joinGuardTimer = setTimeout(() => {
       if (!this.relayJoinedOnce && !this.p2pDirectReady && this.relayRoomCode === cleanCode) {
@@ -794,85 +952,6 @@ export class NetworkClient {
       }
     }, 10000);
     this._joinGuardTimer = joinGuardTimer;
-
-    // Also attempt direct WebRTC upgrade via PeerJS in the background (optional speedup)
-    if (!window.Peer) return;
-    const peerHostId = `bstrike_v2_${cleanCode}`;
-    try {
-      this.clientPeer = new window.Peer({
-        config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }
-      });
-
-      this.clientPeer.on('open', () => {
-        if (!this.clientPeer || this.relayRoomCode !== cleanCode) return;
-        const conn = this.clientPeer.connect(peerHostId, { reliable: true });
-        this.hostConn = conn;
-
-        conn.on('open', () => {
-          if (this.relayRoomCode !== cleanCode) {
-            try { conn.close(); } catch {}
-            return;
-          }
-          this.p2pDirectReady = true;
-          this.relayJoinedOnce = true;
-          clearTimeout(joinGuardTimer);
-          conn.send({
-            type: 'p2p_hello',
-            clientId: this.clientId,
-            user: {
-              id: this.currentUser?.id,
-              username: this.currentUser?.username,
-              loadout: this.currentUser?.loadout,
-              rp: this.currentUser?.rp
-            }
-          });
-          this.startPingLoop();
-        });
-
-        conn.on('data', async (msg) => {
-          if (!msg?.type) return;
-          if (msg.type === 'pong_check') {
-            this.pingMs = Math.max(2, Math.round(performance.now() - (msg.clientSentAt || performance.now())));
-            this.emit('ping_updated', { pingMs: this.pingMs, onlineCount: this.onlineCount });
-            return;
-          }
-          if (msg.type === 'joined_room' || msg.type === 'match_started') {
-            this.relayJoinedOnce = true;
-          }
-          if (msg.type === 'match_started') this.inP2PMatch = true;
-          if (msg.type === 'match_ended') {
-            this.inP2PMatch = false;
-            await this.submitCloudMatchReward(msg);
-          }
-          this.emit(msg.type, msg);
-        });
-
-        conn.on('close', () => {
-          this.p2pDirectReady = false;
-          this.hostConn = null;
-          // If relay session is still active, seamlessly keep playing via Cloud Relay; otherwise exit
-          if (this.relayRoomCode === cleanCode) {
-            this.scheduleClientRelay(15);
-          } else {
-            this.inP2PMatch = false;
-            this.cleanupP2PSession();
-            this.emit('left_room', { rooms: [] });
-          }
-        });
-      });
-
-      this.clientPeer.on('error', (err) => {
-        // Never kill the active Cloud Relay session if only PeerJS/WebRTC NAT failed!
-        console.warn('PeerJS optional upgrade notice (Cloud Relay active):', err?.type || err);
-        if (this.hostConn) {
-          try { this.hostConn.close(); } catch {}
-          this.hostConn = null;
-        }
-        this.p2pDirectReady = false;
-      });
-    } catch (err) {
-      console.warn('PeerJS init warning:', err);
-    }
   }
 
   async submitCloudMatchReward(matchEndedMsg) {
@@ -930,6 +1009,15 @@ export class NetworkClient {
     this.relayClientIds.clear();
     this.relayOutbox = [];
     this.clientRelayOutbox = [];
+
+    for (const rtc of this.rtcPeers.values()) {
+      try { rtc.pc.close(); } catch {}
+    }
+    this.rtcPeers.clear();
+    if (this.clientRtc) {
+      try { this.clientRtc.pc.close(); } catch {}
+      this.clientRtc = null;
+    }
 
     if (this.hostHeartbeatTimer) {
       clearInterval(this.hostHeartbeatTimer);

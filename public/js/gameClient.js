@@ -369,6 +369,7 @@ export class FPSGameClient {
     this.modeConfig = payload.modeConfig;
     this.latestBomb = null;
     this.latestStorm = payload.storm || null;
+    this.lastWorldStateAt = 0;
 
     this.hud.setRoomCode(payload.room?.code || '');
 
@@ -806,6 +807,8 @@ export class FPSGameClient {
 
   onWorldState(msg) {
     if (!this.active) return;
+    if (msg.t && this.lastWorldStateAt && msg.t < this.lastWorldStateAt) return;
+    if (msg.t) this.lastWorldStateAt = msg.t;
     this.lastSnapshotPlayers = msg.players || [];
     this.latestBomb = msg.bomb || null;
     this.latestStorm = msg.storm || this.latestStorm;
@@ -877,6 +880,8 @@ export class FPSGameClient {
           isAlly,
           rig,
           current: { x: ps.x, y: ps.y, z: ps.z, yaw: ps.yaw, pitch: ps.pitch },
+          pred: { x: ps.x, y: ps.y, z: ps.z },
+          predAge: 0,
           target: { ...ps }
         };
         this.remoteEntities.set(ps.id, ent);
@@ -884,7 +889,15 @@ export class FPSGameClient {
         if (ps.w && ps.w !== ent.rig.currentWeaponId) {
           swapRigWeapon(ent.rig, ps.w, ent.meta.skins?.[ps.w] || 'default', ent.meta.attachments?.[ps.w] || {});
         }
+        const wasDead = Boolean(ent.target?.dead);
         ent.target = { ...ps };
+        ent.pred = { x: ps.x, y: ps.y, z: ps.z };
+        ent.predAge = 0;
+        if ((wasDead && !ps.dead) || Math.hypot(ps.x - ent.current.x, ps.z - ent.current.z) > 8.5) {
+          ent.current.x = ps.x;
+          ent.current.y = ps.y;
+          ent.current.z = ps.z;
+        }
       }
     }
 
@@ -1110,7 +1123,10 @@ export class FPSGameClient {
         onGround: this.local.onGround,
         x: Number(this.local.x.toFixed(3)),
         y: Number(this.local.y.toFixed(3)),
-        z: Number(this.local.z.toFixed(3))
+        z: Number(this.local.z.toFixed(3)),
+        vx: Number((this.local.vx || 0).toFixed(2)),
+        vy: Number((this.local.vy || 0).toFixed(2)),
+        vz: Number((this.local.vz || 0).toFixed(2))
       });
     }
 
@@ -1205,21 +1221,41 @@ export class FPSGameClient {
   }
 
   updateRemotePlayers(dt, timeSec) {
-    const lerpFactor = expSmooth(15, dt);
+    const posLerp = expSmooth(16, dt);
+    const angleLerp = expSmooth(18, dt);
     for (const ent of this.remoteEntities.values()) {
       const tgt = ent.target;
       const cur = ent.current;
+      const pred = ent.pred || (ent.pred = { x: tgt.x, y: tgt.y, z: tgt.z });
       const prevX = cur.x;
       const prevZ = cur.z;
 
-      if (Math.hypot(tgt.x - cur.x, tgt.z - cur.z) > 6.5) {
-        cur.x = tgt.x;
-        cur.y = tgt.y;
-        cur.z = tgt.z;
+      // Velocity Dead-Reckoning between network snapshots (up to 280ms)
+      if (!tgt.dead) {
+        const age = ent.predAge || 0;
+        if (age < 0.28) {
+          const step = Math.min(dt, 0.28 - age);
+          ent.predAge = age + step;
+          pred.x += (tgt.vx || 0) * step;
+          pred.z += (tgt.vz || 0) * step;
+          if (!tgt.ground && tgt.vy !== undefined) {
+            pred.y = Math.max(0, pred.y + (tgt.vy || 0) * step);
+          }
+          if (this.mapData) {
+            const h = tgt.crouch ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
+            depenetratePlayerXZ(pred, h, PHYSICS.PLAYER_RADIUS, this.mapData);
+          }
+        }
+      }
+
+      if (Math.hypot(pred.x - cur.x, pred.z - cur.z) > 8.5) {
+        cur.x = pred.x;
+        cur.y = pred.y;
+        cur.z = pred.z;
       } else {
-        cur.x += (tgt.x - cur.x) * lerpFactor;
-        cur.y += (tgt.y - cur.y) * lerpFactor;
-        cur.z += (tgt.z - cur.z) * lerpFactor;
+        cur.x += (pred.x - cur.x) * posLerp;
+        cur.y += (pred.y - cur.y) * posLerp;
+        cur.z += (pred.z - cur.z) * posLerp;
 
         // Ensure interpolated remote players/bots never visually clip through wall corners
         if (!tgt.dead && this.mapData) {
@@ -1229,8 +1265,8 @@ export class FPSGameClient {
         }
       }
 
-      cur.yaw += shortestAngleDiff(cur.yaw, tgt.yaw) * lerpFactor;
-      cur.pitch += ((tgt.pitch || 0) - cur.pitch) * lerpFactor;
+      cur.yaw += shortestAngleDiff(cur.yaw, tgt.yaw) * angleLerp;
+      cur.pitch += ((tgt.pitch || 0) - cur.pitch) * angleLerp;
 
       ent.rig.group.position.set(cur.x, cur.y, cur.z);
       ent.rig.group.rotation.y = cur.yaw;

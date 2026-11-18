@@ -750,12 +750,22 @@ export class GameRoomCore {
       Number.isFinite(rawInput.z)
     ) {
       const now = Date.now();
-      const dtSec = Math.max(0.015, (now - (p.lastClientPosAt || now - 30)) / 1000);
+      const dtSec = Math.max(0.02, Math.min(0.35, (now - (p.lastClientPosAt || now - 35)) / 1000));
       const drift = Math.hypot(rawInput.x - p.x, rawInput.z - p.z);
-      // Accept client position if within generous anti-speedhack envelope (< 5.5m)
-      if (drift < 5.5 && rawInput.y >= -0.05 && rawInput.y <= 9.5) {
-        p.vx = (rawInput.x - p.x) / dtSec;
-        p.vz = (rawInput.z - p.z) / dtSec;
+      // Accept client position if within generous anti-speedhack envelope (< 8.5m)
+      if (drift < 8.5 && rawInput.y >= -0.05 && rawInput.y <= 9.5) {
+        const estVx = Number.isFinite(Number(rawInput.vx))
+          ? Math.max(-12, Math.min(12, Number(rawInput.vx)))
+          : Math.max(-12, Math.min(12, (rawInput.x - p.x) / dtSec));
+        const estVz = Number.isFinite(Number(rawInput.vz))
+          ? Math.max(-12, Math.min(12, Number(rawInput.vz)))
+          : Math.max(-12, Math.min(12, (rawInput.z - p.z) / dtSec));
+        const estVy = Number.isFinite(Number(rawInput.vy))
+          ? Math.max(-18, Math.min(18, Number(rawInput.vy)))
+          : 0;
+        p.vx = estVx;
+        p.vy = estVy;
+        p.vz = estVz;
         p.x = rawInput.x;
         p.y = Math.max(0, rawInput.y);
         p.z = rawInput.z;
@@ -1203,7 +1213,7 @@ export class GameRoomCore {
       }
 
       // Only step physics on server for AI Bots or human players without recent client-predicted position packets
-      if (p.isBot || now - (p.lastClientPosAt || 0) > 180) {
+      if (p.isBot || now - (p.lastClientPosAt || 0) > 450) {
         const wStats = this.getPlayerWeaponStats(p);
         stepPlayerPhysics(p, p.input, this.map, dt, wStats.moveSpeedMult, op.speedMult);
       }
@@ -1548,6 +1558,7 @@ export class GameRoomCore {
         y: Number(p.y.toFixed(3)),
         z: Number(p.z.toFixed(3)),
         vx: Number((p.vx || 0).toFixed(2)),
+        vy: Number((p.vy || 0).toFixed(2)),
         vz: Number((p.vz || 0).toFixed(2)),
         yaw: Number(p.yaw.toFixed(3)),
         pitch: Number(p.pitch.toFixed(3)),

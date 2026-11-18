@@ -201,14 +201,25 @@ app.post('/api/relay/:code/host-sync', (req, res) => {
     gameDB.db.p2pRooms[code].updatedAt = Date.now();
   }
 
+  const pushClientInbox = (inbox, payload) => {
+    if (payload.type === 'world_state') {
+      const idx = inbox.findIndex((p) => p?.type === 'world_state');
+      if (idx >= 0) {
+        inbox[idx] = payload;
+        return;
+      }
+    }
+    inbox.push(payload);
+    if (inbox.length > 160) inbox.shift();
+  };
+
   if (Array.isArray(outgoing)) {
     for (const item of outgoing) {
       if (!item || !item.payload) continue;
       if (!item.to || item.to === '*') {
         for (const [cid, inbox] of q.toClients.entries()) {
           if (cid === hostId) continue;
-          inbox.push(item.payload);
-          if (inbox.length > 160) inbox.shift();
+          pushClientInbox(inbox, item.payload);
         }
       } else {
         let inbox = q.toClients.get(item.to);
@@ -216,8 +227,7 @@ app.post('/api/relay/:code/host-sync', (req, res) => {
           inbox = [];
           q.toClients.set(item.to, inbox);
         }
-        inbox.push(item.payload);
-        if (inbox.length > 160) inbox.shift();
+        pushClientInbox(inbox, item.payload);
       }
     }
   }
@@ -255,6 +265,13 @@ app.post('/api/relay/:code/client-sync', (req, res) => {
   if (Array.isArray(outgoing)) {
     for (const payload of outgoing) {
       if (!payload) continue;
+      if (payload.type === 'input') {
+        const idx = activeQ.toHost.findIndex((x) => x.from === clientId && x.payload?.type === 'input');
+        if (idx >= 0) {
+          activeQ.toHost[idx] = { from: clientId, payload };
+          continue;
+        }
+      }
       activeQ.toHost.push({ from: clientId, payload });
       if (activeQ.toHost.length > 240) activeQ.toHost.shift();
     }
