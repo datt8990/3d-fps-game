@@ -47,6 +47,8 @@ export class FPSGameClient {
     this.quality = 'high';
     this.sensitivity = 0.0022;
     this.baseFov = 75;
+    const savedFps = localStorage.getItem('bs_fps_cap');
+    this.fpsCap = savedFps !== null && Number.isFinite(Number(savedFps)) ? Number(savedFps) : 60;
 
     this.mapId = 'warehouse';
     this.mapData = MAPS.warehouse;
@@ -124,7 +126,7 @@ export class FPSGameClient {
     requestAnimationFrame(this.renderLoop);
   }
 
-  applySettings({ sensitivity, quality, volume }) {
+  applySettings({ sensitivity, quality, volume, fpsCap }) {
     if (sensitivity !== undefined) {
       this.sensitivity = 0.0006 + Number(sensitivity) * 0.0032;
     }
@@ -135,6 +137,12 @@ export class FPSGameClient {
     }
     if (volume !== undefined) {
       soundEngine.setVolume(volume);
+    }
+    if (fpsCap !== undefined) {
+      this.fpsCap = Number(fpsCap) || 0;
+      localStorage.setItem('bs_fps_cap', String(this.fpsCap));
+      this.frameCount = 0;
+      this.fpsAccumTime = 0;
     }
   }
 
@@ -953,10 +961,20 @@ export class FPSGameClient {
 
   renderLoop(now) {
     requestAnimationFrame(this.renderLoop);
-    const dt = Math.min(0.05, (now - this.lastFrameAt) / 1000);
-    this.lastFrameAt = now;
+    if (!this.active) {
+      this.lastFrameAt = now;
+      return;
+    }
 
-    if (!this.active) return;
+    const elapsed = now - this.lastFrameAt;
+    if (this.fpsCap > 0) {
+      const iv = 1000 / this.fpsCap;
+      if (elapsed < iv - 0.5) return;
+      this.lastFrameAt = now - (elapsed % iv);
+    } else {
+      this.lastFrameAt = now;
+    }
+    const dt = Math.min(0.05, Math.max(0.001, elapsed / 1000));
 
     this.frameCount++;
     this.fpsAccumTime += dt;
@@ -964,7 +982,7 @@ export class FPSGameClient {
       this.currentFps = Math.round(this.frameCount / this.fpsAccumTime);
       this.frameCount = 0;
       this.fpsAccumTime = 0;
-      this.hud.updateFpsAndPing(this.currentFps, this.net.pingMs);
+      this.hud.updateFpsAndPing(this.currentFps, this.net.pingMs, this.fpsCap);
     }
 
     const wStats = this.getLocalWeaponStats();

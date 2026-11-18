@@ -396,9 +396,10 @@ export class MatchHUD {
     }
   }
 
-  updateFpsAndPing(fps, pingMs) {
+  updateFpsAndPing(fps, pingMs, fpsCap = 60) {
     if (this.fpsPingEl) {
-      this.fpsPingEl.textContent = `FPS: ${fps}  |  PING: ${pingMs}ms`;
+      const capLabel = fpsCap > 0 ? fpsCap : '150+';
+      this.fpsPingEl.textContent = `FPS: ${fps} (${capLabel})  |  PING: ${pingMs}ms`;
     }
   }
 

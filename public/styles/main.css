@@ -1524,4 +1524,124 @@ kbd {
   border-color: var(--gold);
 }
 
+/* ==========================================================================
+   FPS CAP SELECTOR & TEAM VOICE CHAT HUD
+   ========================================================================== */
+.fps-cap-group {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.fps-cap-btn {
+  padding: 8px 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.72);
+  color: #cbd5e1;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.fps-cap-btn:hover {
+  border-color: rgba(56, 189, 248, 0.65);
+  color: #fff;
+}
+
+.fps-cap-btn.active {
+  border-color: var(--cyan);
+  background: rgba(56, 189, 248, 0.2);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+}
+
+.voice-panel {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  pointer-events: auto;
+  min-width: 210px;
+}
+
+.voice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.voice-self {
+  font-weight: 700;
+  color: #cbd5e1;
+  transition: color 0.12s ease, text-shadow 0.12s ease;
+}
+
+.voice-self.talking {
+  color: #4ade80;
+  text-shadow: 0 0 10px rgba(74, 222, 128, 0.75);
+}
+
+.voice-toggle-btn {
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.8);
+  color: #e2e8f0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.voice-toggle-btn:hover {
+  border-color: var(--cyan);
+}
+
+.voice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: #e2e8f0;
+}
+
+.voice-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+  flex-shrink: 0;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.voice-dot.connected {
+  background: #22c55e;
+}
+
+.voice-row.talking .voice-dot {
+  background: #4ade80;
+  box-shadow: 0 0 10px #4ade80;
+  animation: voicePulse 0.7s infinite alternate;
+}
+
+.voice-state {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 10.5px;
+}
+
+@keyframes voicePulse {
+  from { transform: scale(0.95); opacity: 0.85; }
+  to { transform: scale(1.25); opacity: 1; }
+}
 

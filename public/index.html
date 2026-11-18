@@ -180,6 +180,8 @@
             <div><kbd>E</kbd> Đặt / Gỡ bom C4</div>
             <div><kbd>B</kbd> Đổi súng nhanh</div>
             <div><kbd>Z</kbd> Radio Tổ Đội</div>
+            <div><kbd>V</kbd> Nói voice đội</div>
+            <div><kbd>N</kbd> Mic mở</div>
           </div>
         </div>
 
@@ -471,8 +473,27 @@
         <option value="low">Thấp (Tối ưu tối đa cho máy yếu)</option>
       </select>
 
+      <label class="field-label">Giới Hạn Khung Hình (FPS)</label>
+      <div id="set-fps-group" class="fps-cap-group">
+        <button type="button" class="fps-cap-btn" data-fps="30">30</button>
+        <button type="button" class="fps-cap-btn" data-fps="60">60</button>
+        <button type="button" class="fps-cap-btn" data-fps="90">90</button>
+        <button type="button" class="fps-cap-btn" data-fps="120">120</button>
+        <button type="button" class="fps-cap-btn" data-fps="0">150+</button>
+      </div>
+      <div class="muted" style="margin-top:4px;font-size:11.5px;">150+ = không giới hạn (tối đa theo tần số quét màn hình 144/165/240Hz).</div>
+
+      <label class="field-label">Voice Chat Đồng Đội</label>
+      <select id="set-voice-mode" class="tactical-select">
+        <option value="ptt">Giữ phím [V] để nói (Push-to-Talk)</option>
+        <option value="open">Mở mic liên tục (Open Mic)</option>
+        <option value="off">Tắt voice chat</option>
+      </select>
+      <label class="field-label">Âm Lượng Giọng Đồng Đội: <span id="lbl-voice-vol">90%</span></label>
+      <input id="set-voice-vol" type="range" min="0" max="1" step="0.05" value="0.9" class="full-w" />
+
       <div class="row-gap" style="margin-top:18px;justify-content:flex-end;">
-        <button id="btn-close-settings" class="btn-primary">Lưu & Đóng</button>
+        <button id="btn-close-settings" class="btn-primary">Lưu &amp; Đóng</button>
       </div>
     </div>
   </div>
@@ -571,6 +592,13 @@
 
     <!-- Bottom Left: Health, Armor & In-Match Chat -->
     <div class="hud-bottom-left">
+      <div id="hud-voice-panel" class="voice-panel glass-hud hidden">
+        <div class="voice-head">
+          <span id="hud-voice-self" class="voice-self">🎙 Bạn • GIỮ [V] ĐỂ NÓI</span>
+          <button id="hud-voice-toggle" class="hud-mini-btn" title="Bật/tắt mic mở (phím N)">MIC</button>
+        </div>
+        <div id="hud-voice-list" class="voice-list"></div>
+      </div>
       <div class="ingame-chat-panel">
         <div id="ingame-chat-messages" class="ingame-chat-messages"></div>
         <form id="ingame-chat-form" class="ingame-chat-form hidden">

@@ -15,6 +15,7 @@ import { LobbyShowcase } from './lobbyScene.js';
 import { MatchHUD } from './hud.js';
 import { FPSGameClient } from './gameClient.js';
 import { soundEngine } from './audio.js';
+import { TeamVoiceChat } from './voiceChat.js';
 
 const state = {
   user: null,
@@ -37,6 +38,7 @@ const net = new NetworkClient();
 const lobbyShowcase = new LobbyShowcase(lobbyCanvas);
 const hud = new MatchHUD();
 const fpsClient = new FPSGameClient(gameCanvas, net, hud);
+const voice = new TeamVoiceChat();
 
 let friendsPollTimer = null;
 let lastShownInviteId = null;
@@ -963,6 +965,9 @@ function bindNetworkEvents() {
   net.on('room_lobby', ({ room }) => {
     state.currentRoom = room;
     fpsClient.syncRosterFromLobby(room);
+    if (fpsClient.active && room?.players) {
+      voice.updateRoster(room.players);
+    }
     if (!fpsClient.active && state.activeTab === 'rooms') {
       updateRoomTabPanels();
     }
@@ -971,6 +976,7 @@ function bindNetworkEvents() {
   net.on('left_room', (msg) => {
     state.currentRoom = null;
     if (msg.rooms) state.roomsList = msg.rooms;
+    voice.stop();
     if (fpsClient.active) exitMatchToLobbyUI();
     updateRoomTabPanels();
   });
@@ -1007,6 +1013,13 @@ function bindNetworkEvents() {
     document.getElementById('match-hud')?.classList.remove('hidden');
     lobbyShowcase.setPaused(true);
     fpsClient.startMatchSession(msg, net.clientId);
+    voice.start({
+      roomCode: msg.room?.code,
+      clientId: net.clientId,
+      players: msg.room?.players || [],
+      myTeam: fpsClient.localMeta?.team,
+      teamBased: Boolean(msg.modeConfig?.teamBased)
+    });
   });
 
   net.on('world_state', (msg) => fpsClient.onWorldState(msg));
@@ -1039,6 +1052,7 @@ function bindNetworkEvents() {
 
   net.on('match_ended', async (msg) => {
     state.currentRoom = msg.room;
+    voice.stop();
     fpsClient.stopMatchSession();
     document.getElementById('match-hud')?.classList.add('hidden');
     lobbyShowcase.setPaused(false);
@@ -1054,6 +1068,7 @@ function bindNetworkEvents() {
 }
 
 function exitMatchToLobbyUI() {
+  voice.stop();
   fpsClient.stopMatchSession();
   document.getElementById('match-hud')?.classList.add('hidden');
   document.getElementById('lobby-shell')?.classList.remove('hidden');
@@ -1372,6 +1387,57 @@ function bindUIEvents() {
   });
   document.getElementById('set-quality')?.addEventListener('change', (e) => {
     fpsClient.applySettings({ quality: e.target.value });
+  });
+
+  // FPS Cap Selector
+  const fpsBtns = document.querySelectorAll('#set-fps-group .fps-cap-btn');
+  const syncFpsBtns = (val) => {
+    fpsBtns.forEach((b) => b.classList.toggle('active', Number(b.dataset.fps) === Number(val)));
+  };
+  syncFpsBtns(fpsClient.fpsCap);
+  fpsBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cap = Number(btn.dataset.fps);
+      fpsClient.applySettings({ fpsCap: cap });
+      syncFpsBtns(cap);
+    });
+  });
+
+  // Voice Chat Settings & HUD Toggle
+  const voiceModeEl = document.getElementById('set-voice-mode');
+  const voiceVolEl = document.getElementById('set-voice-vol');
+  const voiceVolLbl = document.getElementById('lbl-voice-vol');
+  if (voiceModeEl) {
+    voiceModeEl.value = voice.mode;
+    voiceModeEl.addEventListener('change', (e) => voice.setMode(e.target.value));
+  }
+  if (voiceVolEl) {
+    voiceVolEl.value = String(voice.volume);
+    if (voiceVolLbl) voiceVolLbl.textContent = `${Math.round(voice.volume * 100)}%`;
+    voiceVolEl.addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      if (voiceVolLbl) voiceVolLbl.textContent = `${Math.round(v * 100)}%`;
+      voice.setVolume(v);
+    });
+  }
+  document.getElementById('hud-voice-toggle')?.addEventListener('click', () => voice.toggleOpenMic());
+
+  // Voice Hotkeys (V: Push-to-Talk, N: Toggle Open Mic)
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat || !fpsClient.active) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.code === 'KeyV') {
+      voice.setPushToTalk(true);
+    } else if (e.code === 'KeyN') {
+      voice.toggleOpenMic();
+      if (voiceModeEl) voiceModeEl.value = voice.mode;
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'KeyV') {
+      voice.setPushToTalk(false);
+    }
   });
 
   // In-Match HUD Buttons
