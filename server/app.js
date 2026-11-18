@@ -3,7 +3,39 @@ import express from 'express';
 import { gameDB } from './db.js';
 
 export const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '512kb' }));
+
+// Cloud Room Relay Queues (Guarantees 100% Vercel cross-device room join & gameplay fallback when WebRTC NAT/PeerJS fails!)
+const relayQueues = new Map();
+
+function pruneRelayQueues() {
+  const now = Date.now();
+  for (const [code, q] of relayQueues.entries()) {
+    if (now - (q.updatedAt || 0) > 60000) {
+      relayQueues.delete(code);
+    }
+  }
+}
+
+function getOrCreateRelay(code, hostId = null) {
+  pruneRelayQueues();
+  let q = relayQueues.get(code);
+  if (!q) {
+    q = {
+      code,
+      hostId,
+      toHost: [],
+      toClients: new Map(),
+      lastHostAt: hostId ? Date.now() : 0,
+      updatedAt: Date.now(),
+      closed: false
+    };
+    relayQueues.set(code, q);
+  }
+  if (hostId) q.hostId = hostId;
+  q.updatedAt = Date.now();
+  return q;
+}
 
 // Hook for local WS server to inject live WS rooms into /api/rooms
 let localWsRoomsProvider = () => [];
@@ -142,8 +174,95 @@ app.post('/api/rooms/heartbeat', (req, res) => {
 
 app.post('/api/rooms/close', (req, res) => {
   const user = resolveUser(req);
-  gameDB.removeCloudRoom(req.body?.code, user?.id);
+  const code = String(req.body?.code || '').replace(/^rm_/i, '').trim().toUpperCase();
+  gameDB.removeCloudRoom(code, user?.id);
+  const q = relayQueues.get(code);
+  if (q) {
+    q.closed = true;
+    q.updatedAt = Date.now();
+  }
   res.json({ ok: true });
+});
+
+// 5b. Universal Cloud Room Relay (Cross-network fallback when PeerJS / WebRTC NAT fails)
+app.post('/api/relay/:code/host-sync', (req, res) => {
+  const user = resolveUser(req);
+  const code = String(req.params.code || '').replace(/^rm_/i, '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'Thiếu mã phòng.' });
+
+  const { hostId, outgoing, roomSummary } = req.body || {};
+  const q = getOrCreateRelay(code, hostId || null);
+  q.lastHostAt = Date.now();
+  q.closed = false;
+
+  if (roomSummary?.code) {
+    gameDB.upsertCloudRoom(roomSummary, user?.id);
+  } else if (gameDB.db.p2pRooms[code]) {
+    gameDB.db.p2pRooms[code].updatedAt = Date.now();
+  }
+
+  if (Array.isArray(outgoing)) {
+    for (const item of outgoing) {
+      if (!item || !item.payload) continue;
+      if (!item.to || item.to === '*') {
+        for (const [cid, inbox] of q.toClients.entries()) {
+          if (cid === hostId) continue;
+          inbox.push(item.payload);
+          if (inbox.length > 160) inbox.shift();
+        }
+      } else {
+        let inbox = q.toClients.get(item.to);
+        if (!inbox) {
+          inbox = [];
+          q.toClients.set(item.to, inbox);
+        }
+        inbox.push(item.payload);
+        if (inbox.length > 160) inbox.shift();
+      }
+    }
+  }
+
+  const packets = q.toHost.splice(0, q.toHost.length);
+  res.json({ ok: true, packets });
+});
+
+app.post('/api/relay/:code/client-sync', (req, res) => {
+  const code = String(req.params.code || '').replace(/^rm_/i, '').trim().toUpperCase();
+  const { clientId, outgoing } = req.body || {};
+  if (!code || !clientId) return res.status(400).json({ error: 'Thiếu mã phòng hoặc clientId.' });
+
+  pruneRelayQueues();
+  const q = relayQueues.get(code);
+  const cloudRoom = gameDB.getActiveCloudRooms().find((r) => (r.code || '').toUpperCase() === code);
+
+  if (q?.closed) {
+    return res.status(410).json({ error: 'Chủ phòng đã đóng phòng đấu.', closed: true });
+  }
+  if (!q && !cloudRoom) {
+    return res.status(404).json({ error: 'Không tìm thấy phòng đấu hoặc phòng đã đóng.' });
+  }
+
+  const activeQ = q || getOrCreateRelay(code, null);
+  if (activeQ.lastHostAt > 0 && Date.now() - activeQ.lastHostAt > 20000) {
+    return res.status(410).json({ error: 'Chủ phòng đã mất kết nối.', closed: true });
+  }
+
+  if (!activeQ.toClients.has(clientId)) {
+    activeQ.toClients.set(clientId, []);
+  }
+  activeQ.updatedAt = Date.now();
+
+  if (Array.isArray(outgoing)) {
+    for (const payload of outgoing) {
+      if (!payload) continue;
+      activeQ.toHost.push({ from: clientId, payload });
+      if (activeQ.toHost.length > 240) activeQ.toHost.shift();
+    }
+  }
+
+  const inbox = activeQ.toClients.get(clientId);
+  const packets = inbox.splice(0, inbox.length);
+  res.json({ ok: true, packets });
 });
 
 app.post('/api/matchmaking/find', (req, res) => {

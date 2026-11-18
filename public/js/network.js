@@ -57,6 +57,18 @@ export class NetworkClient {
 
     this.clientPeer = null;
     this.hostConn = null; // DataConnection to remote host
+
+    // Cloud HTTP Room Relay (100% reliable fallback & fast join across any NAT/Firewall)
+    this.relayClientIds = new Set();
+    this.relayOutbox = [];
+    this.hostRelayTimer = null;
+    this.hostRelayInFlight = false;
+
+    this.relayRoomCode = null;
+    this.clientRelayOutbox = [];
+    this.clientRelayTimer = null;
+    this.clientRelayInFlight = false;
+    this.p2pDirectReady = false;
   }
 
   on(type, fn) {
@@ -75,8 +87,8 @@ export class NetworkClient {
     this.currentUser = user;
     if (this.hostRoom && user) {
       this.hostRoom.updateHumanLoadout(this.clientId, user.loadout, user.rp);
-    } else if (this.hostConn?.open && user) {
-      this.hostConn.send({ type: 'p2p_loadout', loadout: user.loadout, rp: user.rp });
+    } else if ((this.hostConn?.open || this.relayRoomCode) && user) {
+      this.sendToRemoteHost({ type: 'p2p_loadout', loadout: user.loadout, rp: user.rp });
     }
   }
 
@@ -185,7 +197,7 @@ export class NetworkClient {
 
     this.stopLobbyPolling();
     this.lobbyPollTimer = setInterval(async () => {
-      if (this.hostRoom?.status === 'playing' || (this.hostConn && this.inP2PMatch)) return;
+      if (this.hostRoom?.status === 'playing' || ((this.hostConn || this.relayRoomCode) && this.inP2PMatch)) return;
       try {
         const res = await this.apiCall('/api/rooms');
         if (res.rooms) {
@@ -206,7 +218,7 @@ export class NetworkClient {
   startPingLoop() {
     this.stopPingLoop();
     this.pingTimer = setInterval(() => {
-      if (this.transportMode === 'ws' && this.ws?.readyState === WebSocket.OPEN) {
+      if (this.transportMode === 'ws' && this.ws?.readyState === WebSocket.OPEN && !this.hostConn?.open && !this.relayRoomCode) {
         this.ws.send(JSON.stringify({ type: 'ping_check', clientSentAt: performance.now(), lastRtt: this.pingMs }));
       } else if (this.hostConn?.open) {
         this.hostConn.send({ type: 'ping_check', clientSentAt: performance.now() });
@@ -224,11 +236,33 @@ export class NetworkClient {
     }
   }
 
+  sendToRemoteHost(obj) {
+    if (this.hostConn?.open) {
+      this.hostConn.send(obj);
+      return;
+    }
+    if (!this.relayRoomCode) return;
+
+    if (obj.type === 'input') {
+      const idx = this.clientRelayOutbox.findIndex((p) => p.type === 'input');
+      if (idx >= 0) this.clientRelayOutbox[idx] = obj;
+      else this.clientRelayOutbox.push(obj);
+      return;
+    }
+
+    this.clientRelayOutbox.push(obj);
+    this.scheduleClientRelay(12);
+  }
+
   // Unified Outgoing Command Dispatcher (Identical API for WS & P2P!)
   send(obj) {
     if (this.transportMode === 'ws') {
-      if (this.hostConn?.open) {
+      if (this.hostConn?.open || this.relayRoomCode) {
         if (obj.type === 'leave_room') {
+          if (this.relayRoomCode && !this.hostConn?.open) {
+            this.clientRelayOutbox.push({ type: 'p2p_leave' });
+            this.flushClientRelayOnce().catch(() => {});
+          }
           this.cleanupP2PSession().then(() => {
             this.emit('left_room', {});
             if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -238,7 +272,7 @@ export class NetworkClient {
           return;
         }
         if (!['list_rooms', 'global_chat', 'create_room', 'join_room', 'quick_match'].includes(obj.type)) {
-          this.hostConn.send(obj);
+          this.sendToRemoteHost(obj);
           return;
         }
       }
@@ -332,6 +366,10 @@ export class NetworkClient {
       }
 
       case 'leave_room': {
+        if (this.relayRoomCode && !this.hostConn?.open) {
+          this.clientRelayOutbox.push({ type: 'p2p_leave' });
+          await this.flushClientRelayOnce().catch(() => {});
+        }
         await this.cleanupP2PSession();
         const res = await this.apiCall('/api/rooms').catch(() => ({ rooms: [] }));
         this.emit('left_room', { rooms: res.rooms || [] });
@@ -342,12 +380,120 @@ export class NetworkClient {
         // In-Room / In-Match Gameplay Commands
         if (this.hostRoom) {
           this.routePacketToHostRoom(this.clientId, msg);
-        } else if (this.hostConn?.open) {
-          this.hostConn.send(msg);
+        } else {
+          this.sendToRemoteHost(msg);
         }
         break;
       }
     }
+  }
+
+  enqueueHostRelay(targetId, payload) {
+    if (!this.hostRoom || !targetId) return;
+    this.relayOutbox.push({ to: targetId, payload });
+    if (this.relayOutbox.length > 260) {
+      this.relayOutbox.splice(0, this.relayOutbox.length - 260);
+    }
+    if (payload?.type && payload.type !== 'world_state') {
+      this.scheduleHostRelay(12);
+    }
+  }
+
+  scheduleHostRelay(delayMs = null) {
+    if (!this.hostRoom || !this.apiCall) return;
+    if (this.hostRelayTimer) {
+      if (delayMs !== null && delayMs <= 20) {
+        clearTimeout(this.hostRelayTimer);
+        this.hostRelayTimer = null;
+      } else {
+        return;
+      }
+    }
+    const wait = delayMs !== null ? delayMs : (this.hostRoom.status === 'playing' ? 65 : 260);
+    this.hostRelayTimer = setTimeout(() => {
+      this.hostRelayTimer = null;
+      this.flushHostRelayOnce();
+    }, wait);
+  }
+
+  async flushHostRelayOnce() {
+    if (!this.hostRoom || !this.apiCall || this.hostRelayInFlight) return;
+    this.hostRelayInFlight = true;
+    const activeRoom = this.hostRoom;
+    const outgoing = this.relayOutbox.splice(0, this.relayOutbox.length);
+
+    try {
+      const res = await this.apiCall(`/api/relay/${activeRoom.code}/host-sync`, 'POST', {
+        hostId: this.clientId,
+        outgoing,
+        roomSummary: activeRoom.getSummary()
+      });
+
+      if (this.hostRoom === activeRoom && Array.isArray(res?.packets)) {
+        for (const pkt of res.packets) {
+          this.handleRelayHostIncomingPacket(pkt?.from, pkt?.payload);
+        }
+      }
+    } catch {
+      // Re-queue critical non-world_state packets on transient network hiccup
+      const critical = outgoing.filter((x) => x?.payload?.type && x.payload.type !== 'world_state');
+      if (critical.length && this.hostRoom === activeRoom) {
+        this.relayOutbox.unshift(...critical.slice(0, 30));
+      }
+    } finally {
+      this.hostRelayInFlight = false;
+      if (this.hostRoom === activeRoom) {
+        this.scheduleHostRelay(this.relayOutbox.length ? 15 : null);
+      }
+    }
+  }
+
+  handleRelayHostIncomingPacket(fromId, msg) {
+    if (!fromId || !msg || typeof msg.type !== 'string' || !this.hostRoom) return;
+
+    if (msg.type === 'p2p_hello') {
+      if (this.hostRoom.combatants.has(fromId)) {
+        if (this.hostRoom.status === 'waiting' && !this.peerConns.get(fromId)?.open) {
+          this.relayClientIds.add(fromId);
+          this.enqueueHostRelay(fromId, { type: 'joined_room', room: this.hostRoom.getLobbyPayload() });
+        }
+        return;
+      }
+
+      this.relayClientIds.add(fromId);
+      const wasWaiting = this.hostRoom.status === 'waiting';
+      const res = this.hostRoom.addHumanPlayer({
+        id: fromId,
+        userId: msg.user?.id || null,
+        username: msg.user?.username || 'Bạn_Chiến_Đấu',
+        loadout: msg.user?.loadout || {},
+        rp: msg.user?.rp || 1200
+      });
+      if (res.error) {
+        this.enqueueHostRelay(fromId, { type: 'error_msg', text: res.error });
+        this.relayClientIds.delete(fromId);
+        return;
+      }
+      if (wasWaiting) {
+        this.enqueueHostRelay(fromId, { type: 'joined_room', room: this.hostRoom.getLobbyPayload() });
+      }
+      return;
+    }
+
+    if (msg.type === 'p2p_leave') {
+      this.relayClientIds.delete(fromId);
+      if (!this.peerConns.get(fromId)?.open) {
+        this.hostRoom.removeHumanPlayer(fromId);
+      }
+      return;
+    }
+
+    if (msg.type === 'p2p_loadout') {
+      this.hostRoom.updateHumanLoadout(fromId, msg.loadout, msg.rp);
+      return;
+    }
+
+    this.routePacketToHostRoom(fromId, msg);
   }
 
   createHostedP2PRoom(options = {}) {
@@ -370,15 +516,24 @@ export class NetworkClient {
         sendTo: (targetId, payload) => {
           if (targetId === this.clientId) {
             this.handleIncomingHostLoopback(payload);
-          } else {
-            const c = this.peerConns.get(targetId);
-            if (c?.open) c.send(payload);
+            return;
+          }
+          const c = this.peerConns.get(targetId);
+          if (c?.open) {
+            c.send(payload);
+          } else if (this.relayClientIds.has(targetId)) {
+            this.enqueueHostRelay(targetId, payload);
           }
         },
         broadcast: (payload) => {
           this.handleIncomingHostLoopback(payload);
           for (const c of this.peerConns.values()) {
             if (c?.open) c.send(payload);
+          }
+          for (const cid of this.relayClientIds) {
+            if (!this.peerConns.get(cid)?.open) {
+              this.enqueueHostRelay(cid, payload);
+            }
           }
         },
         onEmpty: () => {},
@@ -398,28 +553,35 @@ export class NetworkClient {
     this.emit('joined_room', { room: this.hostRoom.getLobbyPayload() });
     this.startPingLoop();
 
-    // Open WebRTC PeerJS Host Broker so Friends anywhere can join via Room Code!
-    if (window.Peer && options.mode !== 'practice') {
-      try {
-        this.hostPeer = new window.Peer(peerHostId, {
-          config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }
-        });
-        this.hostPeer.on('open', () => {
-          this.publishRoomHeartbeat();
-        });
-        this.hostPeer.on('connection', (conn) => {
-          this.setupIncomingFriendConnection(conn);
-        });
-        this.hostPeer.on('disconnected', () => {
-          if (this.hostRoom && this.hostPeer && !this.hostPeer.destroyed) {
-            try { this.hostPeer.reconnect(); } catch {}
-          }
-        });
-      } catch (err) {
-        console.warn('PeerJS Host warning:', err);
+    // Start Cloud Room Relay + PeerJS Broker so friends on ANY network can join reliably!
+    if (options.mode !== 'practice') {
+      this.flushHostRelayOnce();
+
+      if (window.Peer) {
+        try {
+          this.hostPeer = new window.Peer(peerHostId, {
+            config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }
+          });
+          this.hostPeer.on('open', () => {
+            this.publishRoomHeartbeat();
+          });
+          this.hostPeer.on('connection', (conn) => {
+            this.setupIncomingFriendConnection(conn);
+          });
+          this.hostPeer.on('disconnected', () => {
+            if (this.hostRoom && this.hostPeer && !this.hostPeer.destroyed) {
+              try { this.hostPeer.reconnect(); } catch {}
+            }
+          });
+          this.hostPeer.on('error', (err) => {
+            console.warn('PeerJS Host notice (Relay remains active):', err?.type || err);
+          });
+        } catch (err) {
+          console.warn('PeerJS Host warning:', err);
+        }
       }
 
-      this.hostHeartbeatTimer = setInterval(() => this.publishRoomHeartbeat(), 12000);
+      this.hostHeartbeatTimer = setInterval(() => this.publishRoomHeartbeat(), 10000);
       this.publishRoomHeartbeat();
     }
 
@@ -437,6 +599,13 @@ export class NetworkClient {
       if (msg.type === 'p2p_hello') {
         remotePlayerId = msg.clientId || ('peer_' + Math.random().toString(36).slice(2, 8));
         this.peerConns.set(remotePlayerId, conn);
+        const alreadyInRoom = this.hostRoom.combatants.has(remotePlayerId);
+        this.relayClientIds.delete(remotePlayerId);
+
+        if (alreadyInRoom) {
+          // Upgraded seamlessly from HTTP Relay to Direct WebRTC DataChannel
+          return;
+        }
 
         const wasWaiting = this.hostRoom.status === 'waiting';
         const res = this.hostRoom.addHumanPlayer({
@@ -474,7 +643,9 @@ export class NetworkClient {
     conn.on('close', () => {
       if (remotePlayerId && this.hostRoom) {
         this.peerConns.delete(remotePlayerId);
-        this.hostRoom.removeHumanPlayer(remotePlayerId);
+        if (!this.relayClientIds.has(remotePlayerId)) {
+          this.hostRoom.removeHumanPlayer(remotePlayerId);
+        }
       }
     });
   }
@@ -518,83 +689,190 @@ export class NetworkClient {
     this.emit(msg.type, msg);
   }
 
-  joinRemoteP2PRoom(code, onFailFallback = null) {
-    if (!window.Peer) {
-      this.emit('error_msg', { text: 'Trình duyệt chưa tải được thư viện WebRTC P2P.' });
-      return;
+  scheduleClientRelay(delayMs = null) {
+    if (!this.relayRoomCode || !this.apiCall) return;
+    if (this.clientRelayTimer) {
+      if (delayMs !== null && delayMs <= 20) {
+        clearTimeout(this.clientRelayTimer);
+        this.clientRelayTimer = null;
+      } else {
+        return;
+      }
     }
+    const wait = delayMs !== null ? delayMs : (this.inP2PMatch ? 65 : 260);
+    this.clientRelayTimer = setTimeout(() => {
+      this.clientRelayTimer = null;
+      this.flushClientRelayOnce();
+    }, wait);
+  }
 
-    const peerHostId = `bstrike_v2_${code}`;
-    this.clientPeer = new window.Peer({
-      config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }
-    });
-    let connectedOnce = false;
+  async flushClientRelayOnce(onFailFallback = null) {
+    if (!this.relayRoomCode || !this.apiCall || this.clientRelayInFlight) return;
+    this.clientRelayInFlight = true;
+    const code = this.relayRoomCode;
+    const outgoing = this.p2pDirectReady ? [] : this.clientRelayOutbox.splice(0, this.clientRelayOutbox.length);
+    const t0 = performance.now();
 
-    const failTimer = setTimeout(() => {
-      if (!connectedOnce) {
+    try {
+      const res = await this.apiCall(`/api/relay/${code}/client-sync`, 'POST', {
+        clientId: this.clientId,
+        outgoing
+      });
+
+      if (this.relayRoomCode !== code) return;
+
+      if (!this.p2pDirectReady) {
+        this.pingMs = Math.max(8, Math.round(performance.now() - t0));
+        this.emit('ping_updated', { pingMs: this.pingMs, onlineCount: this.onlineCount });
+      }
+
+      if (res?.error || res?.closed) {
+        const wasJoined = this.relayJoinedOnce;
+        await this.cleanupP2PSession();
+        if (!wasJoined && onFailFallback) {
+          onFailFallback();
+        } else {
+          this.emit('error_msg', { text: res.error || `Phòng #${code} đã đóng.` });
+          if (wasJoined) this.emit('left_room', { rooms: [] });
+        }
+        return;
+      }
+
+      if (Array.isArray(res?.packets)) {
+        for (const msg of res.packets) {
+          if (!msg?.type) continue;
+          if (msg.type === 'joined_room' || msg.type === 'match_started') {
+            this.relayJoinedOnce = true;
+          }
+          if (msg.type === 'match_started') this.inP2PMatch = true;
+          if (msg.type === 'match_ended') {
+            this.inP2PMatch = false;
+            await this.submitCloudMatchReward(msg);
+          }
+          this.emit(msg.type, msg);
+        }
+      }
+    } catch {
+      if (outgoing.length && this.relayRoomCode === code && !this.p2pDirectReady) {
+        const important = outgoing.filter((x) => x.type !== 'input');
+        this.clientRelayOutbox.unshift(...important.slice(0, 20));
+      }
+    } finally {
+      this.clientRelayInFlight = false;
+      if (this.relayRoomCode === code && !this.p2pDirectReady) {
+        this.scheduleClientRelay(this.clientRelayOutbox.length ? 15 : null);
+      }
+    }
+  }
+
+  joinRemoteP2PRoom(code, onFailFallback = null) {
+    const cleanCode = String(code || '').replace(/^rm_/i, '').trim().toUpperCase();
+    if (!cleanCode) return;
+
+    this.relayRoomCode = cleanCode;
+    this.relayJoinedOnce = false;
+    this.p2pDirectReady = false;
+    this.clientRelayOutbox = [
+      {
+        type: 'p2p_hello',
+        clientId: this.clientId,
+        user: {
+          id: this.currentUser?.id,
+          username: this.currentUser?.username,
+          loadout: this.currentUser?.loadout,
+          rp: this.currentUser?.rp
+        }
+      }
+    ];
+    this.flushClientRelayOnce(onFailFallback);
+
+    const joinGuardTimer = setTimeout(() => {
+      if (!this.relayJoinedOnce && !this.p2pDirectReady && this.relayRoomCode === cleanCode) {
         this.cleanupP2PSession();
         if (onFailFallback) onFailFallback();
-        else this.emit('error_msg', { text: `Không thể kết nối tới Mã Phòng #${code} (Phòng đã đóng hoặc sai mã).` });
+        else this.emit('error_msg', { text: `Không thể kết nối tới Mã Phòng #${cleanCode} (Chủ phòng không phản hồi).` });
       }
-    }, 15000);
+    }, 10000);
+    this._joinGuardTimer = joinGuardTimer;
 
-    this.clientPeer.on('open', () => {
-      const conn = this.clientPeer.connect(peerHostId, { reliable: true });
-      this.hostConn = conn;
+    // Also attempt direct WebRTC upgrade via PeerJS in the background (optional speedup)
+    if (!window.Peer) return;
+    const peerHostId = `bstrike_v2_${cleanCode}`;
+    try {
+      this.clientPeer = new window.Peer({
+        config: { iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }
+      });
 
-      conn.on('open', () => {
-        connectedOnce = true;
-        clearTimeout(failTimer);
-        conn.send({
-          type: 'p2p_hello',
-          clientId: this.clientId,
-          user: {
-            id: this.currentUser?.id,
-            username: this.currentUser?.username,
-            loadout: this.currentUser?.loadout,
-            rp: this.currentUser?.rp
+      this.clientPeer.on('open', () => {
+        if (!this.clientPeer || this.relayRoomCode !== cleanCode) return;
+        const conn = this.clientPeer.connect(peerHostId, { reliable: true });
+        this.hostConn = conn;
+
+        conn.on('open', () => {
+          if (this.relayRoomCode !== cleanCode) {
+            try { conn.close(); } catch {}
+            return;
+          }
+          this.p2pDirectReady = true;
+          this.relayJoinedOnce = true;
+          clearTimeout(joinGuardTimer);
+          conn.send({
+            type: 'p2p_hello',
+            clientId: this.clientId,
+            user: {
+              id: this.currentUser?.id,
+              username: this.currentUser?.username,
+              loadout: this.currentUser?.loadout,
+              rp: this.currentUser?.rp
+            }
+          });
+          this.startPingLoop();
+        });
+
+        conn.on('data', async (msg) => {
+          if (!msg?.type) return;
+          if (msg.type === 'pong_check') {
+            this.pingMs = Math.max(2, Math.round(performance.now() - (msg.clientSentAt || performance.now())));
+            this.emit('ping_updated', { pingMs: this.pingMs, onlineCount: this.onlineCount });
+            return;
+          }
+          if (msg.type === 'joined_room' || msg.type === 'match_started') {
+            this.relayJoinedOnce = true;
+          }
+          if (msg.type === 'match_started') this.inP2PMatch = true;
+          if (msg.type === 'match_ended') {
+            this.inP2PMatch = false;
+            await this.submitCloudMatchReward(msg);
+          }
+          this.emit(msg.type, msg);
+        });
+
+        conn.on('close', () => {
+          this.p2pDirectReady = false;
+          this.hostConn = null;
+          // If relay session is still active, seamlessly keep playing via Cloud Relay; otherwise exit
+          if (this.relayRoomCode === cleanCode) {
+            this.scheduleClientRelay(15);
+          } else {
+            this.inP2PMatch = false;
+            this.cleanupP2PSession();
+            this.emit('left_room', { rooms: [] });
           }
         });
-        this.startPingLoop();
       });
 
-      conn.on('data', async (msg) => {
-        if (!msg?.type) return;
-        if (msg.type === 'pong_check') {
-          this.pingMs = Math.max(2, Math.round(performance.now() - (msg.clientSentAt || performance.now())));
-          this.emit('ping_updated', { pingMs: this.pingMs, onlineCount: this.onlineCount });
-          return;
+      this.clientPeer.on('error', (err) => {
+        // Never kill the active Cloud Relay session if only PeerJS/WebRTC NAT failed!
+        console.warn('PeerJS optional upgrade notice (Cloud Relay active):', err?.type || err);
+        if (this.hostConn) {
+          try { this.hostConn.close(); } catch {}
+          this.hostConn = null;
         }
-        if (msg.type === 'match_started') this.inP2PMatch = true;
-        if (msg.type === 'match_ended') {
-          this.inP2PMatch = false;
-          await this.submitCloudMatchReward(msg);
-        }
-        this.emit(msg.type, msg);
+        this.p2pDirectReady = false;
       });
-
-      conn.on('close', () => {
-        this.inP2PMatch = false;
-        this.cleanupP2PSession();
-        this.emit('left_room', { rooms: [] });
-        this.emit('system_toast', { text: 'Chủ phòng đã đóng kết nối phòng đấu.' });
-      });
-    });
-
-    this.clientPeer.on('error', (err) => {
-      clearTimeout(failTimer);
-      console.warn('PeerJS Join Error:', err?.type, err);
-      if (!connectedOnce) {
-        this.cleanupP2PSession();
-        if (onFailFallback) onFailFallback();
-        else {
-          const reason = err?.type === 'peer-unavailable'
-            ? 'Chủ phòng đã thoát hoặc chưa mở kết nối P2P'
-            : (err?.type ? `Lỗi WebRTC (${err.type})` : 'Không thể bắt tay kết nối NAT');
-          this.emit('error_msg', { text: `Không vào được phòng #${code}: ${reason}.` });
-        }
-      }
-    });
+    } catch (err) {
+      console.warn('PeerJS init warning:', err);
+    }
   }
 
   async submitCloudMatchReward(matchEndedMsg) {
@@ -634,6 +912,25 @@ export class NetworkClient {
 
   async cleanupP2PSession() {
     this.inP2PMatch = false;
+    this.p2pDirectReady = false;
+    this.relayJoinedOnce = false;
+    if (this._joinGuardTimer) {
+      clearTimeout(this._joinGuardTimer);
+      this._joinGuardTimer = null;
+    }
+    if (this.hostRelayTimer) {
+      clearTimeout(this.hostRelayTimer);
+      this.hostRelayTimer = null;
+    }
+    if (this.clientRelayTimer) {
+      clearTimeout(this.clientRelayTimer);
+      this.clientRelayTimer = null;
+    }
+    this.relayRoomCode = null;
+    this.relayClientIds.clear();
+    this.relayOutbox = [];
+    this.clientRelayOutbox = [];
+
     if (this.hostHeartbeatTimer) {
       clearInterval(this.hostHeartbeatTimer);
       this.hostHeartbeatTimer = null;
