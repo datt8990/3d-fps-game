@@ -24,6 +24,10 @@ function shortestAngleDiff(from, to) {
   return diff - Math.PI;
 }
 
+function expSmooth(rate, dt) {
+  return 1 - Math.exp(-rate * dt);
+}
+
 export class FPSGameClient {
   constructor(canvas, net, hud) {
     this.canvas = canvas;
@@ -122,6 +126,9 @@ export class FPSGameClient {
 
     this.bindInputEvents();
     this.lastFrameAt = performance.now();
+    this.lastRenderAt = this.lastFrameAt;
+    this.nextFrameAt = this.lastFrameAt;
+    this.fpsClockStart = this.lastFrameAt;
     this.renderLoop = this.renderLoop.bind(this);
     requestAnimationFrame(this.renderLoop);
   }
@@ -141,8 +148,12 @@ export class FPSGameClient {
     if (fpsCap !== undefined) {
       this.fpsCap = Number(fpsCap) || 0;
       localStorage.setItem('bs_fps_cap', String(this.fpsCap));
+      const now = performance.now();
       this.frameCount = 0;
       this.fpsAccumTime = 0;
+      this.lastRenderAt = now;
+      this.nextFrameAt = now;
+      this.fpsClockStart = now;
     }
   }
 
@@ -962,26 +973,32 @@ export class FPSGameClient {
   renderLoop(now) {
     requestAnimationFrame(this.renderLoop);
     if (!this.active) {
-      this.lastFrameAt = now;
+      this.lastRenderAt = now;
+      this.nextFrameAt = now;
+      this.fpsClockStart = now;
       return;
     }
 
-    const elapsed = now - this.lastFrameAt;
     if (this.fpsCap > 0) {
       const iv = 1000 / this.fpsCap;
-      if (elapsed < iv - 0.5) return;
-      this.lastFrameAt = now - (elapsed % iv);
-    } else {
-      this.lastFrameAt = now;
+      // 1.5ms tolerance prevents skipping a whole vsync when rAF arrives slightly early
+      if (now + 1.5 < this.nextFrameAt) return;
+      this.nextFrameAt = this.nextFrameAt + iv;
+      if (now - this.nextFrameAt > iv * 2) {
+        this.nextFrameAt = now + iv;
+      }
     }
-    const dt = Math.min(0.05, Math.max(0.001, elapsed / 1000));
+
+    const rawElapsedMs = Math.max(0.5, now - this.lastRenderAt);
+    this.lastRenderAt = now;
+    const dt = Math.min(0.05, rawElapsedMs / 1000);
 
     this.frameCount++;
-    this.fpsAccumTime += dt;
-    if (this.fpsAccumTime >= 0.5) {
-      this.currentFps = Math.round(this.frameCount / this.fpsAccumTime);
+    const fpsWindowMs = now - this.fpsClockStart;
+    if (fpsWindowMs >= 500) {
+      this.currentFps = Math.round((this.frameCount * 1000) / fpsWindowMs);
       this.frameCount = 0;
-      this.fpsAccumTime = 0;
+      this.fpsClockStart = now;
       this.hud.updateFpsAndPing(this.currentFps, this.net.pingMs, this.fpsCap);
     }
 
@@ -1138,7 +1155,7 @@ export class FPSGameClient {
     else if (sprint) targetFov = this.baseFov + 5;
 
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
-      this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, 14 * dt);
+      this.camera.fov += (targetFov - this.camera.fov) * expSmooth(14, dt);
       this.camera.updateProjectionMatrix();
     }
 
@@ -1147,17 +1164,17 @@ export class FPSGameClient {
 
     if (this.fpRig) {
       this.fpRig.visible = this.sniperZoomStage === 0;
-      this.vmKickZ += (0 - this.vmKickZ) * Math.min(1, 18 * dt);
-      this.vmKickPitch += (0 - this.vmKickPitch) * Math.min(1, 16 * dt);
-      this.swayX += (0 - this.swayX) * Math.min(1, 12 * dt);
-      this.swayY += (0 - this.swayY) * Math.min(1, 12 * dt);
+      this.vmKickZ += (0 - this.vmKickZ) * expSmooth(18, dt);
+      this.vmKickPitch += (0 - this.vmKickPitch) * expSmooth(16, dt);
+      this.swayX += (0 - this.swayX) * expSmooth(12, dt);
+      this.swayY += (0 - this.swayY) * expSmooth(12, dt);
 
       const targetX = this.adsActive ? 0.0 : 0.22;
       const targetY = this.adsActive ? -0.142 : -0.22;
       const targetZ = this.adsActive ? -0.30 : -0.39;
 
-      this.fpRig.position.x += (targetX + this.swayX + bobX - this.fpRig.position.x) * Math.min(1, 16 * dt);
-      this.fpRig.position.y += (targetY + this.swayY + bobY * 0.6 - this.fpRig.position.y) * Math.min(1, 16 * dt);
+      this.fpRig.position.x += (targetX + this.swayX + bobX - this.fpRig.position.x) * expSmooth(16, dt);
+      this.fpRig.position.y += (targetY + this.swayY + bobY * 0.6 - this.fpRig.position.y) * expSmooth(16, dt);
       this.fpRig.position.z = targetZ + this.vmKickZ;
 
       const gunData = this.fpRig.userData.gun?.userData;
@@ -1178,7 +1195,7 @@ export class FPSGameClient {
         }
       } else {
         this.hud.updateReloadProgress(0);
-        this.fpRig.rotation.z += ((sprint ? 0.18 : 0) - this.fpRig.rotation.z) * Math.min(1, 12 * dt);
+        this.fpRig.rotation.z += ((sprint ? 0.18 : 0) - this.fpRig.rotation.z) * expSmooth(12, dt);
         this.fpRig.rotation.x = this.vmKickPitch - (sprint ? 0.18 : 0);
         if (gunData?.magMesh && gunData?.magBasePos) {
           gunData.magMesh.position.copy(gunData.magBasePos);
@@ -1188,7 +1205,7 @@ export class FPSGameClient {
   }
 
   updateRemotePlayers(dt, timeSec) {
-    const lerpFactor = Math.min(1, 15 * dt);
+    const lerpFactor = expSmooth(15, dt);
     for (const ent of this.remoteEntities.values()) {
       const tgt = ent.target;
       const cur = ent.current;
