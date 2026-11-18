@@ -1,4 +1,4 @@
-// Upgraded Tactical HUD v2.0: Radar Minimap, Dynamic Crosshair, Kill Streaks, Grenades, Radio & Scoreboard
+// High-Performance Tactical HUD v2.0: Zero-Reflow DOM Diffing, Offscreen Minimap Cache, Dynamic Crosshair & Scoreboard
 import { WEAPONS } from '/shared/constants.js';
 
 export class MatchHUD {
@@ -17,6 +17,11 @@ export class MatchHUD {
     this.grenadeCountEl = document.getElementById('hud-grenade-count');
     this.reloadBarWrap = document.getElementById('hud-reload-wrap');
     this.reloadBarFill = document.getElementById('hud-reload-fill');
+
+    this.slot1NameEl = document.getElementById('hud-slot1-name');
+    this.slot2NameEl = document.getElementById('hud-slot2-name');
+    this.slot3NameEl = document.getElementById('hud-slot3-name');
+    this.slotBtns = [...document.querySelectorAll('.weapon-slots-row .hud-slot-btn')];
 
     this.alphaScoreEl = document.getElementById('hud-score-alpha');
     this.bravoScoreEl = document.getElementById('hud-score-bravo');
@@ -51,6 +56,28 @@ export class MatchHUD {
     this.damageTimeout = null;
     this.streakTimeout = null;
     this.enemyRevealUntil = new Map();
+
+    // State diff cache to prevent redundant 60Hz DOM reflows
+    this._cache = {
+      hp: -1,
+      armor: -1,
+      slot: -1,
+      weaponId: '',
+      ammo: -1,
+      reserve: -1,
+      grenades: -1,
+      primaryId: '',
+      secondaryId: '',
+      meleeId: '',
+      chGap: -1,
+      chScoped: null,
+      chAds: null,
+      timerText: '',
+      alphaScore: -1,
+      bravoScore: -1,
+      modeSub: ''
+    };
+    this._staticMapCache = new Map();
   }
 
   setRoomCode(code) {
@@ -66,43 +93,75 @@ export class MatchHUD {
   updateVitals(hp, maxHp, armor, maxArmor) {
     const safeHp = Math.max(0, Math.round(hp));
     const safeArmor = Math.max(0, Math.round(armor));
-    if (this.hpValEl) this.hpValEl.textContent = String(safeHp);
-    if (this.armorValEl) this.armorValEl.textContent = String(safeArmor);
-    if (this.hpBarEl) {
-      const pct = Math.max(0, Math.min(100, (safeHp / (maxHp || 100)) * 100));
-      this.hpBarEl.style.width = `${pct}%`;
-      this.hpBarEl.classList.toggle('critical', safeHp <= 30);
+
+    if (safeHp !== this._cache.hp) {
+      this._cache.hp = safeHp;
+      if (this.hpValEl) this.hpValEl.textContent = String(safeHp);
+      if (this.hpBarEl) {
+        const pct = Math.max(0, Math.min(100, (safeHp / (maxHp || 100)) * 100));
+        this.hpBarEl.style.width = `${pct}%`;
+        this.hpBarEl.classList.toggle('critical', safeHp <= 30);
+      }
     }
-    if (this.armorBarEl) {
-      const pct = Math.max(0, Math.min(100, (safeArmor / (maxArmor || 100)) * 100));
-      this.armorBarEl.style.width = `${pct}%`;
+
+    if (safeArmor !== this._cache.armor) {
+      this._cache.armor = safeArmor;
+      if (this.armorValEl) this.armorValEl.textContent = String(safeArmor);
+      if (this.armorBarEl) {
+        const pct = Math.max(0, Math.min(100, (safeArmor / (maxArmor || 100)) * 100));
+        this.armorBarEl.style.width = `${pct}%`;
+      }
     }
   }
 
   updateWeaponHUD(slot, weaponId, ammo, reserveAmmo, primaryId = 'ak47', secondaryId = 'deagle', meleeId = 'knife', grenades = 1) {
     const w = WEAPONS[weaponId] || WEAPONS.ak47;
-    if (this.weaponNameEl) this.weaponNameEl.textContent = w.name;
+    if (weaponId !== this._cache.weaponId) {
+      this._cache.weaponId = weaponId;
+      if (this.weaponNameEl) this.weaponNameEl.textContent = w.name;
+    }
+
     if (w.isMelee) {
-      if (this.ammoMagEl) this.ammoMagEl.textContent = '∞';
-      if (this.ammoResEl) this.ammoResEl.textContent = 'CẬN CHIẾN';
+      if (this._cache.ammo !== '∞') {
+        this._cache.ammo = '∞';
+        if (this.ammoMagEl) this.ammoMagEl.textContent = '∞';
+        if (this.ammoResEl) this.ammoResEl.textContent = 'CẬN CHIẾN';
+      }
     } else {
-      if (this.ammoMagEl) this.ammoMagEl.textContent = String(ammo);
-      if (this.ammoResEl) this.ammoResEl.textContent = `/ ${reserveAmmo}`;
-    }
-    if (this.grenadeCountEl) {
-      this.grenadeCountEl.textContent = String(grenades ?? 0);
+      if (ammo !== this._cache.ammo) {
+        this._cache.ammo = ammo;
+        if (this.ammoMagEl) this.ammoMagEl.textContent = String(ammo);
+      }
+      if (reserveAmmo !== this._cache.reserve) {
+        this._cache.reserve = reserveAmmo;
+        if (this.ammoResEl) this.ammoResEl.textContent = `/ ${reserveAmmo}`;
+      }
     }
 
-    const s1 = document.getElementById('hud-slot1-name');
-    const s2 = document.getElementById('hud-slot2-name');
-    const s3 = document.getElementById('hud-slot3-name');
-    if (s1 && WEAPONS[primaryId]) s1.textContent = WEAPONS[primaryId].name;
-    if (s2 && WEAPONS[secondaryId]) s2.textContent = WEAPONS[secondaryId].name;
-    if (s3 && WEAPONS[meleeId]) s3.textContent = WEAPONS[meleeId].name;
+    if (grenades !== this._cache.grenades) {
+      this._cache.grenades = grenades;
+      if (this.grenadeCountEl) this.grenadeCountEl.textContent = String(grenades ?? 0);
+    }
 
-    document.querySelectorAll('.weapon-slots-row .hud-slot-btn').forEach((btn) => {
-      btn.classList.toggle('active', Number(btn.dataset.slot) === Number(slot));
-    });
+    if (primaryId !== this._cache.primaryId) {
+      this._cache.primaryId = primaryId;
+      if (this.slot1NameEl && WEAPONS[primaryId]) this.slot1NameEl.textContent = WEAPONS[primaryId].name;
+    }
+    if (secondaryId !== this._cache.secondaryId) {
+      this._cache.secondaryId = secondaryId;
+      if (this.slot2NameEl && WEAPONS[secondaryId]) this.slot2NameEl.textContent = WEAPONS[secondaryId].name;
+    }
+    if (meleeId !== this._cache.meleeId) {
+      this._cache.meleeId = meleeId;
+      if (this.slot3NameEl && WEAPONS[meleeId]) this.slot3NameEl.textContent = WEAPONS[meleeId].name;
+    }
+
+    if (slot !== this._cache.slot) {
+      this._cache.slot = slot;
+      for (const btn of this.slotBtns) {
+        btn.classList.toggle('active', Number(btn.dataset.slot) === Number(slot));
+      }
+    }
   }
 
   updateReloadProgress(ratio) {
@@ -118,44 +177,67 @@ export class MatchHUD {
   updateTopScoreAndTimer({ mode, modeConfig, alphaScore, bravoScore, roundNumber, timeLeftSec, myKills, aliveCount }) {
     const mins = Math.floor(timeLeftSec / 60);
     const secs = timeLeftSec % 60;
-    if (this.timerEl) {
-      this.timerEl.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    const tStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    if (tStr !== this._cache.timerText && this.timerEl) {
+      this._cache.timerText = tStr;
+      this.timerEl.textContent = tStr;
     }
 
     if (modeConfig?.teamBased) {
-      if (this.alphaLabelEl) this.alphaLabelEl.textContent = 'ALPHA';
-      if (this.bravoLabelEl) this.bravoLabelEl.textContent = 'BRAVO';
-      if (this.alphaScoreEl) this.alphaScoreEl.textContent = String(alphaScore);
-      if (this.bravoScoreEl) this.bravoScoreEl.textContent = String(bravoScore);
-      if (this.modeSubEl) {
-        this.modeSubEl.textContent = mode === 'bomb'
-          ? `HIỆP ${roundNumber} • CHẠM ${modeConfig.scoreLimit}`
-          : `${modeConfig.shortName.toUpperCase()} • MỤC TIÊU ${modeConfig.scoreLimit}`;
+      if (this.alphaLabelEl && this.alphaLabelEl.textContent !== 'ALPHA') this.alphaLabelEl.textContent = 'ALPHA';
+      if (this.bravoLabelEl && this.bravoLabelEl.textContent !== 'BRAVO') this.bravoLabelEl.textContent = 'BRAVO';
+      if (alphaScore !== this._cache.alphaScore && this.alphaScoreEl) {
+        this._cache.alphaScore = alphaScore;
+        this.alphaScoreEl.textContent = String(alphaScore);
+      }
+      if (bravoScore !== this._cache.bravoScore && this.bravoScoreEl) {
+        this._cache.bravoScore = bravoScore;
+        this.bravoScoreEl.textContent = String(bravoScore);
+      }
+      const sub = mode === 'bomb'
+        ? `HIỆP ${roundNumber} • CHẠM ${modeConfig.scoreLimit}`
+        : `${modeConfig.shortName.toUpperCase()} • MỤC TIÊU ${modeConfig.scoreLimit}`;
+      if (sub !== this._cache.modeSub && this.modeSubEl) {
+        this._cache.modeSub = sub;
+        this.modeSubEl.textContent = sub;
       }
     } else if (mode === 'survival') {
-      if (this.alphaLabelEl) this.alphaLabelEl.textContent = 'HẠ GỤC';
-      if (this.bravoLabelEl) this.bravoLabelEl.textContent = 'CÒN SỐNG';
+      if (this.alphaLabelEl && this.alphaLabelEl.textContent !== 'HẠ GỤC') this.alphaLabelEl.textContent = 'HẠ GỤC';
+      if (this.bravoLabelEl && this.bravoLabelEl.textContent !== 'CÒN SỐNG') this.bravoLabelEl.textContent = 'CÒN SỐNG';
       if (this.alphaScoreEl) this.alphaScoreEl.textContent = String(myKills || 0);
       if (this.bravoScoreEl) this.bravoScoreEl.textContent = String(aliveCount || 1);
-      if (this.modeSubEl) this.modeSubEl.textContent = 'SINH TỒN • VÒNG BO ĐANG THU HẸP';
+      if (this.modeSubEl && this.modeSubEl.textContent !== 'SINH TỒN • VÒNG BO ĐANG THU HẸP') {
+        this.modeSubEl.textContent = 'SINH TỒN • VÒNG BO ĐANG THU HẸP';
+      }
     } else {
-      if (this.alphaLabelEl) this.alphaLabelEl.textContent = 'BẠN';
-      if (this.bravoLabelEl) this.bravoLabelEl.textContent = 'MỤC TIÊU';
+      if (this.alphaLabelEl && this.alphaLabelEl.textContent !== 'BẠN') this.alphaLabelEl.textContent = 'BẠN';
+      if (this.bravoLabelEl && this.bravoLabelEl.textContent !== 'MỤC TIÊU') this.bravoLabelEl.textContent = 'MỤC TIÊU';
       if (this.alphaScoreEl) this.alphaScoreEl.textContent = String(myKills || 0);
       if (this.bravoScoreEl) this.bravoScoreEl.textContent = String(modeConfig?.scoreLimit || 20);
-      if (this.modeSubEl) this.modeSubEl.textContent = mode === 'practice' ? 'TRƯỜNG BẮN THỬ SÚNG 3D' : 'SOLO DEATHMATCH';
+      const sub = mode === 'practice' ? 'TRƯỜNG BẮN THỬ SÚNG 3D' : 'SOLO DEATHMATCH';
+      if (this.modeSubEl && this.modeSubEl.textContent !== sub) this.modeSubEl.textContent = sub;
     }
   }
 
-  updateCrosshair(spreadPx = 8, isSniperScoped = false, isAds = false) {
-    if (this.sniperOverlay) {
-      this.sniperOverlay.classList.toggle('hidden', !isSniperScoped);
+  updateCrosshair(spreadPx = 6, isSniperScoped = false, isAds = false) {
+    if (isSniperScoped !== this._cache.chScoped) {
+      this._cache.chScoped = isSniperScoped;
+      this.sniperOverlay?.classList.toggle('hidden', !isSniperScoped);
+      this.crosshairEl?.classList.toggle('hidden', isSniperScoped);
     }
-    if (!this.crosshairEl) return;
-    this.crosshairEl.classList.toggle('hidden', isSniperScoped);
-    this.crosshairEl.classList.toggle('ads-tight', isAds && !isSniperScoped);
-    const gap = Math.round(Math.max(4, Math.min(34, spreadPx)));
-    this.crosshairEl.style.setProperty('--ch-gap', `${gap}px`);
+    if (!this.crosshairEl || isSniperScoped) return;
+
+    const adsTight = Boolean(isAds && !isSniperScoped);
+    if (adsTight !== this._cache.chAds) {
+      this._cache.chAds = adsTight;
+      this.crosshairEl.classList.toggle('ads-tight', adsTight);
+    }
+
+    const gap = Math.round(Math.max(4, Math.min(26, spreadPx)));
+    if (gap !== this._cache.chGap) {
+      this._cache.chGap = gap;
+      this.crosshairEl.style.setProperty('--ch-gap', `${gap}px`);
+    }
   }
 
   showHitmarker(damage, hitZone, killed) {
@@ -177,7 +259,7 @@ export class MatchHUD {
     this.hitmarkerTimeout = setTimeout(() => {
       this.hitmarkerEl.classList.add('hidden');
       this.hitDmgEl?.classList.add('hidden');
-    }, 260);
+    }, 240);
   }
 
   showKillStreak(streak = 1, isHeadshot = false, isFirstBlood = false, victimName = '') {
@@ -198,7 +280,7 @@ export class MatchHUD {
     clearTimeout(this.streakTimeout);
     this.streakTimeout = setTimeout(() => {
       this.streakBannerEl.classList.add('hidden');
-    }, 2400);
+    }, 2300);
   }
 
   toggleRadioMenu(show) {
@@ -212,7 +294,7 @@ export class MatchHUD {
     clearTimeout(this.damageTimeout);
     this.damageTimeout = setTimeout(() => {
       this.damageVignette.classList.add('hidden');
-    }, 320);
+    }, 300);
   }
 
   pushKillFeed({ killerName, killerTeam, victimName, victimTeam, weaponId, headshot }) {
@@ -233,7 +315,7 @@ export class MatchHUD {
     while (this.killFeedEl.children.length > 6) {
       this.killFeedEl.lastElementChild.remove();
     }
-    setTimeout(() => item.remove(), 5500);
+    setTimeout(() => item.remove(), 5200);
   }
 
   updateBombHUD(bomb, localPlayer, mapData) {
@@ -283,7 +365,7 @@ export class MatchHUD {
 
     if (this.interactHintEl) {
       if (hint) {
-        this.interactHintEl.textContent = hint;
+        if (this.interactHintEl.textContent !== hint) this.interactHintEl.textContent = hint;
         this.interactHintEl.classList.remove('hidden');
       } else {
         this.interactHintEl.classList.add('hidden');
@@ -297,7 +379,7 @@ export class MatchHUD {
     this.roundBannerEl.className = `hud-round-banner ${winnerTeam}`;
     setTimeout(() => {
       this.roundBannerEl?.classList.add('hidden');
-    }, 3600);
+    }, 3500);
   }
 
   setRespawnState(dead, secondsLeft = 0) {
@@ -318,6 +400,31 @@ export class MatchHUD {
     if (this.fpsPingEl) {
       this.fpsPingEl.textContent = `FPS: ${fps}  |  PING: ${pingMs}ms`;
     }
+  }
+
+  _getStaticMapCanvas(mapData, scale) {
+    if (this._staticMapCache.has(mapData.id)) {
+      return this._staticMapCache.get(mapData.id);
+    }
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 256;
+    const ctx = c.getContext('2d');
+    ctx.translate(128, 128);
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.44)';
+    for (const b of mapData.blocks) {
+      if (b.y > 4.0) continue;
+      ctx.fillRect((b.x - b.w * 0.5) * scale, (b.z - b.d * 0.5) * scale, b.w * scale, b.d * scale);
+    }
+    for (const site of mapData.bombSites || []) {
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(site.x * scale, site.z * scale, site.radius * scale, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    this._staticMapCache.set(mapData.id, c);
+    return c;
   }
 
   drawMinimap(mapData, localPlayer, allPlayers, teamBased, bomb, storm) {
@@ -346,21 +453,13 @@ export class MatchHUD {
     ctx.translate(cx, cy);
     ctx.rotate(localPlayer.yaw);
 
-    ctx.fillStyle = 'rgba(148, 163, 184, 0.42)';
-    for (const b of mapData.blocks) {
-      if (b.y > 4.0) continue;
-      const rx = (b.x - b.w * 0.5 - localPlayer.x) * scale;
-      const rz = (b.z - b.d * 0.5 - localPlayer.z) * scale;
-      ctx.fillRect(rx, rz, b.w * scale, b.d * scale);
-    }
+    // Draw pre-rendered static map geometry in a single hardware-accelerated blit
+    const staticCanvas = this._getStaticMapCanvas(mapData, scale);
+    ctx.drawImage(staticCanvas, -128 - localPlayer.x * scale, -128 - localPlayer.z * scale);
 
     for (const site of mapData.bombSites || []) {
       const sx = (site.x - localPlayer.x) * scale;
       const sz = (site.z - localPlayer.z) * scale;
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(sx, sz, site.radius * scale, 0, Math.PI * 2); ctx.stroke();
-
       ctx.save();
       ctx.translate(sx, sz);
       ctx.rotate(-localPlayer.yaw);

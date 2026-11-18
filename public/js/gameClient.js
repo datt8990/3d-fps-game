@@ -35,6 +35,8 @@ export class FPSGameClient {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.12;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.08, 320);
@@ -93,6 +95,7 @@ export class FPSGameClient {
     this.fpRig = null;
     this.vmKickZ = 0;
     this.vmKickPitch = 0;
+    this.recoilAccumPitch = 0;
     this.swayX = 0;
     this.swayY = 0;
     this.bobTimer = 0;
@@ -155,6 +158,11 @@ export class FPSGameClient {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
+    const lockPromptEl = document.getElementById('hud-lock-prompt');
+    lockPromptEl?.addEventListener('click', () => {
+      if (this.active && !this.uiModalOpen) this.requestLock();
+    });
+
     document.addEventListener('pointerlockchange', () => {
       this.pointerLocked = document.pointerLockElement === this.canvas;
       const lockHint = document.getElementById('hud-lock-prompt');
@@ -202,12 +210,18 @@ export class FPSGameClient {
       const zoomScale = this.sniperZoomStage === 2 ? 0.22 : (this.adsActive ? 0.55 : 1.0);
       const dx = e.movementX || 0;
       const dy = e.movementY || 0;
+      const pitchDelta = dy * this.sensitivity * zoomScale;
 
       this.local.yaw -= dx * this.sensitivity * zoomScale;
-      this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch - dy * this.sensitivity * zoomScale));
+      this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch - pitchDelta));
 
-      this.swayX = Math.max(-0.04, Math.min(0.04, this.swayX - dx * 0.00035));
-      this.swayY = Math.max(-0.04, Math.min(0.04, this.swayY + dy * 0.00035));
+      // If player manually compensates recoil downward, reduce accumulated auto-recovery pitch
+      if (pitchDelta > 0 && this.recoilAccumPitch > 0) {
+        this.recoilAccumPitch = Math.max(0, this.recoilAccumPitch - pitchDelta);
+      }
+
+      this.swayX = Math.max(-0.032, Math.min(0.032, this.swayX - dx * 0.00028));
+      this.swayY = Math.max(-0.032, Math.min(0.032, this.swayY + dy * 0.00028));
     });
 
     window.addEventListener('wheel', (e) => {
@@ -218,6 +232,19 @@ export class FPSGameClient {
 
     window.addEventListener('keydown', (e) => {
       if (!this.active) return;
+
+      if (e.code === 'Escape') {
+        if (this.uiModalOpen) {
+          this.closeInGameChat();
+          this.toggleBuyWeaponModal(false);
+          return;
+        }
+        if (this.radioOpen) {
+          this.radioOpen = false;
+          this.hud.toggleRadioMenu(false);
+          return;
+        }
+      }
 
       if (e.code === 'Tab') {
         e.preventDefault();
@@ -534,10 +561,16 @@ export class FPSGameClient {
       spreadApplied: (st.pellets || 1) <= 1
     });
 
-    this.local.pitch = Math.min(1.50, this.local.pitch + st.recoilPitch);
-    this.local.yaw += (Math.random() - 0.5) * st.recoilYaw * 2;
-    this.vmKickZ = st.isMelee ? -0.14 : 0.085;
-    this.vmKickPitch = st.isMelee ? -0.35 : 0.14;
+    // Smooth, low-recoil kick with ADS/crouch stabilization & soft spray ceiling
+    const recoilScale = (this.adsActive ? 0.65 : 1.0) * (this.local.crouching ? 0.72 : 1.0);
+    const sprayDamp = this.recoilAccumPitch > 0.045 ? 0.25 : 1.0;
+    const pitchKick = st.recoilPitch * recoilScale * sprayDamp;
+
+    this.local.pitch = Math.min(1.50, this.local.pitch + pitchKick);
+    this.recoilAccumPitch = Math.min(0.068, this.recoilAccumPitch + pitchKick);
+    this.local.yaw += (Math.random() - 0.5) * st.recoilYaw * recoilScale * 1.4;
+    this.vmKickZ = st.isMelee ? -0.11 : (this.adsActive ? 0.018 : 0.032);
+    this.vmKickPitch = st.isMelee ? -0.26 : (this.adsActive ? 0.020 : 0.042);
 
     if (!st.isMelee && !st.suppressed) {
       this.triggerMuzzleFlash();
@@ -578,6 +611,7 @@ export class FPSGameClient {
       this.local.vz = 0;
       this.local.yaw = msg.yaw;
       this.local.pitch = 0;
+      this.recoilAccumPitch = 0;
       this.local.dead = false;
       this.local.hp = msg.hp;
       this.local.armor = msg.armor;
@@ -970,6 +1004,19 @@ export class FPSGameClient {
       }
     }
 
+    if (this.mapObjects?.animatedProps) {
+      for (const prop of this.mapObjects.animatedProps) {
+        if (prop.type === 'spin_y') {
+          prop.mesh.rotation.y += dt * (prop.speed || 1.0);
+        } else if (prop.type === 'spin_multi') {
+          prop.mesh.rotation.y += dt * (prop.speed || 1.2);
+          prop.mesh.rotation.z = Math.sin(now * 0.0015) * 0.22;
+        } else if (prop.type === 'crane_sway') {
+          prop.mesh.position.x = (prop.baseX || 0) + Math.sin(now * 0.0005) * 6.5;
+        }
+      }
+    }
+
     const enrichedPlayers = (this.lastSnapshotPlayers || []).map((p) => ({
       ...p,
       team: this.rosterMeta.get(p.id)?.team || ''
@@ -1054,6 +1101,13 @@ export class FPSGameClient {
       bobY = Math.sin(this.bobTimer) * 0.004;
     }
 
+    // Automatic smooth recoil recovery when not actively firing
+    if (now - this.local.lastFireTime > 105 && this.recoilAccumPitch > 0.0002) {
+      const recov = this.recoilAccumPitch * Math.min(1, 12 * dt);
+      this.local.pitch = Math.max(-1.50, this.local.pitch - recov);
+      this.recoilAccumPitch = Math.max(0, this.recoilAccumPitch - recov);
+    }
+
     this.camera.position.set(this.local.x, this.local.y + this.local.eyeHeight + bobY, this.local.z);
     this.camera.rotation.y = this.local.yaw;
     this.camera.rotation.x = this.local.pitch;
@@ -1070,15 +1124,15 @@ export class FPSGameClient {
       this.camera.updateProjectionMatrix();
     }
 
-    const spreadPx = 6 + horizSpeed * 2.2 + (this.local.onGround ? 0 : 12) + this.vmKickZ * 95;
+    const spreadPx = 4 + horizSpeed * 1.2 + (this.local.onGround ? 0 : 6) + this.vmKickZ * 38;
     this.hud.updateCrosshair(spreadPx, this.sniperZoomStage > 0, this.adsActive);
 
     if (this.fpRig) {
       this.fpRig.visible = this.sniperZoomStage === 0;
-      this.vmKickZ += (0 - this.vmKickZ) * Math.min(1, 14 * dt);
-      this.vmKickPitch += (0 - this.vmKickPitch) * Math.min(1, 12 * dt);
-      this.swayX += (0 - this.swayX) * Math.min(1, 10 * dt);
-      this.swayY += (0 - this.swayY) * Math.min(1, 10 * dt);
+      this.vmKickZ += (0 - this.vmKickZ) * Math.min(1, 18 * dt);
+      this.vmKickPitch += (0 - this.vmKickPitch) * Math.min(1, 16 * dt);
+      this.swayX += (0 - this.swayX) * Math.min(1, 12 * dt);
+      this.swayY += (0 - this.swayY) * Math.min(1, 12 * dt);
 
       const targetX = this.adsActive ? 0.0 : 0.22;
       const targetY = this.adsActive ? -0.142 : -0.22;
@@ -1089,6 +1143,10 @@ export class FPSGameClient {
       this.fpRig.position.z = targetZ + this.vmKickZ;
 
       const gunData = this.fpRig.userData.gun?.userData;
+      if (gunData?.boltMesh && gunData.boltBaseZ !== undefined) {
+        gunData.boltMesh.position.z = gunData.boltBaseZ + Math.max(0, this.vmKickZ * 0.75);
+      }
+
       if (this.local.reloadingEnd > now) {
         const total = Math.max(200, this.local.reloadingEnd - this.local.reloadingStart);
         const ratio = Math.min(1, (now - this.local.reloadingStart) / total);

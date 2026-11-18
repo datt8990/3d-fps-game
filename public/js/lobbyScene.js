@@ -1,4 +1,4 @@
-// Interactive 3D Hangar Showcase for Main Lobby, Operator Select & Weapon Armory
+// Interactive 3D Military Hangar Showcase for Main Lobby, Operator Select & Weapon Armory
 import * as THREE from 'three';
 import { createOperatorRig, animateOperatorRig, createWeaponModel } from './models.js';
 
@@ -8,6 +8,10 @@ export class LobbyShowcase {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 60);
@@ -33,41 +37,70 @@ export class LobbyShowcase {
   }
 
   setupStage() {
-    const hemi = new THREE.HemisphereLight('#93c5fd', '#0f172a', 1.0);
+    const hemi = new THREE.HemisphereLight('#93c5fd', '#0f172a', 1.05);
     this.scene.add(hemi);
 
-    const keyLight = new THREE.DirectionalLight('#f8fafc', 1.65);
+    const keyLight = new THREE.DirectionalLight('#f8fafc', 1.85);
     keyLight.position.set(3, 5, 4);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.set(1024, 1024);
     this.scene.add(keyLight);
 
-    const rimCyan = new THREE.PointLight('#06b6d4', 2.4, 10);
+    const rimCyan = new THREE.PointLight('#06b6d4', 2.8, 12);
     rimCyan.position.set(-2.5, 2.2, -1.8);
     this.scene.add(rimCyan);
 
-    const rimAmber = new THREE.PointLight('#f97316', 1.8, 10);
+    const rimAmber = new THREE.PointLight('#f97316', 2.2, 12);
     rimAmber.position.set(2.5, 1.5, -1.5);
     this.scene.add(rimAmber);
 
-    // Tactical Glowing Pedestal
-    const base = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.15, 1.28, 0.12, 40),
-      new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.75, roughness: 0.28 })
+    // Multi-tiered Tactical Armored Turntable Pedestal
+    const outerBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.32, 1.48, 0.10, 48),
+      new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.82, roughness: 0.24 })
     );
-    base.position.y = -0.06;
-    this.stageGroup.add(base);
+    outerBase.position.y = -0.09;
+    outerBase.receiveShadow = true;
+    this.stageGroup.add(outerBase);
+
+    const innerBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.12, 1.22, 0.08, 48),
+      new THREE.MeshStandardMaterial({ color: '#1e293b', metalness: 0.78, roughness: 0.30 })
+    );
+    innerBase.position.y = -0.03;
+    innerBase.receiveShadow = true;
+    this.stageGroup.add(innerBase);
 
     this.ringMesh = new THREE.Mesh(
       new THREE.RingGeometry(1.06, 1.13, 48),
-      new THREE.MeshBasicMaterial({ color: '#38bdf8', side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: '#38bdf8', side: THREE.DoubleSide, transparent: true, opacity: 0.85 })
     );
     this.ringMesh.rotation.x = -Math.PI / 2;
-    this.ringMesh.position.y = 0.005;
+    this.ringMesh.position.y = 0.015;
     this.stageGroup.add(this.ringMesh);
 
-    // Subtle background tactical grid floor
+    this.outerRingMesh = new THREE.Mesh(
+      new THREE.RingGeometry(1.26, 1.30, 32),
+      new THREE.MeshBasicMaterial({ color: '#f97316', side: THREE.DoubleSide, transparent: true, opacity: 0.55 })
+    );
+    this.outerRingMesh.rotation.x = -Math.PI / 2;
+    this.outerRingMesh.position.y = -0.035;
+    this.stageGroup.add(this.outerRingMesh);
+
+    // Background Hangar Pillars & Tactical Grid Floor
     const grid = new THREE.GridHelper(18, 24, '#1e3a8a', '#0f172a');
-    grid.position.y = -0.12;
+    grid.position.y = -0.14;
     this.scene.add(grid);
+
+    const pillarMat = new THREE.MeshStandardMaterial({ color: '#0f172a', metalness: 0.75, roughness: 0.35 });
+    const stripMat = new THREE.MeshBasicMaterial({ color: '#0284c7' });
+    for (const px of [-3.4, 3.4]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.45, 4.5, 0.45), pillarMat);
+      pillar.position.set(px, 2.1, -3.2);
+      const lightStrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 3.6, 0.06), stripMat);
+      lightStrip.position.set(px * 0.92, 2.1, -2.96);
+      this.scene.add(pillar, lightStrip);
+    }
   }
 
   bindEvents() {
@@ -119,7 +152,6 @@ export class LobbyShowcase {
       name: username,
       isAlly: true
     });
-    // Face toward camera (+Z -> rotation.y = Math.PI)
     this.operatorRig.group.rotation.y = Math.PI;
     this.operatorRig.nameplate.visible = false;
     this.operatorRig.group.visible = this.mode === 'operator';
@@ -132,7 +164,7 @@ export class LobbyShowcase {
     }
     const holder = new THREE.Group();
     const gun = createWeaponModel(weaponId, skinId, attachments);
-    const scale = weaponId === 'deagle' ? 2.25 : (weaponId === 'awp' ? 1.55 : 1.85);
+    const scale = weaponId === 'deagle' || weaponId === 'usps' ? 2.25 : (weaponId === 'awp' || weaponId === 'barrett' ? 1.55 : 1.85);
     gun.scale.setScalar(scale);
     gun.rotation.y = Math.PI * 0.5;
     holder.position.set(0, 1.15, 0);
@@ -188,6 +220,9 @@ export class LobbyShowcase {
 
     if (this.ringMesh) {
       this.ringMesh.material.opacity = 0.7 + Math.sin(tSec * 3) * 0.25;
+    }
+    if (this.outerRingMesh) {
+      this.outerRingMesh.rotation.z = tSec * 0.4;
     }
 
     this.renderer.render(this.scene, this.camera);

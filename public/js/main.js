@@ -440,7 +440,7 @@ function renderArmoryTab() {
   if (statsBox) {
     const totalDmg = eff.damage * (eff.pellets || 1);
     const headDmg = Math.round(eff.damage * eff.headMult);
-    const ctrlPct = Math.max(15, Math.min(98, Math.round(100 - eff.recoilPitch * 850)));
+    const ctrlPct = Math.max(45, Math.min(98, Math.round(100 - eff.recoilPitch * 1650)));
 
     statsBox.innerHTML = `
       <p class="muted" style="margin-bottom:8px;">${gun.desc}</p>
