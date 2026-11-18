@@ -138,6 +138,8 @@ function onLoginSuccess(user) {
 function refreshProfileUI() {
   const u = state.user;
   if (!u) return;
+  const opNav = document.querySelector('.nav-btn[data-tab="operators"]');
+  if (opNav) opNav.textContent = `NHÂN VẬT (${Object.keys(OPERATORS).length})`;
   document.getElementById('top-gp').textContent = u.gp.toLocaleString('vi-VN');
   document.getElementById('top-username').textContent = u.username;
   document.getElementById('top-rank-badge').textContent = u.rank?.icon || 'II';

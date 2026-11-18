@@ -2052,81 +2052,222 @@ export function createWeaponModel(weaponId = 'ak47', skinId = 'default', attachm
   return group;
 }
 
+function getOperatorFpArmProfile(operatorId, outfitId, outfit) {
+  const isFemale = Boolean((OPERATORS[operatorId]?.gender) === 'female');
+  const isSwimwear = Boolean(outfit?.isSwimwear);
+  const skinMap = {
+    siren: '#f7d3be',
+    valkyrie: '#f7d3be',
+    phoenix: '#f7d3be',
+    kagura: '#f7d3be',
+    aria: '#b5724c',
+    titan: isSwimwear ? '#d6a37c' : '#64748b',
+    vanguard: outfit?.skinTone || '#d6a37c',
+    ghost: outfit?.skinTone || '#cfa380',
+    shadow: outfit?.skinTone || '#d1a482'
+  };
+  const skinTone = skinMap[operatorId] || outfit?.skinTone || '#d6a781';
+
+  const shortSleeve = ['siren', 'aria'].includes(operatorId);
+  const fingerless = ['phoenix', 'siren', 'aria', 'valkyrie', 'kagura'].includes(operatorId);
+  const useSpecDark = ['urban', 'stealth_ops'].includes(outfitId);
+
+  let sleevePrimary = outfit?.primary || '#334155';
+  let cuffHex = outfit?.secondary || '#1e293b';
+  let watchAccent = outfit?.accent || '#38bdf8';
+  let gloveHex = '#18181b';
+
+  if (operatorId === 'phoenix') {
+    sleevePrimary = outfitId === 'urban' ? '#232730' : outfit.primary;
+    cuffHex = outfitId === 'urban' ? '#12151c' : outfit.secondary;
+    watchAccent = '#94a3b8';
+    gloveHex = '#14171f';
+  } else if (operatorId === 'kagura') {
+    sleevePrimary = useSpecDark ? '#151922' : outfit.primary;
+    cuffHex = useSpecDark ? '#0f131b' : outfit.secondary;
+    watchAccent = outfitId === 'urban' ? '#06b6d4' : (outfit?.accent || '#06b6d4');
+  } else if (operatorId === 'shadow') {
+    sleevePrimary = useSpecDark ? '#141923' : outfit.primary;
+    cuffHex = '#0b1017';
+    watchAccent = '#10b981';
+  } else if (operatorId === 'titan') {
+    sleevePrimary = outfitId === 'urban' ? '#475569' : outfit.primary;
+    cuffHex = '#1e293b';
+    watchAccent = '#f59e0b';
+    gloveHex = '#334155';
+  } else if (operatorId === 'valkyrie') {
+    cuffHex = '#7f1d1d';
+    watchAccent = '#ef4444';
+  } else if (operatorId === 'aria') {
+    cuffHex = outfit?.accent || '#22d3ee';
+    watchAccent = '#ec4899';
+  }
+
+  return {
+    isFemale,
+    isSwimwear,
+    skinTone,
+    shortSleeve,
+    fingerless,
+    sleevePrimary,
+    cuffHex,
+    watchAccent,
+    gloveHex,
+    hasBracer: operatorId === 'kagura' || operatorId === 'titan',
+    hasWatch: !isSwimwear && operatorId !== 'aria'
+  };
+}
+
 export function createFirstPersonRig(weaponId, skinId, attachments, outfitId = 'urban', operatorId = null) {
   const root = new THREE.Group();
   const outfit = OUTFITS[outfitId] || OUTFITS.urban;
-  const opCfg = operatorId ? (OPERATORS[operatorId] || OPERATORS.vanguard) : null;
-  const isSwimwear = Boolean(outfit.isSwimwear);
-  const isFemale = Boolean(opCfg?.gender === 'female');
+  const prof = getOperatorFpArmProfile(operatorId || 'vanguard', outfitId, outfit);
+  const { isSwimwear, isFemale, shortSleeve, fingerless } = prof;
   const gun = createWeaponModel(weaponId, skinId, attachments);
-  const outfitTex = getOutfitTextures(outfitId, outfit.primary, outfit.secondary, outfit.accent);
+  const outfitTex = getOutfitTextures(outfitId, prof.sleevePrimary, prof.cuffHex, prof.watchAccent);
 
   const sleeveMat = new THREE.MeshStandardMaterial({
-    map: outfitTex.map,
+    map: ['phoenix', 'kagura', 'shadow'].includes(operatorId) && outfitId === 'urban' ? null : outfitTex.map,
+    color: ['phoenix', 'kagura', 'shadow'].includes(operatorId) && outfitId === 'urban' ? prof.sleevePrimary : '#ffffff',
     bumpMap: outfitTex.bumpMap,
-    bumpScale: 0.015,
-    roughness: 0.70
+    bumpScale: 0.014,
+    roughness: operatorId === 'kagura' || operatorId === 'titan' ? 0.36 : 0.68,
+    metalness: operatorId === 'titan' ? 0.55 : (operatorId === 'kagura' ? 0.25 : 0.06)
   });
-  const cuffMat = new THREE.MeshStandardMaterial({ color: outfit.secondary, roughness: 0.62 });
-  const gloveMat = new THREE.MeshStandardMaterial({ color: '#18181b', roughness: 0.45, metalness: 0.28 });
-  const knuckleMat = new THREE.MeshStandardMaterial({ color: '#27272a', roughness: 0.25, metalness: 0.80 });
-  const skinMat = new THREE.MeshStandardMaterial({ color: outfit.skinTone || '#d6a781', roughness: 0.46, metalness: 0.02 });
-  const armMat = isSwimwear ? skinMat : sleeveMat;
-  const wristRingMat = isSwimwear
-    ? new THREE.MeshStandardMaterial({ color: outfit.accent || '#fde047', metalness: 0.78, roughness: 0.22 })
-    : cuffMat;
-  const armRTop = isSwimwear || isFemale ? 0.039 : 0.046;
-  const armRBot = isSwimwear || isFemale ? 0.031 : 0.038;
-  const watchFaceMat = new THREE.MeshBasicMaterial({ map: getWatchFaceTexture(outfit.accent || '#38bdf8') });
+  const cuffMat = new THREE.MeshStandardMaterial({ color: prof.cuffHex, roughness: 0.56, metalness: 0.22 });
+  const gloveMat = new THREE.MeshStandardMaterial({ color: prof.gloveHex, roughness: 0.44, metalness: operatorId === 'titan' ? 0.65 : 0.26 });
+  const knuckleMat = new THREE.MeshStandardMaterial({ color: '#27272a', roughness: 0.26, metalness: 0.78 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: prof.skinTone, roughness: 0.44, metalness: operatorId === 'titan' && !isSwimwear ? 0.68 : 0.02 });
+  const glowAccentMat = new THREE.MeshStandardMaterial({ color: prof.watchAccent, emissive: prof.watchAccent, emissiveIntensity: 1.15, roughness: 0.22 });
+  const bangleMat = new THREE.MeshStandardMaterial({ color: outfit.accent || '#fde047', metalness: 0.86, roughness: 0.18 });
+  const watchFaceMat = new THREE.MeshBasicMaterial({ map: getWatchFaceTexture(prof.watchAccent) });
 
-  // Right Arm + Carbon-Knuckle Glove + Trigger Finger
+  // Choose sleeve vs bare forearm skin matching selected character & outfit!
+  const upperArmMat = isSwimwear ? skinMat : sleeveMat;
+  const forearmMat = (isSwimwear || shortSleeve) ? skinMat : sleeveMat;
+  const handMat = isSwimwear ? skinMat : gloveMat;
+  const fingerMat = (isSwimwear || fingerless) ? skinMat : gloveMat;
+
+  const armRTop = isSwimwear || isFemale ? 0.037 : 0.046;
+  const armRBot = isSwimwear || isFemale ? 0.029 : 0.037;
+  const wristBandPos = new THREE.Vector3();
+
+  // Right Arm + Articulated Grip Fingers matching Operator Outfit/Gloves
   const rArmGroup = new THREE.Group();
-  connectLimbSegment(rArmGroup, new THREE.Vector3(0.14, -0.15, 0.38), new THREE.Vector3(0.03, -0.09, 0.14), armRTop, armRBot, armMat);
-  const rHand = new THREE.Mesh(new THREE.CapsuleGeometry(isFemale ? 0.022 : 0.026, 0.048, 6, 10), isSwimwear ? skinMat : gloveMat);
+  const rShoulder = new THREE.Vector3(0.14, -0.15, 0.38);
+  const rMid = new THREE.Vector3(0.085, -0.12, 0.26);
+  const rWrist = new THREE.Vector3(0.03, -0.09, 0.14);
+  if (!isSwimwear && shortSleeve) {
+    connectLimbSegment(rArmGroup, rShoulder, rMid, armRTop, armRTop * 0.94, upperArmMat);
+    connectLimbSegment(rArmGroup, rMid, rWrist, armRTop * 0.90, armRBot, forearmMat);
+    const hem = new THREE.Mesh(new THREE.CylinderGeometry(armRTop * 0.95, armRTop * 0.95, 0.018, 12), cuffMat);
+    hem.rotation.x = Math.PI / 2;
+    hem.position.copy(rMid);
+    rArmGroup.add(hem);
+  } else {
+    connectLimbSegment(rArmGroup, rShoulder, rWrist, armRTop, armRBot, forearmMat);
+  }
+
+  const rHand = new THREE.Mesh(new THREE.CapsuleGeometry(isFemale ? 0.020 : 0.025, 0.044, 6, 10), handMat);
   rHand.rotation.x = Math.PI / 2;
   rHand.position.set(0.018, -0.078, 0.095);
-  const rKnuckle = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.014, 0.032), isSwimwear ? wristRingMat : knuckleMat);
-  rKnuckle.position.set(0.018, -0.052, 0.088);
-  const rTriggerFinger = new THREE.Mesh(new THREE.CapsuleGeometry(0.0065, 0.028, 4, 6), skinMat);
+  rArmGroup.add(rHand);
+
+  if (!isSwimwear) {
+    const rKnuckle = new THREE.Mesh(new THREE.BoxGeometry(isFemale ? 0.044 : 0.052, 0.012, 0.028), operatorId === 'valkyrie' ? cuffMat : knuckleMat);
+    rKnuckle.position.set(0.018, -0.054, 0.088);
+    rArmGroup.add(rKnuckle);
+    if (prof.hasBracer) {
+      const rBracer = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.010, 0.115), glowAccentMat);
+      rBracer.position.set(0.095, -0.095, 0.25);
+      rBracer.rotation.y = -0.35;
+      rArmGroup.add(rBracer);
+    }
+  }
+  const rTriggerFinger = new THREE.Mesh(new THREE.CapsuleGeometry(0.006, 0.028, 4, 6), fingerMat);
   rTriggerFinger.rotation.x = Math.PI / 2;
   rTriggerFinger.position.set(0.015, -0.044, 0.058);
-  rArmGroup.add(rHand, rKnuckle, rTriggerFinger);
+  for (let f = 0; f < 3; f++) {
+    const gFinger = new THREE.Mesh(new THREE.CapsuleGeometry(0.0065, 0.022, 4, 6), fingerMat);
+    gFinger.rotation.z = Math.PI / 2;
+    gFinger.position.set(0.005, -0.064 - f * 0.013, 0.082 + f * 0.004);
+    rArmGroup.add(gFinger);
+  }
+  rArmGroup.add(rTriggerFinger);
 
-  // Left Arm + Tactical Smartwatch / Beach Bangle + Sculpted Supporting Hand
+  // Left Arm + Character Wrist Gear (Bikini Bangle vs Tactical Watch/Bracer) + Supporting Hand
   const isShort = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven', 'knife', 'karambit'].includes(weaponId);
   const lArmGroup = new THREE.Group();
   const lWrist = new THREE.Vector3(-0.028, -0.056, isShort ? 0.045 : -0.13);
   const lElbow = new THREE.Vector3(-0.18, -0.15, isShort ? 0.28 : 0.16);
-  connectLimbSegment(lArmGroup, lElbow, lWrist, armRTop, armRBot, armMat);
+  const lMid = new THREE.Vector3().lerpVectors(lElbow, lWrist, 0.45);
+  if (!isSwimwear && shortSleeve) {
+    connectLimbSegment(lArmGroup, lElbow, lMid, armRTop, armRTop * 0.94, upperArmMat);
+    connectLimbSegment(lArmGroup, lMid, lWrist, armRTop * 0.90, armRBot, forearmMat);
+    const lHem = new THREE.Mesh(new THREE.CylinderGeometry(armRTop * 0.95, armRTop * 0.95, 0.018, 12), cuffMat);
+    lHem.rotation.x = Math.PI / 2;
+    lHem.position.copy(lMid);
+    lArmGroup.add(lHem);
+  } else {
+    connectLimbSegment(lArmGroup, lElbow, lWrist, armRTop, armRBot, forearmMat);
+  }
 
-  const lCuff = new THREE.Mesh(new THREE.CylinderGeometry(armRBot + 0.002, armRBot + 0.002, isSwimwear ? 0.016 : 0.038, 12), wristRingMat);
-  lCuff.rotation.x = Math.PI / 2;
-  lCuff.position.copy(lWrist).add(new THREE.Vector3(-0.012, -0.008, 0.02));
-  lCuff.rotation.y = 0.28;
+  if (isSwimwear) {
+    // Only slender beach bangle bracelet when wearing bikini — zero black watch or glove pads!
+    const bangle = new THREE.Mesh(new THREE.TorusGeometry(armRBot + 0.004, 0.0035, 8, 18), bangleMat);
+    bangle.rotation.y = 0.28;
+    bangle.position.copy(lWrist).add(new THREE.Vector3(-0.008, -0.004, 0.018));
+    lArmGroup.add(bangle);
+  } else {
+    const lCuff = new THREE.Mesh(new THREE.CylinderGeometry(armRBot + 0.0025, armRBot + 0.0025, 0.036, 12), cuffMat);
+    lCuff.rotation.x = Math.PI / 2;
+    lCuff.position.copy(lWrist).add(new THREE.Vector3(-0.012, -0.008, 0.02));
+    lCuff.rotation.y = 0.28;
+    lArmGroup.add(lCuff);
 
-  const watchBand = new THREE.Mesh(new THREE.CylinderGeometry(0.033, 0.033, 0.022, 12), knuckleMat);
-  watchBand.rotation.x = Math.PI / 2;
-  watchBand.position.copy(lWrist);
-  const watchScreen = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.009, 0.030), watchFaceMat);
-  watchScreen.position.copy(lWrist).add(new THREE.Vector3(0.008, 0.028, 0));
+    if (prof.hasWatch) {
+      wristBandPos.copy(lWrist);
+      const watchBand = new THREE.Mesh(new THREE.CylinderGeometry(armRBot + 0.0035, armRBot + 0.0035, 0.018, 12), knuckleMat);
+      watchBand.rotation.x = Math.PI / 2;
+      watchBand.position.copy(wristBandPos);
+      const watchScreen = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.008, 0.027), operatorId === 'phoenix' ? knuckleMat : watchFaceMat);
+      watchScreen.position.copy(wristBandPos).add(new THREE.Vector3(0.006, 0.026, 0));
+      lArmGroup.add(watchBand, watchScreen);
+    }
+    if (prof.hasBracer) {
+      const lBracer = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.010, 0.115), glowAccentMat);
+      lBracer.position.copy(lMid).add(new THREE.Vector3(-0.028, 0.018, 0));
+      lBracer.rotation.y = 0.28;
+      lArmGroup.add(lBracer);
+    }
+  }
 
-  const lHand = new THREE.Mesh(new THREE.CapsuleGeometry(isFemale ? 0.022 : 0.026, 0.048, 6, 10), isSwimwear ? skinMat : gloveMat);
+  const lHand = new THREE.Mesh(new THREE.CapsuleGeometry(isFemale ? 0.020 : 0.025, 0.046, 6, 10), handMat);
   lHand.rotation.x = Math.PI / 2;
   lHand.position.set(-0.014, -0.044, isShort ? 0.020 : -0.19);
-  const lKnuckle = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.013, 0.034), isSwimwear ? cuffMat : knuckleMat);
-  lKnuckle.position.set(-0.014, -0.019, isShort ? 0.018 : -0.19);
-  const lThumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.0075, 0.028, 4, 6), skinMat);
+  lArmGroup.add(lHand);
+  if (!isSwimwear) {
+    const lKnuckle = new THREE.Mesh(new THREE.BoxGeometry(isFemale ? 0.045 : 0.053, 0.012, 0.032), operatorId === 'valkyrie' ? cuffMat : knuckleMat);
+    lKnuckle.position.set(-0.014, -0.019, isShort ? 0.018 : -0.19);
+    lArmGroup.add(lKnuckle);
+  }
+  const lThumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.007, 0.028, 4, 6), fingerMat);
   lThumb.rotation.x = Math.PI / 2;
   lThumb.position.set(-0.025, -0.014, isShort ? 0.015 : -0.19);
-
-  lArmGroup.add(lCuff, watchBand, watchScreen, lHand, lKnuckle, lThumb);
+  for (let f = 0; f < 4; f++) {
+    const supFinger = new THREE.Mesh(new THREE.CapsuleGeometry(0.006, 0.024, 4, 6), fingerMat);
+    supFinger.rotation.z = Math.PI / 2;
+    supFinger.position.set(-0.006, -0.032, (isShort ? 0.006 : -0.205) + f * 0.012);
+    lArmGroup.add(supFinger);
+  }
+  lArmGroup.add(lThumb);
 
   // Invisible barrel tip anchor for bullet tracer spawn (no obstructive yellow muzzle flash)
   const flashGroup = new THREE.Object3D();
   flashGroup.position.copy(gun.userData.muzzlePos);
 
   root.add(gun, rArmGroup, lArmGroup, flashGroup);
-  root.userData = { gun, flashGroup, lArm: lArmGroup, rArm: rArmGroup };
+  root.userData = { gun, flashGroup, lArm: lArmGroup, rArm: rArmGroup, operatorId: operatorId || 'vanguard', outfitId };
   return root;
 }
 
@@ -2887,30 +3028,32 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
     bones.head.quaternion.copy(_q4);
   }
 
-  const mountYaw = isVictory && !isShort ? 0.44 : 0.0;
-  const mountPitch = pitch + recoil * 0.42;
+  const mountYaw = isVictory && !isShort ? 0.34 : 0.0;
+  const mountPitch = (isVictory ? -0.04 : pitch) + recoil * 0.42;
 
-  // Deterministic 2-bone tactical weapon grip solver (zero frame oscillation)
+  // Deterministic 2-bone tactical weapon grip solver (zero frame oscillation + palm-aligned wrist roll)
   if (bones.upperArmR && bones.lowerArmR && bones.handR) {
     const uRDir = isShort
       ? new THREE.Vector3(0.28, -0.62 + recoil * 0.3, -0.73)
       : (isVictory
-        ? new THREE.Vector3(0.32, -0.78, -0.54)
-        : new THREE.Vector3(0.28, -0.74 + pitch * 0.2, -0.61));
+        ? new THREE.Vector3(0.42, -0.68, -0.58)
+        : new THREE.Vector3(0.32, -0.72 + pitch * 0.2, -0.62));
     aimBoneSegmentWorld(bones.upperArmR, bones.lowerArmR, uRDir.applyQuaternion(bodyWorldQ), 1.0);
 
     const lRDir = isShort
       ? new THREE.Vector3(-0.20, 0.24 + pitch * 0.65 + recoil * 0.7, -0.95)
       : (isVictory
-        ? new THREE.Vector3(-0.16, 0.26, -0.95)
-        : new THREE.Vector3(-0.28, 0.36 + pitch * 0.55 + recoil * 0.65, -0.89));
+        ? new THREE.Vector3(-0.24, 0.14, -0.96)
+        : new THREE.Vector3(-0.26, 0.32 + pitch * 0.55 + recoil * 0.65, -0.91));
     aimBoneSegmentWorld(bones.lowerArmR, bones.handR, lRDir.applyQuaternion(bodyWorldQ), 1.0);
   }
 
   if (bones.upperArmL && bones.lowerArmL && bones.handL && !isMelee) {
     const uLDir = isShort
       ? new THREE.Vector3(0.30, -0.58, -0.75)
-      : new THREE.Vector3(0.22, -0.64 + pitch * 0.2, -0.73);
+      : (isVictory
+        ? new THREE.Vector3(0.18, -0.68, -0.70)
+        : new THREE.Vector3(0.22, -0.64 + pitch * 0.2, -0.73));
     aimBoneSegmentWorld(bones.upperArmL, bones.lowerArmL, uLDir.applyQuaternion(bodyWorldQ), 1.0);
 
     const rHandW = new THREE.Vector3();
@@ -2925,11 +3068,24 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
     ).normalize();
     const fwdWorld = gunFwdLocal.applyQuaternion(bodyWorldQ);
     const upWorld = new THREE.Vector3(0, 1, 0).applyQuaternion(bodyWorldQ);
-    const guardOffset = isShort ? 0.04 : 0.24;
+    const guardOffset = isShort ? 0.04 : 0.22;
     const guardWorld = rHandW.clone()
       .addScaledVector(fwdWorld, guardOffset)
-      .addScaledVector(upWorld, isShort ? -0.02 : 0.01);
-    aimBoneSegmentWorld(bones.lowerArmL, bones.handL, guardWorld.sub(lElbowW), 1.0);
+      .addScaledVector(upWorld, isShort ? -0.025 : -0.012);
+    const lForeDirW = guardWorld.clone().sub(lElbowW);
+    aimBoneSegmentWorld(bones.lowerArmL, bones.handL, lForeDirW, 1.0);
+
+    // Roll Left Wrist inward & palm-up so fingers cradle UNDER handguard instead of cutting across receiver
+    bones.handL.updateMatrixWorld(true);
+    const axisL = lForeDirW.clone().normalize();
+    _q1.setFromAxisAngle(axisL, 1.35);
+    bones.handL.getWorldQuaternion(_q2);
+    _q4.multiplyQuaternions(_q1, _q2);
+    if (bones.handL.parent) {
+      bones.handL.parent.getWorldQuaternion(_q3).invert();
+      _q4.premultiply(_q3);
+    }
+    bones.handL.quaternion.copy(_q4);
   }
 
   // Sync weaponMount squarely inside HandR in bodyRoot uniform scale space

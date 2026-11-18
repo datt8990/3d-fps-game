@@ -730,19 +730,32 @@ function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
       modelPos.copy(p);
       let changed = false;
 
-      // 0. Smoothly slim athletic torso/waist & tailor baggy outer VRoid clothes tightly to waist/ribs (smooth radial fade avoids arm/hip seam kinks)
-      if (p.y > hipY - 0.10 && p.y < bustY + 0.12 && Math.abs(p.x) < 0.21) {
-        const xFade = Math.max(0, Math.min(1, (0.21 - Math.abs(p.x)) / 0.05));
-        const yTopFade = Math.max(0, Math.min(1, (bustY + 0.12 - p.y) / 0.06));
-        const torsoScaleX = 1 - (isOuterGarment && !isSwimwear ? 0.115 : 0.055) * xFade * yTopFade;
-        modelPos.x *= torsoScaleX;
-        if (isOuterGarment && !isSwimwear && p.y < bustY - 0.04) {
-          // Pull loose boxy sweater/skirt hem horizontally & front/back slightly closer to slender figure
-          const hemWeight = Math.max(0, Math.min(1, (bustY - 0.04 - p.y) / 0.18)) * xFade;
-          modelPos.x *= 1 - 0.065 * hemWeight;
-          if (modelPos.z < 0.01) modelPos.z *= 1 - 0.06 * hemWeight;
+      if (!isSwimwear) {
+        // Tailored clothed uniform: inner covered Body_00_SKIN stays tucked 8-12mm inside outer Tops/Bottoms so glutes/hips NEVER poke through skirts!
+        const xFade = Math.max(0, Math.min(1, (0.20 - Math.abs(p.x)) / 0.055));
+        const yBotFade = Math.max(0, Math.min(1, (p.y - (hipY - 0.08)) / 0.06));
+        const yTopFade = Math.max(0, Math.min(1, (bustY + 0.10 - p.y) / 0.06));
+        const torsoMask = xFade * yBotFade * yTopFade;
+
+        if (!isOuterGarment && torsoMask > 0.001) {
+          // Tuck covered body skin inside garments cleanly (leaves arms, shoulders & bare thighs untouched)
+          modelPos.x *= 1 - 0.115 * torsoMask;
+          modelPos.z *= 1 - 0.095 * torsoMask;
+          changed = true;
+        } else if (isOuterGarment && torsoMask > 0.001) {
+          // Slender tailored uniform fit + subtle waist taper while keeping garment wider than inner body
+          const waistFocus = Math.exp(-Math.pow((p.y - waistY) / 0.11, 2));
+          modelPos.x *= 1 - (0.045 + 0.030 * waistFocus) * torsoMask;
+          changed = true;
         }
-        changed = true;
+      } else {
+        // Bikini / Summer Swimwear: sleek slender silhouette directly on Body_00_SKIN
+        if (p.y > hipY - 0.10 && p.y < bustY + 0.12 && Math.abs(p.x) < 0.21) {
+          const xFade = Math.max(0, Math.min(1, (0.21 - Math.abs(p.x)) / 0.05));
+          const yTopFade = Math.max(0, Math.min(1, (bustY + 0.12 - p.y) / 0.06));
+          modelPos.x *= 1 - 0.055 * xFade * yTopFade;
+          changed = true;
+        }
       }
 
       // 1. Vong 1 (Bust fullness - proportional rounded projection in front of chest)
@@ -756,7 +769,8 @@ function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
           const bridge = Math.exp(-((p.x / 0.028) ** 2 + ((p.y - bustY) / 0.050) ** 2)) * 0.35;
           const wBust = Math.min(1.0, lobe + bridge * 0.25) * frontGate;
           if (wBust > 0.01) {
-            modelPos.z -= wBust * 0.026;
+            const bustProj = !isSwimwear && !isOuterGarment ? 0.010 : (!isSwimwear ? 0.028 : 0.026);
+            modelPos.z -= wBust * bustProj;
             modelPos.y -= wBust * 0.004;
             changed = true;
           }
@@ -767,12 +781,12 @@ function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
       if (Math.abs(p.y - waistY) < 0.08 && Math.abs(p.x) < 0.16) {
         const wWaist = Math.exp(-Math.pow((p.y - waistY) / 0.052, 2));
         if (wWaist > 0.01) {
-          modelPos.x *= 1 - 0.022 * wWaist;
+          modelPos.x *= 1 - 0.020 * wWaist;
           changed = true;
         }
       }
 
-      // 3. Vong 3 (Sleek hips sideways + sculpted fuller rear projection +Z)
+      // 3. Vong 3 (Sleek hips sideways + sculpted fuller rear projection +Z; garments loft cleanly above skin)
       if (p.y > hipY - 0.16 && p.y < hipY + 0.135 && Math.abs(p.x) < 0.22) {
         const rearGate = Math.max(0, Math.min(1, (p.z - 0.002) / 0.050));
         if (rearGate > 0.01) {
@@ -782,7 +796,8 @@ function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
           const midBridge = Math.exp(-(p.x * p.x) / 0.002) * 0.42;
           const wGlute = rearGate * wGluteY * Math.min(1.0, Math.max(cheekL, cheekR) + midBridge);
           if (wGlute > 0.01) {
-            modelPos.z += wGlute * 0.035;
+            const gluteProj = !isSwimwear && !isOuterGarment ? 0.012 : (!isSwimwear ? 0.040 : 0.035);
+            modelPos.z += wGlute * gluteProj;
             modelPos.y += wGlute * 0.008;
             changed = true;
           }
@@ -957,12 +972,12 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
           const useBlackSpecOps = (key === 'vita' || key === 'vivi' || isPhoenix) && outCfg?.id === 'urban';
           const suitPrim = useBlackSpecOps ? '#232730' : primaryHex;
           const suitSec = useBlackSpecOps ? '#11151d' : secHex;
-          applyRecoloredClothingMat(mat, suitPrim, suitSec, 0.24, 0.72);
+          applyRecoloredClothingMat(mat, suitPrim, suitSec, 0.34, 0.78);
           mat.roughness = (key === 'vita' || key === 'vivi') ? 0.38 : 0.48;
           mat.metalness = (key === 'vita' || key === 'vivi') ? 0.18 : 0.06;
         } else if (mName.includes('shoes_')) {
           const bootCol = ((key === 'vita' || key === 'vivi' || isPhoenix) && outCfg?.id === 'urban') ? '#14171e' : vestHex;
-          applyRecoloredClothingMat(mat, bootCol, secHex, 0.22, 0.65);
+          applyRecoloredClothingMat(mat, bootCol, secHex, 0.30, 0.70);
           mat.roughness = 0.36;
           mat.metalness = 0.24;
         } else if (mName.includes('hair')) {

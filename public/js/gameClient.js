@@ -103,6 +103,7 @@ export class FPSGameClient {
     this.radioOpen = false;
 
     this.fpRig = null;
+    this.fpSignature = '';
     this.vmKickZ = 0;
     this.vmKickPitch = 0;
     this.recoilAccumPitch = 0;
@@ -497,6 +498,13 @@ export class FPSGameClient {
         this.localMeta = p;
       }
     }
+    if (this.active && this.localMeta && this.local.weaponId) {
+      const wId = this.local.weaponId;
+      const sig = `${wId}|${this.localMeta.skins?.[wId] || 'default'}|${this.localMeta.outfit || 'urban'}|${this.localMeta.operator || 'vanguard'}|${JSON.stringify(this.localMeta.attachments?.[wId] || {})}`;
+      if (sig !== this.fpSignature) {
+        this.rebuildFirstPersonRig(wId);
+      }
+    }
   }
 
   rebuildFirstPersonRig(weaponId) {
@@ -508,6 +516,7 @@ export class FPSGameClient {
     const att = this.localMeta?.attachments?.[weaponId] || {};
     const outfitId = this.localMeta?.outfit || 'urban';
     const operatorId = this.localMeta?.operator || 'vanguard';
+    this.fpSignature = `${weaponId}|${skinId}|${outfitId}|${operatorId}|${JSON.stringify(att)}`;
 
     this.fpRig = createFirstPersonRig(weaponId, skinId, att, outfitId, operatorId);
     this.fpRig.position.set(0.22, -0.22, -0.38);
