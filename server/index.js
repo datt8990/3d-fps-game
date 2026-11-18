@@ -13,9 +13,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
 const PORT = Number(process.env.PORT) || 3000;
 
-// Serve static assets & local vendor modules
-app.use(express.static(path.join(ROOT_DIR, 'public')));
-app.use('/shared', express.static(path.join(ROOT_DIR, 'shared')));
+// Serve static assets & local vendor modules (disable ES module stale browser caching during updates)
+const noCacheOpts = {
+  etag: false,
+  lastModified: false,
+  setHeaders: (res, filePath) => {
+    if (!/\.(glb|png|jpg|webp|woff2?)$/i.test(filePath)) {
+      res.set('Cache-Control', 'no-store');
+    }
+  }
+};
+app.use(express.static(path.join(ROOT_DIR, 'public'), noCacheOpts));
+app.use('/shared', express.static(path.join(ROOT_DIR, 'shared'), noCacheOpts));
 app.use('/vendor/three', express.static(path.join(ROOT_DIR, 'node_modules', 'three')));
 app.use('/vendor/peerjs', express.static(path.join(ROOT_DIR, 'node_modules', 'peerjs', 'dist')));
 

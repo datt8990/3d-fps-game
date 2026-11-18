@@ -286,6 +286,8 @@ function renderOperatorsTab() {
   const currentOp = OPERATORS[viewOpId] || OPERATORS.vanguard;
   const currentOut = OUTFITS[viewOutId] || OUTFITS.urban;
 
+  const opTag = document.getElementById('operators-panel-tag');
+  if (opTag) opTag.textContent = `${Object.keys(OPERATORS).length} QUÂN NHÂN ĐẶC NHIỆM (NAM & NỮ)`;
   if (opList) {
     opList.innerHTML = Object.values(OPERATORS).map((op) => {
       const unlocked = u.unlocked.operators.includes(op.id);

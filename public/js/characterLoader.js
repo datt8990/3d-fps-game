@@ -25,13 +25,6 @@ export const CHARACTER_ARCHETYPES = {
     rigType: 'rpm',
     animSource: 'xbot'
   },
-  male_specops: {
-    url: '/assets/models/MaleSpecOps.glb',
-    facingY: Math.PI,
-    scale: 0.98,
-    rigType: 'rpm',
-    animSource: 'xbot'
-  },
   orion: {
     url: '/assets/models/Avatar_Orion.glb',
     facingY: 0,
@@ -43,6 +36,13 @@ export const CHARACTER_ARCHETYPES = {
     url: '/assets/models/VitaFemale.glb',
     facingY: 0,
     scale: 1.02,
+    rigType: 'vroid',
+    animSource: 'xbot'
+  },
+  vivi: {
+    url: '/assets/models/ViviFemale.glb',
+    facingY: 0,
+    scale: 1.22,
     rigType: 'vroid',
     animSource: 'xbot'
   },
@@ -78,12 +78,12 @@ export function resolveCharacterArchetype(operatorId = 'vanguard') {
       return 'shibu';
     case 'aria':
       return 'sample_a';
-    case 'kagura':
+    case 'phoenix':
       return 'vita';
+    case 'kagura':
+      return 'vivi';
     case 'ghost':
       return 'rpm';
-    case 'phoenix':
-      return 'male_specops';
     case 'titan':
       return 'xbot';
     case 'shadow':
@@ -608,11 +608,90 @@ function createVroidBikiniBodyTexture(srcTex, primaryHex, secHex, accentHex) {
   }
 }
 
-// Sculpt fuller balanced feminine hourglass proportions (Vong 1 Bust, Vong 2 Waist, Vong 3 Hips & Glutes)
-function applyFemaleCurveSculpt(modelRoot) {
+// Creates Phoenix tactical skin texture: bare upper thighs + sheer dark charcoal thigh-high stockings + garters + dark sleeve/gloves
+function createPhoenixTacticalBodyTexture(srcTex, suitHex = '#232730', trimHex = '#11151d') {
+  if (typeof document === 'undefined') return null;
+  const cacheKey = `phx_tac_${srcTex?.uuid || 'x'}_${suitHex}_${trimHex}`;
+  if (bikiniTexCache.has(cacheKey)) return bikiniTexCache.get(cacheKey);
+  try {
+    const W = 512, H = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const skinHex = '#f9d6c1';
+    ctx.fillStyle = skinHex;
+    ctx.fillRect(0, 0, W, H);
+    if (srcTex?.image?.width) {
+      ctx.drawImage(srcTex.image, 0, 0, W, H);
+    }
+    const imgData = ctx.getImageData(0, 0, W, H);
+    const d = imgData.data;
+    const cSuit = new THREE.Color(suitHex);
+    const sr = cSuit.r * 255, sg = cSuit.g * 255, sb = cSuit.b * 255;
+
+    for (let py = 0; py < H; py++) {
+      const v = py / H;
+      for (let px = 0; px < W; px++) {
+        const u = px / W;
+        const idx = (py * W + px) * 4;
+        const isOuter = u < 0.236 || u > 0.764;
+        const isTorso = !isOuter;
+
+        if (isTorso && v >= 0.145 && v <= 0.65) {
+          // Sleek dark tactical collar shirt & shorts
+          d[idx] = Math.round(sr); d[idx + 1] = Math.round(sg); d[idx + 2] = Math.round(sb); d[idx + 3] = 255;
+        } else if (isTorso && v >= 0.65 && v <= 0.76) {
+          // Boots/socks interior
+          d[idx] = 24; d[idx + 1] = 26; d[idx + 2] = 32; d[idx + 3] = 255;
+        } else if (isOuter && v < 0.14) {
+          // Bare upper thigh skin gap
+          d[idx] = 248; d[idx + 1] = 208; d[idx + 2] = 184; d[idx + 3] = 255;
+        } else if (isOuter && v >= 0.14 && v < 0.49) {
+          // Sheer dark charcoal thigh-high stockings (semi-sheer blend over skin)
+          const sheer = v < 0.165 ? 0.92 : 0.76;
+          d[idx] = Math.round(248 * (1 - sheer) + sr * sheer);
+          d[idx + 1] = Math.round(208 * (1 - sheer) + sg * sheer);
+          d[idx + 2] = Math.round(184 * (1 - sheer) + sb * sheer);
+          d[idx + 3] = 255;
+        } else if (isOuter && v >= 0.50) {
+          // Tactical long sleeves & dark fingerless gloves
+          const isHandSkin = v > 0.955;
+          if (isHandSkin) {
+            d[idx] = 248; d[idx + 1] = 208; d[idx + 2] = 184;
+          } else {
+            d[idx] = Math.round(sr * (v > 0.85 ? 0.78 : 1.0));
+            d[idx + 1] = Math.round(sg * (v > 0.85 ? 0.78 : 1.0));
+            d[idx + 2] = Math.round(sb * (v > 0.85 ? 0.78 : 1.0));
+          }
+          d[idx + 3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // Garter straps on outer thighs & crisp collar detail
+    ctx.fillStyle = trimHex;
+    ctx.fillRect(0, H * 0.140, W * 0.236, H * 0.018);
+    ctx.fillRect(W * 0.764, H * 0.140, W * 0.236, H * 0.018);
+    ctx.fillRect(W * 0.236, H * 0.46, W * 0.528, H * 0.025); // Tactical waist belt
+
+    const outTex = new THREE.CanvasTexture(canvas);
+    outTex.colorSpace = THREE.SRGBColorSpace;
+    outTex.flipY = srcTex ? srcTex.flipY : false;
+    outTex.wrapS = THREE.ClampToEdgeWrapping;
+    outTex.wrapT = THREE.ClampToEdgeWrapping;
+    outTex.needsUpdate = true;
+    bikiniTexCache.set(cacheKey, outTex);
+    return outTex;
+  } catch {
+    return null;
+  }
+}
+
+// Sculpt slender athletic anime proportions + Vong 1 & Vong 3 curves (tailoring loose cloth meshes inward when not in bikini)
+function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
   modelRoot.updateMatrixWorld(true);
   const bustL = modelRoot.getObjectByName('J_Sec_L_Bust1');
-  const bustR = modelRoot.getObjectByName('J_Sec_R_Bust1');
   const hipsB = modelRoot.getObjectByName('J_Bip_C_Hips');
   if (!hipsB) return;
 
@@ -623,11 +702,10 @@ function applyFemaleCurveSculpt(modelRoot) {
   else bp.set(0.056, hp.y + 0.265, -0.075);
 
   const bustY = bp.y - 0.012;
-  const xBust = Math.max(0.052, Math.abs(bp.x));
+  const xBust = Math.max(0.050, Math.abs(bp.x));
   const waistY = hp.y + 0.115;
   const hipY = hp.y - 0.052;
 
-  const mInv = new THREE.Matrix4();
   const invWorld = new THREE.Matrix4().copy(modelRoot.matrixWorld).invert();
   const p = new THREE.Vector3();
   const modelPos = new THREE.Vector3();
@@ -640,9 +718,9 @@ function applyFemaleCurveSculpt(modelRoot) {
       : (child.material?.name || '');
     if (/face|eye|hair|shoes_/i.test(matName)) return;
 
+    const isOuterGarment = /(tops_|bottoms_|accessory)/i.test(matName);
     child.geometry = child.geometry.clone();
     const posAttr = child.geometry.attributes.position;
-    mInv.copy(child.matrixWorld).invert();
     const childToModel = new THREE.Matrix4().multiplyMatrices(invWorld, child.matrixWorld);
     const modelToChild = new THREE.Matrix4().copy(childToModel).invert();
 
@@ -652,51 +730,59 @@ function applyFemaleCurveSculpt(modelRoot) {
       modelPos.copy(p);
       let changed = false;
 
-      // 1. Vong 1 (Bust fullness - balanced rounded projection in front of chest)
-      if (p.y > bustY - 0.13 && p.y < bustY + 0.13 && Math.abs(p.x) < 0.185 && p.z < 0.02) {
+      // 0. Smoothly slim athletic torso/waist & tailor baggy outer VRoid clothes tightly to waist/ribs (smooth radial fade avoids arm/hip seam kinks)
+      if (p.y > hipY - 0.10 && p.y < bustY + 0.12 && Math.abs(p.x) < 0.21) {
+        const xFade = Math.max(0, Math.min(1, (0.21 - Math.abs(p.x)) / 0.05));
+        const yTopFade = Math.max(0, Math.min(1, (bustY + 0.12 - p.y) / 0.06));
+        const torsoScaleX = 1 - (isOuterGarment && !isSwimwear ? 0.115 : 0.055) * xFade * yTopFade;
+        modelPos.x *= torsoScaleX;
+        if (isOuterGarment && !isSwimwear && p.y < bustY - 0.04) {
+          // Pull loose boxy sweater/skirt hem horizontally & front/back slightly closer to slender figure
+          const hemWeight = Math.max(0, Math.min(1, (bustY - 0.04 - p.y) / 0.18)) * xFade;
+          modelPos.x *= 1 - 0.065 * hemWeight;
+          if (modelPos.z < 0.01) modelPos.z *= 1 - 0.06 * hemWeight;
+        }
+        changed = true;
+      }
+
+      // 1. Vong 1 (Bust fullness - proportional rounded projection in front of chest)
+      if (p.y > bustY - 0.12 && p.y < bustY + 0.12 && Math.abs(p.x) < 0.18 && p.z < 0.02) {
         const frontGate = Math.max(0, Math.min(1, (-p.z - 0.012) / 0.065));
         if (frontGate > 0.001) {
-          const dy = (p.y - bustY) / 0.074;
-          const dxL = (p.x + xBust) / 0.064;
-          const dxR = (p.x - xBust) / 0.064;
+          const dy = (p.y - bustY) / 0.072;
+          const dxL = (p.x + xBust * 0.92) / 0.060;
+          const dxR = (p.x - xBust * 0.92) / 0.060;
           const lobe = Math.max(Math.exp(-(dxL * dxL + dy * dy)), Math.exp(-(dxR * dxR + dy * dy)));
-          const bridge = Math.exp(-((p.x / 0.030) ** 2 + ((p.y - bustY) / 0.052) ** 2)) * 0.35;
+          const bridge = Math.exp(-((p.x / 0.028) ** 2 + ((p.y - bustY) / 0.050) ** 2)) * 0.35;
           const wBust = Math.min(1.0, lobe + bridge * 0.25) * frontGate;
           if (wBust > 0.01) {
-            modelPos.z -= wBust * 0.028;
-            modelPos.x += Math.sign(p.x) * wBust * 0.004 * Math.min(1, Math.abs(p.x) / 0.025);
-            modelPos.y -= wBust * 0.005;
+            modelPos.z -= wBust * 0.026;
+            modelPos.y -= wBust * 0.004;
             changed = true;
           }
         }
       }
 
-      // 2. Vong 2 (Subtle natural athletic waist line - avoid harsh shelf pinch)
-      if (Math.abs(p.y - waistY) < 0.085 && Math.abs(p.x) < 0.165) {
-        const wWaist = Math.exp(-Math.pow((p.y - waistY) / 0.055, 2));
+      // 2. Vong 2 (Subtle trim waist)
+      if (Math.abs(p.y - waistY) < 0.08 && Math.abs(p.x) < 0.16) {
+        const wWaist = Math.exp(-Math.pow((p.y - waistY) / 0.052, 2));
         if (wWaist > 0.01) {
-          modelPos.x *= 1 - 0.018 * wWaist;
+          modelPos.x *= 1 - 0.022 * wWaist;
           changed = true;
         }
       }
 
-      // 3. Vong 3 (Sleek proportional hips sideways + full lifted rounded rear glutes +Z)
-      if (p.y > hipY - 0.16 && p.y < hipY + 0.14 && Math.abs(p.x) < 0.22) {
-        const wHipY = Math.exp(-Math.pow((p.y - hipY) / 0.10, 2));
-        const sideGate = Math.max(0, Math.min(1, (Math.abs(p.x) - 0.03) / 0.065));
-        if (wHipY * sideGate > 0.01) {
-          modelPos.x += Math.sign(p.x) * wHipY * sideGate * 0.006;
-          changed = true;
-        }
-        const rearGate = Math.max(0, Math.min(1, (p.z - 0.002) / 0.052));
+      // 3. Vong 3 (Sleek hips sideways + sculpted fuller rear projection +Z)
+      if (p.y > hipY - 0.16 && p.y < hipY + 0.135 && Math.abs(p.x) < 0.22) {
+        const rearGate = Math.max(0, Math.min(1, (p.z - 0.002) / 0.050));
         if (rearGate > 0.01) {
-          const wGluteY = Math.exp(-Math.pow((p.y - (hipY - 0.018)) / 0.098, 2));
-          const cheekL = Math.exp(-Math.pow((p.x + 0.048) / 0.072, 2));
-          const cheekR = Math.exp(-Math.pow((p.x - 0.048) / 0.072, 2));
-          const midBridge = Math.exp(-(p.x * p.x) / 0.0022) * 0.42;
+          const wGluteY = Math.exp(-Math.pow((p.y - (hipY - 0.018)) / 0.095, 2));
+          const cheekL = Math.exp(-Math.pow((p.x + 0.046) / 0.068, 2));
+          const cheekR = Math.exp(-Math.pow((p.x - 0.046) / 0.068, 2));
+          const midBridge = Math.exp(-(p.x * p.x) / 0.002) * 0.42;
           const wGlute = rearGate * wGluteY * Math.min(1.0, Math.max(cheekL, cheekR) + midBridge);
           if (wGlute > 0.01) {
-            modelPos.z += wGlute * 0.036;
+            modelPos.z += wGlute * 0.035;
             modelPos.y += wGlute * 0.008;
             changed = true;
           }
@@ -743,7 +829,8 @@ function applyFemaleCurveSculpt(modelRoot) {
 
 export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlowColor) {
   const isSwimwear = Boolean(outCfg?.isSwimwear);
-  const isVroidFemale = ['vita', 'shino', 'shibu', 'sample_a'].includes(key);
+  const isVroidFemale = ['vita', 'vivi', 'shino', 'shibu', 'sample_a'].includes(key);
+  const isPhoenix = opCfg?.id === 'phoenix';
   const primaryHex = outCfg?.primary || (opCfg?.id === 'aria' ? '#22d3ee' : '#38bdf8');
   const secHex = outCfg?.secondary || '#1e293b';
   const vestHex = outCfg?.vest || secHex;
@@ -853,25 +940,45 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
           mat.roughness = 0.42;
           mat.metalness = 0.02;
           mat.envMapIntensity = 0.88;
+        } else if (mName.includes('body_00_skin') && isPhoenix && !isSwimwear) {
+          const phxSuit = outCfg?.id === 'urban' ? '#232730' : primaryHex;
+          const phxTrim = outCfg?.id === 'urban' ? '#12151c' : secHex;
+          const phxTex = createPhoenixTacticalBodyTexture(mat.map, phxSuit, phxTrim);
+          if (phxTex) {
+            mat.map = phxTex;
+            mat.emissive.set('#ffffff');
+            mat.emissiveMap = phxTex;
+            mat.emissiveIntensity = 0.14;
+          }
+          mat.alphaTest = 0;
+          mat.transparent = false;
+          mat.roughness = 0.48;
         } else if (mName.includes('tops_') || mName.includes('bottoms_') || mName.includes('accessory')) {
-          const useBlackSpecOps = key === 'vita' && outCfg?.id === 'urban';
-          const suitPrim = useBlackSpecOps ? '#1c2331' : primaryHex;
-          const suitSec = useBlackSpecOps ? '#0b101b' : secHex;
+          const useBlackSpecOps = (key === 'vita' || key === 'vivi' || isPhoenix) && outCfg?.id === 'urban';
+          const suitPrim = useBlackSpecOps ? '#232730' : primaryHex;
+          const suitSec = useBlackSpecOps ? '#11151d' : secHex;
           applyRecoloredClothingMat(mat, suitPrim, suitSec, 0.24, 0.72);
-          mat.roughness = key === 'vita' ? 0.36 : 0.48;
-          mat.metalness = key === 'vita' ? 0.22 : 0.06;
+          mat.roughness = (key === 'vita' || key === 'vivi') ? 0.38 : 0.48;
+          mat.metalness = (key === 'vita' || key === 'vivi') ? 0.18 : 0.06;
         } else if (mName.includes('shoes_')) {
-          const bootCol = (key === 'vita' && outCfg?.id === 'urban') ? '#111827' : vestHex;
+          const bootCol = ((key === 'vita' || key === 'vivi' || isPhoenix) && outCfg?.id === 'urban') ? '#14171e' : vestHex;
           applyRecoloredClothingMat(mat, bootCol, secHex, 0.22, 0.65);
           mat.roughness = 0.36;
           mat.metalness = 0.24;
         } else if (mName.includes('hair')) {
-          mat.roughness = 0.36;
-          mat.metalness = 0.14;
-          if (mat.map) {
-            mat.emissive.set('#ffffff');
-            mat.emissiveMap = mat.map;
-            mat.emissiveIntensity = 0.12;
+          if (isPhoenix) {
+            // Pure platinum silver-white hair like reference Spec-Ops photo
+            mat.color.set('#f1f5f9');
+            mat.emissive.set('#e2e8f0');
+            mat.emissiveIntensity = 0.18;
+          } else {
+            mat.roughness = 0.36;
+            mat.metalness = 0.14;
+            if (mat.map) {
+              mat.emissive.set('#ffffff');
+              mat.emissiveMap = mat.map;
+              mat.emissiveIntensity = 0.12;
+            }
           }
         } else {
           // Luminous anime face, eyes & porcelain skin
@@ -973,7 +1080,7 @@ export function instantiateGlbInstance(loadedBundle, opCfg, outCfg, teamGlowColo
   const cloned = SkeletonUtils.clone(gltf.scene);
   const key = Object.keys(CHARACTER_ARCHETYPES).find((k) => CHARACTER_ARCHETYPES[k] === cfg) || 'soldier';
   if (cfg.rigType === 'vroid') {
-    applyFemaleCurveSculpt(cloned);
+    applyFemaleCurveSculpt(cloned, Boolean(outCfg?.isSwimwear));
   }
   const scaleMult = opCfg?.helmetStyle === 'heavy' ? 1.07 : 1.0;
   cloned.scale.setScalar(cfg.scale * scaleMult);

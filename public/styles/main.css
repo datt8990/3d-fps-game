@@ -671,6 +671,16 @@ kbd {
   flex-direction: column;
   gap: 8px;
 }
+#operators-list {
+  gap: 5px;
+}
+#operators-list .item-card {
+  padding: 6px 10px;
+}
+#operators-list .item-card .muted {
+  font-size: 11px;
+  line-height: 1.2;
+}
 .item-card {
   padding: 10px 12px;
   border-radius: 8px;

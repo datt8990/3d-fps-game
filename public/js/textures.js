@@ -607,20 +607,35 @@ export function getWeaponSkinTexture(skinId = 'default') {
   ctx.fillRect(0, 0, 512, 512);
 
   if (skin.pattern === 'solid') {
-    // Brushed anodized gunmetal with machined micro-grooves & subtle panel seams
+    // Realistic Parkerized phosphate gunmetal with directional brush strokes, grain speckles & panel seams
     const grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, '#363b45');
-    grad.addColorStop(0.45, '#252930');
-    grad.addColorStop(1, '#191c22');
+    grad.addColorStop(0, '#3e4450');
+    grad.addColorStop(0.28, '#2d323b');
+    grad.addColorStop(0.72, '#22262e');
+    grad.addColorStop(1, '#16191f');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 512, 512);
-    for (let y = 0; y < 512; y += 3) {
-      ctx.fillStyle = y % 6 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.05)';
+    for (let y = 0; y < 512; y += 2) {
+      ctx.fillStyle = y % 4 === 0 ? 'rgba(255,255,255,0.035)' : 'rgba(0,0,0,0.055)';
       ctx.fillRect(0, y, 512, 1);
+    }
+    // Fine Parkerized bead-blasted steel micro-speckle
+    for (let i = 0; i < 2400; i++) {
+      const px = (i * 73) % 512;
+      const py = (i * 139 + Math.floor(i / 7) * 19) % 512;
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.07)';
+      ctx.fillRect(px, py, 2, 1);
     }
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 2;
     ctx.strokeRect(18, 18, 476, 476);
+    // Subtle receiver pins & stamped ribbing accents
+    ctx.fillStyle = 'rgba(15,18,24,0.45)';
+    for (const [rx, ry] of [[68, 92], [68, 420], [444, 92], [444, 420], [256, 76], [256, 436]]) {
+      ctx.beginPath();
+      ctx.arc(rx, ry, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   } else if (skin.pattern === 'stripes') {
     // Asiimov precision sci-fi geometric plating
     const grad = ctx.createLinearGradient(0, 0, 512, 512);
@@ -1017,5 +1032,96 @@ export function getStudioEnvMap() {
   tex.mapping = THREE.EquirectangularReflectionMapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   miscTextureCache.set('studio_env', tex);
+  return tex;
+}
+
+export function getWeaponMetalBumpTexture() {
+  if (miscTextureCache.has('weapon_metal_bump')) return miscTextureCache.get('weapon_metal_bump');
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, 256, 256);
+  // Directional CNC milling / brushed steel micro-streaks
+  for (let y = 0; y < 256; y += 2) {
+    const v = 118 + ((y * 17) % 20);
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.fillRect(0, y, 256, 1);
+  }
+  for (let i = 0; i < 1600; i++) {
+    const x = (i * 53) % 256;
+    const y = (i * 97) % 256;
+    const v = i % 2 === 0 ? 152 : 102;
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.fillRect(x, y, 2, 1);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(3, 3);
+  miscTextureCache.set('weapon_metal_bump', tex);
+  return tex;
+}
+
+export function getWoodStockTexture(tone = '#85461e') {
+  const key = `wood_stock_${tone}`;
+  if (miscTextureCache.has(key)) return miscTextureCache.get(key);
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = tone;
+  ctx.fillRect(0, 0, 256, 256);
+  // Warm amber laminated hardwood birch/walnut rings
+  const g = ctx.createLinearGradient(0, 0, 256, 256);
+  g.addColorStop(0, 'rgba(245, 158, 11, 0.20)');
+  g.addColorStop(0.5, 'rgba(67, 20, 7, 0.24)');
+  g.addColorStop(1, 'rgba(180, 83, 9, 0.16)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+
+  for (let y = 0; y < 256; y += 4) {
+    ctx.strokeStyle = y % 8 === 0 ? 'rgba(54, 21, 8, 0.34)' : 'rgba(217, 119, 6, 0.16)';
+    ctx.lineWidth = y % 12 === 0 ? 2.2 : 1.1;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    for (let x = 0; x <= 256; x += 32) {
+      const wave = Math.sin(x * 0.045 + y * 0.12) * 3.5;
+      ctx.lineTo(x, y + wave);
+    }
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  miscTextureCache.set(key, tex);
+  return tex;
+}
+
+export function getPolymerGripTexture(baseHex = '#1f242d') {
+  const key = `poly_grip_${baseHex}`;
+  if (miscTextureCache.has(key)) return miscTextureCache.get(key);
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = baseHex;
+  ctx.fillRect(0, 0, 256, 256);
+  // Checkered anti-slip grip stippling
+  ctx.strokeStyle = 'rgba(0,0,0,0.42)';
+  ctx.lineWidth = 1.5;
+  for (let i = -256; i < 512; i += 12) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 256, 256); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(i, 256); ctx.lineTo(i + 256, 0); ctx.stroke();
+  }
+  for (let y = 0; y < 256; y += 8) {
+    for (let x = (y % 16 === 0 ? 0 : 4); x < 256; x += 8) {
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillRect(x, y, 2, 2);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(3, 3);
+  miscTextureCache.set(key, tex);
   return tex;
 }

@@ -191,15 +191,16 @@ export const OPERATORS = {
   },
   phoenix: {
     id: 'phoenix',
-    name: 'PHOENIX',
-    role: 'Chiến Y Đặc Nhiệm',
+    name: 'PHOENIX (NỮ)',
+    gender: 'female',
+    role: 'Nữ Đặc Nhiệm Bạc',
     perkLabel: 'Hồi phục +3 HP/giây ngoài giao tranh',
-    desc: 'Chuyên gia sinh tồn tiền tuyến với khả năng tự hồi phục sinh lực sau 4 giây rời giao tranh.',
-    speedMult: 1.01,
+    desc: 'Nữ đặc nhiệm tóc bạc với giáp ngực chiến thuật, 3 băng đạn trước ngực, ống phát sáng chiến thuật, tất đùi và bao súng đùi.',
+    speedMult: 1.02,
     maxArmor: 105,
-    reloadBonus: 0.05,
+    reloadBonus: 0.06,
     regenPerSec: 3,
-    helmetStyle: 'medic',
+    helmetStyle: 'phoenix_specops',
     unlockCost: 1300
   },
   siren: {
