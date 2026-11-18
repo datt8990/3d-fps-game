@@ -1,5 +1,6 @@
-// Shared 3D Physics, Multi-Block Collision, Circle-AABB Depenetration, Step-Up & Hitbox Raycasting
+// Shared 3D Physics, Spatial-Grid Multi-Block Collision, Heightfield Terrain & Hitbox Raycasting
 import { PHYSICS } from './constants.js';
+import { SWIM_DEPTH } from './terrain.js';
 
 export function directionFromAngles(yaw, pitch) {
   const cp = Math.cos(pitch);
@@ -37,7 +38,97 @@ function overlapsXZ(px, pz, r, box) {
   );
 }
 
-export function canStandAt(px, py, pz, height, r, blocks) {
+// ---------------------------------------------------------------------------------------------
+// Uniform 2D spatial grid so open-world maps with thousands of colliders stay O(local) per query.
+// The grid is attached to the blocks array itself (blocks.__grid) so every existing API keeps its signature.
+// ---------------------------------------------------------------------------------------------
+const EMPTY_LIST = [];
+let queryStamp = 1;
+
+export function buildBlockGrid(blocks, half, cs = 32) {
+  const n = Math.ceil((half * 2) / cs) + 1;
+  const cells = new Array(n * n);
+  const clampI = (v) => (v < 0 ? 0 : (v >= n ? n - 1 : v));
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    const x0 = clampI(Math.floor((b.x - b.w * 0.5 + half) / cs));
+    const x1 = clampI(Math.floor((b.x + b.w * 0.5 + half) / cs));
+    const z0 = clampI(Math.floor((b.z - b.d * 0.5 + half) / cs));
+    const z1 = clampI(Math.floor((b.z + b.d * 0.5 + half) / cs));
+    for (let gz = z0; gz <= z1; gz++) {
+      for (let gx = x0; gx <= x1; gx++) {
+        const idx = gz * n + gx;
+        (cells[idx] || (cells[idx] = [])).push(b);
+      }
+    }
+  }
+  Object.defineProperty(blocks, '__grid', { value: { cs, half, n, cells }, enumerable: false, configurable: true });
+  return blocks;
+}
+
+export function nearBlocks(blocks, x, z, r) {
+  const g = blocks.__grid;
+  if (!g) return blocks;
+  const { cs, half, n, cells } = g;
+  const clampI = (v) => (v < 0 ? 0 : (v >= n ? n - 1 : v));
+  const x0 = clampI(Math.floor((x - r + half) / cs));
+  const x1 = clampI(Math.floor((x + r + half) / cs));
+  const z0 = clampI(Math.floor((z - r + half) / cs));
+  const z1 = clampI(Math.floor((z + r + half) / cs));
+  if (x0 === x1 && z0 === z1) return cells[z0 * n + x0] || EMPTY_LIST;
+  const out = [];
+  const stamp = ++queryStamp;
+  for (let gz = z0; gz <= z1; gz++) {
+    for (let gx = x0; gx <= x1; gx++) {
+      const list = cells[gz * n + gx];
+      if (!list) continue;
+      for (let i = 0; i < list.length; i++) {
+        const b = list[i];
+        if (b._qs !== stamp) { b._qs = stamp; out.push(b); }
+      }
+    }
+  }
+  return out;
+}
+
+function gridRayBlocks(blocks, ox, oz, dx, dz, maxDist) {
+  const g = blocks.__grid;
+  if (!g) return blocks;
+  const { cs, half, n, cells } = g;
+  const out = [];
+  const stamp = ++queryStamp;
+  let cx = Math.floor((ox + half) / cs);
+  let cz = Math.floor((oz + half) / cs);
+  const stepX = dx > 0 ? 1 : -1;
+  const stepZ = dz > 0 ? 1 : -1;
+  const tDeltaX = Math.abs(dx) < 1e-9 ? Infinity : cs / Math.abs(dx);
+  const tDeltaZ = Math.abs(dz) < 1e-9 ? Infinity : cs / Math.abs(dz);
+  const nextBx = (dx > 0 ? (cx + 1) : cx) * cs - half;
+  const nextBz = (dz > 0 ? (cz + 1) : cz) * cs - half;
+  let tMaxX = Math.abs(dx) < 1e-9 ? Infinity : (nextBx - ox) / dx;
+  let tMaxZ = Math.abs(dz) < 1e-9 ? Infinity : (nextBz - oz) / dz;
+  let t = 0;
+  for (let guard = 0; guard < 400; guard++) {
+    if (cx >= 0 && cx < n && cz >= 0 && cz < n) {
+      const list = cells[cz * n + cx];
+      if (list) {
+        for (let i = 0; i < list.length; i++) {
+          const b = list[i];
+          if (b._qs !== stamp) { b._qs = stamp; out.push(b); }
+        }
+      }
+    } else if (t > 0) {
+      break;
+    }
+    if (tMaxX < tMaxZ) { t = tMaxX; tMaxX += tDeltaX; cx += stepX; }
+    else { t = tMaxZ; tMaxZ += tDeltaZ; cz += stepZ; }
+    if (t > maxDist) break;
+  }
+  return out;
+}
+
+export function canStandAt(px, py, pz, height, r, blocksIn) {
+  const blocks = nearBlocks(blocksIn, px, pz, r + 0.1);
   for (let i = 0; i < blocks.length; i++) {
     const box = getBoxBounds(blocks[i]);
     if (!overlapsXZ(px, pz, r - 0.02, box)) continue;
@@ -53,7 +144,7 @@ export function canStandAt(px, py, pz, height, r, blocks) {
  * Guarantees that neither players nor AI bots can ever clip into or walk through walls/corners.
  */
 export function depenetratePlayerXZ(state, height, r, map) {
-  const blocks = map.blocks;
+  const blocks = nearBlocks(map.blocks, state.x, state.z, r + 1.5);
   for (let pass = 0; pass < 3; pass++) {
     let pushed = false;
     for (let i = 0; i < blocks.length; i++) {
@@ -99,7 +190,8 @@ export function depenetratePlayerXZ(state, height, r, map) {
 export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, operatorSpeedMult = 1.0) {
   const clampedDt = Math.min(dt, 0.05);
   const r = PHYSICS.PLAYER_RADIUS;
-  const blocks = map.blocks;
+  const terrain = map.terrain || null;
+  const blocks = nearBlocks(map.blocks, state.x, state.z, 3.2);
 
   // Handle crouch state (ensure headroom before standing up)
   if (input.crouch) {
@@ -121,6 +213,15 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
   }
   if (input.ads) {
     baseSpeed *= PHYSICS.SPEED_ADS_MULT;
+  }
+  if (terrain) {
+    const depth = terrain.depthAt(state.x, state.z);
+    const inFluid = depth > 0.3 && state.y <= terrain.waterLevel + 0.15;
+    state.inWater = inFluid;
+    if (inFluid) {
+      if (depth > SWIM_DEPTH) baseSpeed *= 0.45;
+      else baseSpeed *= 0.74;
+    }
   }
   const moveSpeed = baseSpeed * weaponMoveMult * operatorSpeedMult;
 
@@ -155,17 +256,38 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
   // Gravity
   state.vy -= PHYSICS.GRAVITY * clampedDt;
   if (state.vy < -32) state.vy = -32;
+  const wasOnGround = Boolean(state.onGround);
 
   // Move X with step-up support
   const prevX = state.x;
+  const prevZ = state.z;
   let nextX = prevX + state.vx * clampedDt;
   nextX = resolveAxisX(prevX, nextX, state, height, r, blocks);
   state.x = nextX;
-
-  // Move Z with step-up support
-  const prevZ = state.z;
   let nextZ = prevZ + state.vz * clampedDt;
   nextZ = resolveAxisZ(prevZ, nextZ, state, height, r, blocks);
+
+  // Terrain slope / cliff limit: sheer faces cannot be walked up, gentle hills can
+  if (terrain) {
+    const stepLen = Math.hypot(nextX - prevX, nextZ - prevZ);
+    const gCur = terrain.floorAt(prevX, prevZ);
+    const allow = Math.max(state.y, gCur) + (wasOnGround ? stepLen * 0.95 + 0.14 : 0.32);
+    if (terrain.floorAt(nextX, nextZ) > allow) {
+      if (terrain.floorAt(nextX, prevZ) <= allow) {
+        nextZ = prevZ;
+        state.vz = 0;
+      } else if (terrain.floorAt(prevX, nextZ) <= allow) {
+        nextX = prevX;
+        state.vx = 0;
+      } else {
+        nextX = prevX;
+        nextZ = prevZ;
+        state.vx = 0;
+        state.vz = 0;
+      }
+    }
+  }
+  state.x = nextX;
   state.z = nextZ;
 
   // Enforce multi-block corner depenetration so nothing can ever clip through walls
@@ -174,7 +296,14 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
   // Move Y (floor + blocks, order-independent highest supporting surface)
   let nextY = state.y + state.vy * clampedDt;
   state.onGround = false;
-  let bestFloorY = nextY <= 0 ? 0 : -Infinity;
+  const groundY = terrain ? terrain.floorAt(state.x, state.z) : 0;
+  let bestFloorY = nextY <= groundY ? groundY : -Infinity;
+  if (
+    terrain && bestFloorY === -Infinity && wasOnGround && state.vy <= 0 &&
+    nextY - groundY <= 0.42 + Math.hypot(state.x - prevX, state.z - prevZ) * 1.05
+  ) {
+    bestFloorY = groundY;
+  }
 
   for (let i = 0; i < blocks.length; i++) {
     const box = getBoxBounds(blocks[i]);
@@ -197,6 +326,102 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
   }
 
   state.y = nextY;
+  return state;
+}
+
+/**
+ * Simulates Battle Royale drop-plane, skydive, and parachute glide physics on `map`.
+ */
+export function stepAirbornePhysics(state, input, map, dt, dropPlane = null) {
+  const clampedDt = Math.min(dt, 0.05);
+  const r = PHYSICS.PLAYER_RADIUS;
+  const terrain = map.terrain || null;
+
+  if (state.dropPhase === 'plane' && dropPlane) {
+    state.x = dropPlane.x;
+    state.y = dropPlane.y;
+    state.z = dropPlane.z;
+    state.vx = 0;
+    state.vy = 0;
+    state.vz = 0;
+    state.onGround = false;
+    return state;
+  }
+
+  const isChute = state.dropPhase === 'parachute';
+  const fwdIn = input.forward || 0;
+  const rightIn = input.right || 0;
+  const horizSpeed = isChute ? (fwdIn < 0 ? 10.5 : 19.5) : 32.0;
+  const sinY = Math.sin(input.yaw || 0);
+  const cosY = Math.cos(input.yaw || 0);
+  const fwdX = -sinY;
+  const fwdZ = -cosY;
+  const rightX = cosY;
+  const rightZ = -sinY;
+
+  let wishX = fwdX * fwdIn + rightX * rightIn;
+  let wishZ = fwdZ * fwdIn + rightZ * rightIn;
+  const wishLen = Math.hypot(wishX, wishZ);
+  if (wishLen > 1e-4) {
+    wishX = (wishX / wishLen) * horizSpeed;
+    wishZ = (wishZ / wishLen) * horizSpeed;
+  } else if (isChute) {
+    // Gentle forward canopy glide when neutral so player drifts cleanly
+    wishX = fwdX * 5.2;
+    wishZ = fwdZ * 5.2;
+  }
+
+  const blend = Math.min(1, (isChute ? 4.4 : 3.2) * clampedDt);
+  state.vx = (state.vx || 0) + (wishX - (state.vx || 0)) * blend;
+  state.vz = (state.vz || 0) + (wishZ - (state.vz || 0)) * blend;
+
+  const pitchDive = Math.max(0, -(input.pitch || 0));
+  let targetVy;
+  if (isChute) {
+    // Slow controllable canopy descent: brake (-2.4m/s) with S, standard (-3.8m/s), glide-dive (-6.4m/s)
+    if (fwdIn < 0) targetVy = -2.4;
+    else targetVy = -3.8 - (fwdIn > 0 ? pitchDive * 2.6 : pitchDive * 1.1);
+  } else {
+    targetVy = -20.0 - pitchDive * 22.0;
+  }
+  state.vy = (state.vy || targetVy) + (targetVy - (state.vy || targetVy)) * Math.min(1, 5.0 * clampedDt);
+
+  state.x += state.vx * clampedDt;
+  state.z += state.vz * clampedDt;
+  state.y += state.vy * clampedDt;
+  state.onGround = false;
+
+  const maxW = map.bounds.halfW - r - 0.5;
+  const maxD = map.bounds.halfD - r - 0.5;
+  state.x = Math.max(-maxW, Math.min(maxW, state.x));
+  state.z = Math.max(-maxD, Math.min(maxD, state.z));
+
+  const groundFloorY = terrain ? terrain.floorAt(state.x, state.z) : 0;
+  const agl = state.y - groundFloorY;
+
+  if (!isChute && agl <= 55) {
+    state.dropPhase = 'parachute';
+    state.vy = Math.max(state.vy, -6.5);
+  }
+
+  // Landing surface check (terrain height / water floor or building roof / bridge directly under feet)
+  let surfaceY = groundFloorY;
+  const nearby = nearBlocks(map.blocks, state.x, state.z, r + 1.5);
+  for (let i = 0; i < nearby.length; i++) {
+    const box = getBoxBounds(nearby[i]);
+    if (!overlapsXZ(state.x, state.z, r, box)) continue;
+    if (box.maxY <= state.y + 0.65 && box.maxY > surfaceY) {
+      surfaceY = box.maxY;
+    }
+  }
+
+  if (state.y <= surfaceY + 0.08) {
+    state.y = surfaceY;
+    state.vy = 0;
+    state.onGround = true;
+    state.dropPhase = 'ground';
+    depenetratePlayerXZ(state, PHYSICS.HEIGHT_STAND, r, map);
+  }
   return state;
 }
 
@@ -316,8 +541,42 @@ export function intersectRayAABB(ox, oy, oz, dx, dy, dz, minX, minY, minZ, maxX,
 export function raycastMap(origin, dir, maxDist, map) {
   let closest = null;
   let bestDist = maxDist;
+  const terrain = map.terrain || null;
 
-  if (dir.y < -1e-6 && origin.y > 0) {
+  if (terrain) {
+    const step = 4.0;
+    let prevT = 0;
+    for (let t = step; t <= bestDist; t += step) {
+      const px = origin.x + dir.x * t;
+      const py = origin.y + dir.y * t;
+      const pz = origin.z + dir.z * t;
+      if (Math.abs(px) > map.bounds.halfW || Math.abs(pz) > map.bounds.halfD) break;
+      const th = terrain.heightAt(px, pz);
+      if (py <= th) {
+        let lo = prevT;
+        let hi = t;
+        for (let k = 0; k < 5; k++) {
+          const mid = (lo + hi) * 0.5;
+          const mx = origin.x + dir.x * mid;
+          const my = origin.y + dir.y * mid;
+          const mz = origin.z + dir.z * mid;
+          if (my <= terrain.heightAt(mx, mz)) hi = mid;
+          else lo = mid;
+        }
+        bestDist = hi;
+        const hx = origin.x + dir.x * hi;
+        const hz = origin.z + dir.z * hi;
+        closest = {
+          dist: hi,
+          point: { x: hx, y: terrain.heightAt(hx, hz), z: hz },
+          normal: terrain.normalAt(hx, hz),
+          mat: map.floorMat
+        };
+        break;
+      }
+      prevT = t;
+    }
+  } else if (dir.y < -1e-6 && origin.y > 0) {
     const tFloor = -origin.y / dir.y;
     if (tFloor >= 0 && tFloor < bestDist) {
       bestDist = tFloor;
@@ -334,7 +593,7 @@ export function raycastMap(origin, dir, maxDist, map) {
     }
   }
 
-  const blocks = map.blocks;
+  const blocks = gridRayBlocks(map.blocks, origin.x, origin.z, dir.x, dir.z, bestDist);
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
     const hit = intersectRayAABB(
@@ -363,12 +622,25 @@ export function canWalkBetweenXZ(x1, z1, x2, z2, map, clearanceRadius = 0.46) {
   const dist = Math.hypot(dx, dz);
   if (dist < 0.05) return true;
 
+  const terrain = map.terrain || null;
+  if (terrain) {
+    const samples = Math.max(2, Math.ceil(dist / 12));
+    for (let s = 1; s < samples; s++) {
+      const px = x1 + (dx * s) / samples;
+      const pz = z1 + (dz * s) / samples;
+      if (terrain.slopeAt(px, pz) > 0.78 || terrain.depthAt(px, pz) > SWIM_DEPTH) {
+        return false;
+      }
+    }
+  }
+
   const dirX = dx / dist;
   const dirZ = dz / dist;
   const perpX = -dirZ * clearanceRadius;
   const perpZ = dirX * clearanceRadius;
+  const groundOff = terrain ? terrain.floorAt(x1, z1) : 0;
 
-  // Test 3 parallel rays (center + left shoulder + right shoulder) at chest height y=0.95
+  // Test 3 parallel rays (center + left shoulder + right shoulder) at chest height y=ground+0.95
   const offsets = [
     { ox: 0, oz: 0 },
     { ox: perpX, oz: perpZ },
@@ -377,7 +649,7 @@ export function canWalkBetweenXZ(x1, z1, x2, z2, map, clearanceRadius = 0.46) {
 
   for (const off of offsets) {
     const hit = raycastMap(
-      { x: x1 + off.ox, y: 0.95, z: z1 + off.oz },
+      { x: x1 + off.ox, y: groundOff + 0.95, z: z1 + off.oz },
       { x: dirX, y: 0, z: dirZ },
       dist,
       map
@@ -402,6 +674,7 @@ export function raycastShot(origin, dir, maxRange, map, combatants, shooterId, s
   for (const target of combatants) {
     if (!target || target.id === shooterId || target.dead) continue;
     if (teamBased && shooterTeam && target.team === shooterTeam) continue;
+    if (Math.hypot(target.x - origin.x, target.z - origin.z) > closestDist + 1.5) continue;
 
     const totalH = target.crouching ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
     const headSize = 0.24;

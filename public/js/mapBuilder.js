@@ -1,7 +1,7 @@
 // AAA-Grade 3D Arena Builder: Sculpted Containers, 3D Sandbag Walls, Armored Trucks, Rotating Radar, Sky Dome & Props
 import * as THREE from 'three';
 import { getMapMaterial, getSkyDomeTexture } from './textures.js';
-import { createC4Mesh } from './models.js';
+import { createC4Mesh, createWeaponModel } from './models.js';
 
 const sharedGeos = {
   unitBox: new THREE.BoxGeometry(1, 1, 1),
@@ -332,9 +332,11 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   scene.background = new THREE.Color(mapData.skyColor || '#6989a8');
   scene.fog = new THREE.FogExp2(mapData.fogColor || '#7c96b0', mapData.fogDensity || 0.0045);
 
+  const isOpenWorld = Boolean(mapData.terrain);
+
   // 1. 3D Atmospheric Sky Dome
   const skyDome = new THREE.Mesh(
-    new THREE.SphereGeometry(185, 32, 20),
+    new THREE.SphereGeometry(isOpenWorld ? 3100 : 185, 32, 20),
     new THREE.MeshBasicMaterial({
       map: getSkyDomeTexture(mapData.theme),
       side: THREE.BackSide,
@@ -355,13 +357,14 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   const sunColor = mapData.theme === 'urban_dusk' ? '#fed7aa' : (mapData.theme === 'desert_military' ? '#fef08a' : '#fffbeb');
   const sun = new THREE.DirectionalLight(sunColor, 1.90);
   sun.position.set(38, 62, 30);
+  worldGroup.add(sun.target);
   if (quality !== 'low') {
     sun.castShadow = true;
     const mapSize = quality === 'high' ? 2048 : 1024;
     sun.shadow.mapSize.set(mapSize, mapSize);
     sun.shadow.camera.near = 5;
-    sun.shadow.camera.far = 160;
-    const d = 54;
+    sun.shadow.camera.far = isOpenWorld ? 240 : 160;
+    const d = isOpenWorld ? 72 : 54;
     sun.shadow.camera.left = -d;
     sun.shadow.camera.right = d;
     sun.shadow.camera.top = d;
@@ -375,15 +378,134 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   fillLight.position.set(-35, 28, -30);
   worldGroup.add(fillLight);
 
-  // 3. Ground Plane offset slightly (-0.008m) so block bottoms at y=0 never Z-fight
-  const floorW = mapData.bounds.halfW * 2 + 10;
-  const floorD = mapData.bounds.halfD * 2 + 10;
-  const floorGeo = new THREE.PlaneGeometry(floorW, floorD);
-  const floorMesh = new THREE.Mesh(floorGeo, getMapMaterial(mapData.floorMat));
-  floorMesh.rotation.x = -Math.PI / 2;
-  floorMesh.position.y = -0.008;
-  floorMesh.receiveShadow = quality !== 'low';
-  worldGroup.add(floorMesh);
+  // 3. Ground Surface (Chunked Heightfield Terrain + River/Ocean Water OR Flat Arena Floor)
+  const sectorGroups = [];
+  if (isOpenWorld) {
+    const t = mapData.terrain;
+    const terrainMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.92,
+      metalness: 0.04
+    });
+    const chunkCells = 50; // 50x10m = 500m per frustum-culled terrain sector
+    const rgb = [0, 0, 0];
+    for (let z0 = 0; z0 < t.nx - 1; z0 += chunkCells) {
+      const z1 = Math.min(t.nx - 1, z0 + chunkCells);
+      for (let x0 = 0; x0 < t.nx - 1; x0 += chunkCells) {
+        const x1 = Math.min(t.nx - 1, x0 + chunkCells);
+        const cols = x1 - x0 + 1;
+        const rows = z1 - z0 + 1;
+        const pos = new Float32Array(cols * rows * 3);
+        const col = new Float32Array(cols * rows * 3);
+        const indices = [];
+
+        let ptr = 0;
+        for (let iz = z0; iz <= z1; iz++) {
+          const wz = -t.half + iz * t.cell;
+          for (let ix = x0; ix <= x1; ix++) {
+            const wx = -t.half + ix * t.cell;
+            const wy = t.heights[iz * t.nx + ix];
+            pos[ptr * 3] = wx;
+            pos[ptr * 3 + 1] = wy;
+            pos[ptr * 3 + 2] = wz;
+            t.colorAt(ix, iz, rgb);
+            col[ptr * 3] = rgb[0];
+            col[ptr * 3 + 1] = rgb[1];
+            col[ptr * 3 + 2] = rgb[2];
+            ptr++;
+          }
+        }
+        for (let rz = 0; rz < rows - 1; rz++) {
+          for (let rx = 0; rx < cols - 1; rx++) {
+            const a = rz * cols + rx;
+            const b = a + 1;
+            const c = a + cols;
+            const d = c + 1;
+            // Matches terrain.heightAt (u+v <= 1) diagonal split with +Y outward normal
+            indices.push(a, c, b, b, c, d);
+          }
+        }
+        const tGeo = new THREE.BufferGeometry();
+        tGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        tGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        tGeo.setIndex(indices);
+        tGeo.computeVertexNormals();
+        const tMesh = new THREE.Mesh(tGeo, terrainMat);
+        tMesh.receiveShadow = quality !== 'low';
+        worldGroup.add(tMesh);
+      }
+    }
+
+    // Translucent River / Lake / Ocean Surface at waterLevel
+    const waterGeo = new THREE.PlaneGeometry(t.half * 2 + 1600, t.half * 2 + 1600);
+    const waterMesh = new THREE.Mesh(
+      waterGeo,
+      new THREE.MeshStandardMaterial({
+        color: '#0e7490',
+        roughness: 0.16,
+        metalness: 0.35,
+        transparent: true,
+        opacity: 0.78
+      })
+    );
+    waterMesh.rotation.x = -Math.PI / 2;
+    waterMesh.position.y = t.waterLevel;
+    worldGroup.add(waterMesh);
+
+    // Instanced Forest Trees (2 GPU draw calls for ~900+ trees!)
+    if (mapData.trees?.length && THREE.InstancedMesh) {
+      const dummy = new THREE.Object3D();
+      const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 3.6, 7);
+      trunkGeo.translate(0, 1.8, 0);
+      const trunkMat = new THREE.MeshStandardMaterial({ color: '#5c3c1e', roughness: 0.9 });
+      const trunksMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, mapData.trees.length);
+
+      const leafGeo = new THREE.ConeGeometry(1.85, 5.2, 8);
+      leafGeo.translate(0, 4.6, 0);
+      const leafMat = new THREE.MeshStandardMaterial({ color: '#166534', roughness: 0.85, metalness: 0.04 });
+      const leavesMesh = new THREE.InstancedMesh(leafGeo, leafMat, mapData.trees.length);
+
+      mapData.trees.forEach((tr, i) => {
+        dummy.position.set(tr.x, tr.y, tr.z);
+        dummy.scale.setScalar(tr.scale || 1);
+        dummy.rotation.y = (i * 1.7) % (Math.PI * 2);
+        dummy.updateMatrix();
+        trunksMesh.setMatrixAt(i, dummy.matrix);
+        leavesMesh.setMatrixAt(i, dummy.matrix);
+      });
+      trunksMesh.instanceMatrix.needsUpdate = true;
+      leavesMesh.instanceMatrix.needsUpdate = true;
+      worldGroup.add(trunksMesh, leavesMesh);
+    }
+
+    // Instanced Natural Boulders / Cliff Rocks (1 GPU draw call!)
+    if (mapData.rocks?.length && THREE.InstancedMesh) {
+      const dummy = new THREE.Object3D();
+      const rockGeo = THREE.DodecahedronGeometry
+        ? new THREE.DodecahedronGeometry(1.0, 0)
+        : new THREE.BoxGeometry(1.6, 1.2, 1.6);
+      const rockMat = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.94, metalness: 0.06 });
+      const rocksMesh = new THREE.InstancedMesh(rockGeo, rockMat, mapData.rocks.length);
+      mapData.rocks.forEach((rk, i) => {
+        dummy.position.set(rk.x, rk.y + (rk.ry || 1) * 0.35, rk.z);
+        dummy.scale.set(rk.s || 1.5, rk.ry || 1.2, (rk.s || 1.5) * 0.9);
+        dummy.rotation.set(i * 0.4, i * 1.1, i * 0.2);
+        dummy.updateMatrix();
+        rocksMesh.setMatrixAt(i, dummy.matrix);
+      });
+      rocksMesh.instanceMatrix.needsUpdate = true;
+      worldGroup.add(rocksMesh);
+    }
+  } else {
+    const floorW = mapData.bounds.halfW * 2 + 10;
+    const floorD = mapData.bounds.halfD * 2 + 10;
+    const floorGeo = new THREE.PlaneGeometry(floorW, floorD);
+    const floorMesh = new THREE.Mesh(floorGeo, getMapMaterial(mapData.floorMat));
+    floorMesh.rotation.x = -Math.PI / 2;
+    floorMesh.position.y = -0.008;
+    floorMesh.receiveShadow = quality !== 'low';
+    worldGroup.add(floorMesh);
+  }
 
   const tiledMaterials = new Set([
     'building_brick',
@@ -396,15 +518,36 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   ]);
   const castShadows = quality !== 'low';
 
+  // Spatial sector bucketing on 5km maps so buildings beyond draw radius cull smoothly
+  const sectorMap = new Map();
+  const getTargetParent = (bx, bz) => {
+    if (!isOpenWorld) return worldGroup;
+    const sx = Math.round(bx / 450) * 450;
+    const sz = Math.round(bz / 450) * 450;
+    const key = `${sx}_${sz}`;
+    let grp = sectorMap.get(key);
+    if (!grp) {
+      grp = new THREE.Group();
+      grp.userData.sectorCenter = { x: sx, z: sz };
+      sectorMap.set(key, grp);
+      sectorGroups.push(grp);
+      worldGroup.add(grp);
+    }
+    return grp;
+  };
+
   // 4. Arena Blocks with Rich 3D Architectural & Tactical Detailing
   for (const b of mapData.blocks) {
+    if (b.noVisual) continue;
+    const parentGrp = getTargetParent(b.x, b.z);
+
     if (b.mat === 'sandbag') {
-      worldGroup.add(createSandbagWallGroup(b, castShadows));
+      parentGrp.add(createSandbagWallGroup(b, castShadows));
       continue;
     }
 
     if (mapData.id === 'urban_city' && (b.mat === 'container_blue' || b.mat === 'container_red') && Math.abs(b.d - 6.2) < 0.2) {
-      worldGroup.add(createArmoredTruckGroup(b, castShadows));
+      parentGrp.add(createArmoredTruckGroup(b, castShadows));
       continue;
     }
 
@@ -437,7 +580,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       mesh.add(coping);
     }
 
-    worldGroup.add(mesh);
+    parentGrp.add(mesh);
   }
 
   // 5. Map-Specific Landmarks & Animated 3D Props
@@ -561,8 +704,9 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
 
   let stormMesh = null;
   if (mode === 'survival') {
+    const stormH = isOpenWorld ? 360 : 22;
     stormMesh = new THREE.Mesh(
-      new THREE.CylinderGeometry(1, 1, 22, 48, 1, true),
+      new THREE.CylinderGeometry(1, 1, stormH, 56, 1, true),
       new THREE.MeshBasicMaterial({
         color: '#a855f7',
         transparent: true,
@@ -571,7 +715,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
         depthWrite: false
       })
     );
-    stormMesh.position.y = 11;
+    stormMesh.position.y = stormH * 0.5;
     worldGroup.add(stormMesh);
   }
 
@@ -580,42 +724,255 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     worldGroup,
     worldC4,
     stormMesh,
+    sun,
+    sectorGroups,
     bombMarkers,
     animatedProps
   };
 }
 
-export function createLootCrateMesh(type = 'medkit') {
-  const color = type === 'medkit' ? '#22c55e' : (type === 'armor' ? '#38bdf8' : '#eab308');
+export function createDropPlaneMesh() {
+  const g = new THREE.Group();
+  const hullMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.45, metalness: 0.65 });
+  const darkTrimMat = new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.4, metalness: 0.72 });
+  const stripeMat = new THREE.MeshStandardMaterial({ color: '#f97316', emissive: '#f97316', emissiveIntensity: 0.35, roughness: 0.35 });
+
+  // Main Cargo Fuselage (aligned -Z forward)
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.4, 12.6), hullMat);
+  body.position.set(0, 0, 0);
+  g.add(body);
+
+  const belly = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.55, 11.4), darkTrimMat);
+  belly.position.set(0, -1.25, 0);
+  g.add(belly);
+
+  // Nose Cone & Cockpit Canopy (-Z forward)
+  const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 1.35, 3.2, 8), hullMat);
+  nose.rotation.x = Math.PI / 2;
+  nose.position.set(0, -0.15, -7.8);
+  g.add(nose);
+
+  const cockpit = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.72, 1.5), propMats.glassCab);
+  cockpit.position.set(0, 0.65, -6.3);
+  g.add(cockpit);
+
+  // Rear Cargo Ramp + Drop Beacon (+Z tail)
+  const tailCone = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.6, 3.4), hullMat);
+  tailCone.position.set(0, 0.35, 7.6);
+  g.add(tailCone);
+
+  const rampBeacon = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 10), propMats.glowAmber);
+  rampBeacon.position.set(0, -0.5, 6.9);
+  g.add(rampBeacon);
+
+  // Swept High Wings & Horizontal/Vertical Tail
+  const wings = new THREE.Mesh(new THREE.BoxGeometry(17.5, 0.28, 2.9), hullMat);
+  wings.position.set(0, 1.15, -0.8);
+  g.add(wings);
+
+  const wingTipL = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.32, 2.7), stripeMat);
+  wingTipL.position.set(-8.6, 1.15, -0.8);
+  const wingTipR = wingTipL.clone();
+  wingTipR.position.x = 8.6;
+  g.add(wingTipL, wingTipR);
+
+  const vTail = new THREE.Mesh(new THREE.BoxGeometry(0.28, 3.8, 2.4), hullMat);
+  vTail.position.set(0, 2.8, 7.9);
+  const hTail = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.22, 1.6), hullMat);
+  hTail.position.set(0, 1.25, 8.2);
+  g.add(vTail, hTail);
+
+  // 4 Wing-mounted Turboprop Engines & Spinning Propellers
+  const props = [];
+  for (const px of [-6.0, -3.1, 3.1, 6.0]) {
+    const nacelle = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.38, 2.1, 10), darkTrimMat);
+    nacelle.rotation.x = Math.PI / 2;
+    nacelle.position.set(px, 0.85, -1.7);
+    g.add(nacelle);
+
+    const propGroup = new THREE.Group();
+    propGroup.position.set(px, 0.85, -2.85);
+    const blade1 = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.14, 0.05), stripeMat);
+    const blade2 = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.9, 0.05), stripeMat);
+    propGroup.add(blade1, blade2);
+    g.add(propGroup);
+    props.push(propGroup);
+  }
+
+  g.userData.props = props;
+  return g;
+}
+
+export function createParachuteMesh() {
+  const g = new THREE.Group();
+  const canopyMatA = new THREE.MeshStandardMaterial({
+    color: '#f97316',
+    roughness: 0.65,
+    metalness: 0.05,
+    side: THREE.DoubleSide
+  });
+  const canopyMatB = new THREE.MeshStandardMaterial({
+    color: '#f8fafc',
+    roughness: 0.65,
+    metalness: 0.05,
+    side: THREE.DoubleSide
+  });
+
+  // Curved parachute dome (open hem facing down)
+  const canopy = new THREE.Mesh(
+    new THREE.SphereGeometry(1.42, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.48),
+    canopyMatA
+  );
+  canopy.position.set(0, 2.35, 0);
+  canopy.scale.set(1.18, 0.88, 1.0);
+  g.add(canopy);
+
+  const centerStripe = new THREE.Mesh(
+    new THREE.SphereGeometry(1.435, 10, 6, Math.PI * 0.35, Math.PI * 0.3, 0, Math.PI * 0.47),
+    canopyMatB
+  );
+  centerStripe.position.copy(canopy.position);
+  centerStripe.scale.copy(canopy.scale);
+  g.add(centerStripe);
+
+  // 4 suspension harness risers from shoulder height to canopy rim
+  const cordMat = new THREE.MeshBasicMaterial({ color: '#cbd5e1' });
+  const rimPts = [
+    [-1.4, 2.35, -0.55],
+    [1.4, 2.35, -0.55],
+    [-1.4, 2.35, 0.55],
+    [1.4, 2.35, 0.55]
+  ];
+  for (const [rx, ry, rz] of rimPts) {
+    const start = new THREE.Vector3(rx * 0.14, 1.28, rz * 0.14);
+    const end = new THREE.Vector3(rx, ry, rz);
+    const dir = new THREE.Vector3().subVectors(end, start);
+    const len = dir.length();
+    const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, len, 5), cordMat);
+    cord.position.copy(start).addScaledVector(dir, 0.5);
+    cord.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    g.add(cord);
+  }
+
+  return g;
+}
+
+export function createLootCrateMesh(crateOrType = 'medkit') {
+  const isObj = crateOrType && typeof crateOrType === 'object';
+  const kind = isObj ? (crateOrType.kind || crateOrType.type || 'medkit') : crateOrType;
+  const weaponId = isObj ? crateOrType.weaponId : null;
+  const tier = isObj ? (crateOrType.tier || 1) : 1;
+
+  if (kind === 'deathbox') {
+    // PUBG-style Wooden/Steel Loot Death Crate with Glowing Locator Beam
+    const g = new THREE.Group();
+    const coffin = new THREE.Mesh(
+      new THREE.BoxGeometry(1.08, 0.52, 0.72),
+      new THREE.MeshStandardMaterial({ color: '#5c3c1e', roughness: 0.75, metalness: 0.15 })
+    );
+    coffin.position.y = 0.26;
+    const lid = new THREE.Mesh(
+      new THREE.BoxGeometry(1.14, 0.10, 0.78),
+      new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.4, metalness: 0.7 })
+    );
+    lid.position.y = 0.54;
+    const tag = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.18, 0.80),
+      new THREE.MeshStandardMaterial({ color: '#facc15', emissive: '#ca8a04', emissiveIntensity: 0.65 })
+    );
+    tag.position.y = 0.34;
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.22, 4.5, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color: '#facc15', transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide })
+    );
+    beam.position.y = 2.4;
+    g.add(coffin, lid, tag, beam);
+    g.userData.crateInfo = crateOrType;
+    return g;
+  }
+
+  if (kind === 'weapon' && weaponId) {
+    const isElite = weaponId === 'awp' || weaponId === 'barrett' || weaponId === 'm249' || weaponId === 'scarh' || weaponId === 'm200';
+    const ringColor = isElite ? '#f59e0b' : '#38bdf8';
+    const g = new THREE.Group();
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.46, 0.035, 8, 22),
+      new THREE.MeshBasicMaterial({ color: ringColor })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.04;
+    g.add(ring);
+
+    const aura = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.38, 0.44, 0.04, 16),
+      new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.25 })
+    );
+    aura.position.y = 0.025;
+    g.add(aura);
+
+    const gunModel = createWeaponModel(weaponId, 'default', {});
+    gunModel.scale.setScalar(1.32);
+    gunModel.position.set(0, 0.46, 0);
+    gunModel.rotation.x = 0.18;
+    gunModel.rotation.z = -0.18;
+    g.add(gunModel);
+
+    g.userData.crateInfo = isObj ? crateOrType : { kind, weaponId };
+    return g;
+  }
+
+  const tierColors = { 1: '#94a3b8', 2: '#38bdf8', 3: '#f59e0b' };
+  const colorMap = {
+    medkit: '#22c55e',
+    med: '#22c55e',
+    vest: tierColors[tier] || '#38bdf8',
+    armor: '#38bdf8',
+    helmet: tierColors[tier] || '#60a5fa',
+    bag: tierColors[tier] || '#a855f7',
+    ammo: '#f97316',
+    grenade: '#ef4444',
+    overcharge: '#c084fc'
+  };
+  const color = colorMap[kind] || '#eab308';
   const g = new THREE.Group();
 
   const basePad = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.48, 0.54, 0.08, 12),
+    new THREE.CylinderGeometry(0.42, 0.48, 0.07, 12),
     propMats.darkSteel
   );
-  basePad.position.y = 0.04;
+  basePad.position.y = 0.035;
 
   const box = new THREE.Mesh(
-    new THREE.BoxGeometry(0.64, 0.44, 0.64),
+    new THREE.BoxGeometry(0.56, 0.34, 0.56),
     new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.38, metalness: 0.68 })
   );
-  box.position.y = 0.28;
+  box.position.y = 0.22;
 
   const glowMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.85, roughness: 0.2 });
-  const trim = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.10, 0.68), glowMat);
-  trim.position.y = 0.28;
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.08, 0.60), glowMat);
+  trim.position.y = 0.22;
 
-  // Floating 3D Holographic Emblem above the crate
+  // Floating 3D Holographic Emblem above the item
   const holoGroup = new THREE.Group();
-  holoGroup.position.y = 0.72;
-  if (type === 'medkit') {
+  holoGroup.position.y = 0.62;
+  if (kind === 'medkit' || kind === 'med') {
     const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.08, 0.08), glowMat);
     const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.28, 0.08), glowMat);
     holoGroup.add(c1, c2);
-  } else if (type === 'armor') {
+  } else if (kind === 'vest' || kind === 'armor') {
     const plate = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), glowMat);
     plate.scale.set(1.1, 1.3, 0.45);
     holoGroup.add(plate);
+  } else if (kind === 'helmet') {
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.58), glowMat);
+    holoGroup.add(dome);
+  } else if (kind === 'bag') {
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.34, 0.16), glowMat);
+    holoGroup.add(pack);
+  } else if (kind === 'grenade') {
+    const gr = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 10), glowMat);
+    holoGroup.add(gr);
   } else {
     for (const bx of [-0.08, 0, 0.08]) {
       const round = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.028, 0.24, 8), glowMat);
@@ -625,5 +982,6 @@ export function createLootCrateMesh(type = 'medkit') {
   }
 
   g.add(basePad, box, trim, holoGroup);
+  g.userData.crateInfo = isObj ? crateOrType : { kind };
   return g;
 }

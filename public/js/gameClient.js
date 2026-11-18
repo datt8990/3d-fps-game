@@ -7,8 +7,8 @@ import {
   getEffectiveWeaponStats
 } from '/shared/constants.js';
 import { MAPS } from '/shared/maps.js';
-import { stepPlayerPhysics, depenetratePlayerXZ } from '/shared/physics.js';
-import { buildThreeMap, createLootCrateMesh } from './mapBuilder.js';
+import { stepPlayerPhysics, stepAirbornePhysics, depenetratePlayerXZ } from '/shared/physics.js';
+import { buildThreeMap, createLootCrateMesh, createDropPlaneMesh, createParachuteMesh } from './mapBuilder.js';
 import {
   createFirstPersonRig,
   createOperatorRig,
@@ -63,7 +63,11 @@ export class FPSGameClient {
     this.modeConfig = null;
     this.mapObjects = null;
     this.lootMeshes = new Map();
+    this.lootData = new Map();
     this.grenadeMeshes = new Map();
+    this.dropPlaneData = null;
+    this.dropPlaneMesh = null;
+    this.localChuteRig = null;
 
     this.localId = null;
     this.localMeta = null;
@@ -73,6 +77,7 @@ export class FPSGameClient {
       yaw: 0, pitch: 0,
       onGround: true,
       crouching: false,
+      dropPhase: 'ground',
       eyeHeight: PHYSICS.EYE_STAND,
       hp: 100, maxHp: 100,
       armor: 100, maxArmor: 100,
@@ -84,6 +89,7 @@ export class FPSGameClient {
       primaryId: 'ak47',
       secondaryId: 'deagle',
       meleeId: 'knife',
+      weaponsState: null,
       ammo: 30,
       reserveAmmo: 90,
       grenades: 1,
@@ -100,6 +106,9 @@ export class FPSGameClient {
     this.sniperZoomStage = 0;
     this.pointerLocked = false;
     this.uiModalOpen = false;
+    this.backpackOpen = false;
+    this.bigMapOpen = false;
+    this.mapPingMarker = null;
     this.radioOpen = false;
 
     this.fpRig = null;
@@ -252,14 +261,26 @@ export class FPSGameClient {
 
     window.addEventListener('wheel', (e) => {
       if (!this.active || !this.pointerLocked || this.uiModalOpen || this.local.dead) return;
-      const next = e.deltaY > 0 ? (this.local.slot % 3) + 1 : ((this.local.slot + 1) % 3) + 1;
-      this.requestWeaponSwitch(next);
+      const validSlots = [1, 2, 3].filter((s) => this.mode !== 'survival' || this.local.weaponsState?.[s]?.id);
+      if (validSlots.length > 1) {
+        const curIdx = Math.max(0, validSlots.indexOf(this.local.slot));
+        const next = validSlots[(curIdx + (e.deltaY > 0 ? 1 : validSlots.length - 1)) % validSlots.length];
+        this.requestWeaponSwitch(next);
+      }
     });
 
     window.addEventListener('keydown', (e) => {
       if (!this.active) return;
 
       if (e.code === 'Escape') {
+        if (this.backpackOpen) {
+          this.toggleBackpackModal(false);
+          return;
+        }
+        if (this.bigMapOpen) {
+          this.toggleBigMapModal(false);
+          return;
+        }
         if (this.uiModalOpen) {
           this.closeInGameChat();
           this.toggleBuyWeaponModal(false);
@@ -272,10 +293,20 @@ export class FPSGameClient {
         }
       }
 
-      if (e.code === 'Tab') {
+      if (e.code === 'Tab' || (this.mode === 'survival' && e.code === 'KeyI')) {
         e.preventDefault();
-        this.hud.renderScoreboard(this.enrichPlayersForScoreboard(), this.localId, this.modeConfig?.teamBased);
-        this.hud.toggleScoreboard(true);
+        if (this.mode === 'survival') {
+          this.toggleBackpackModal();
+        } else {
+          this.hud.renderScoreboard(this.enrichPlayersForScoreboard(), this.localId, this.modeConfig?.teamBased);
+          this.hud.toggleScoreboard(true);
+        }
+        return;
+      }
+
+      if (this.mode === 'survival' && e.code === 'KeyM') {
+        e.preventDefault();
+        this.toggleBigMapModal();
         return;
       }
 
@@ -308,13 +339,37 @@ export class FPSGameClient {
 
       this.keys[e.code] = true;
 
+      if (this.mode === 'survival' && !this.local.dead && !this.uiModalOpen) {
+        if (this.local.dropPhase === 'plane' && (e.code === 'KeyF' || e.code === 'Space')) {
+          e.preventDefault();
+          this.triggerDropAction('jump');
+          return;
+        }
+        if (this.local.dropPhase === 'skydive' && (e.code === 'Space' || e.code === 'KeyF')) {
+          e.preventDefault();
+          this.triggerDropAction('open_chute');
+          return;
+        }
+      }
+
       if (e.code === 'Digit1') this.requestWeaponSwitch(1);
       else if (e.code === 'Digit2') this.requestWeaponSwitch(2);
       else if (e.code === 'Digit3') this.requestWeaponSwitch(3);
-      else if (e.code === 'KeyQ') this.requestWeaponSwitch(this.local.slot === 1 ? 2 : 1);
+      else if (e.code === 'KeyQ') {
+        const altSlot = this.local.slot === 1 ? (this.local.secondaryId ? 2 : 3) : (this.local.primaryId ? 1 : 3);
+        this.requestWeaponSwitch(altSlot);
+      }
       else if (e.code === 'KeyR') this.requestReload();
       else if (e.code === 'KeyG') this.requestThrowGrenade();
-      else if (e.code === 'KeyB') this.toggleBuyWeaponModal();
+      else if (e.code === 'Digit7' && this.mode === 'survival') this.useQuickMed(['bandage', 'energy']);
+      else if (e.code === 'Digit8' && this.mode === 'survival') this.useQuickMed(['firstaid', 'medkit', 'bandage']);
+      else if (e.code === 'KeyE' && this.mode === 'survival' && this.local.dropPhase === 'ground' && !this.local.dead) {
+        const nearBox = [...this.lootData.values()].find(
+          (c) => c.kind === 'deathbox' && Math.hypot(c.x - this.local.x, c.z - this.local.z) <= 3.6 && Math.abs((c.y || 0) - this.local.y) < 3.0
+        );
+        if (nearBox) this.toggleBackpackModal(true);
+      }
+      else if (e.code === 'KeyB' && this.mode !== 'survival') this.toggleBuyWeaponModal();
     });
 
     window.addEventListener('keyup', (e) => {
@@ -364,6 +419,80 @@ export class FPSGameClient {
     }
   }
 
+  toggleBackpackModal(forceState) {
+    if (this.mode !== 'survival') return;
+    const modal = document.getElementById('br-backpack-modal');
+    if (!modal) return;
+    const willOpen = forceState !== undefined ? forceState : !this.backpackOpen;
+    this.backpackOpen = willOpen;
+    if (willOpen && this.bigMapOpen) {
+      this.bigMapOpen = false;
+      document.getElementById('br-bigmap-modal')?.classList.add('hidden');
+    }
+    modal.classList.toggle('hidden', !willOpen);
+    this.uiModalOpen = willOpen;
+    if (willOpen) {
+      this.refreshBackpackUI();
+      document.exitPointerLock?.();
+    } else if (this.active) {
+      this.requestLock();
+    }
+  }
+
+  toggleBigMapModal(forceState) {
+    if (this.mode !== 'survival') return;
+    const modal = document.getElementById('br-bigmap-modal');
+    if (!modal) return;
+    const willOpen = forceState !== undefined ? forceState : !this.bigMapOpen;
+    this.bigMapOpen = willOpen;
+    if (willOpen && this.backpackOpen) {
+      this.backpackOpen = false;
+      document.getElementById('br-backpack-modal')?.classList.add('hidden');
+    }
+    modal.classList.toggle('hidden', !willOpen);
+    this.uiModalOpen = willOpen;
+    if (willOpen) {
+      this.hud.drawBigMap?.(
+        this.mapData,
+        { ...this.local, id: this.localId },
+        this.latestStorm,
+        this.dropPlaneData,
+        this.mapPingMarker
+      );
+      document.exitPointerLock?.();
+    } else if (this.active) {
+      this.requestLock();
+    }
+  }
+
+  useQuickMed(preferredIds = ['firstaid', 'medkit', 'bandage', 'energy']) {
+    if (!this.active || this.local.dead || this.mode !== 'survival') return;
+    const meds = this.local.backpack?.meds || {};
+    const picked = preferredIds.find((id) => (meds[id] || 0) > 0);
+    if (!picked) {
+      this.hud.showRoundBanner?.('Không còn Băng gạc / Y tế trong Balo!', '');
+      return;
+    }
+    this.net.send({ type: 'use_med', medId: picked });
+  }
+
+  refreshBackpackUI() {
+    if (!this.backpackOpen || this.mode !== 'survival') return;
+    const nearby = [];
+    for (const c of this.lootData.values()) {
+      if (Math.hypot(c.x - this.local.x, c.z - this.local.z) <= 4.1 && Math.abs((c.y || 0) - this.local.y) <= 3.0) {
+        nearby.push(c);
+      }
+    }
+    this.hud.renderBackpackModal?.({
+      nearbyCrates: nearby,
+      local: this.local,
+      onLootItem: (crateId, itemId) => this.net.send({ type: 'loot_item', crateId, itemId }),
+      onDropItem: (category, key, qty) => this.net.send({ type: 'drop_item', category, key, qty }),
+      onUseMed: (medId) => this.net.send({ type: 'use_med', medId })
+    });
+  }
+
   startMatchSession(payload, localClientId) {
     this.stopMatchSession();
     this.active = true;
@@ -372,10 +501,14 @@ export class FPSGameClient {
 
     this.mapId = payload.mapId || 'warehouse';
     this.mapData = MAPS[this.mapId] || MAPS.warehouse;
+    this.camera.far = this.mapData.terrain ? 3200 : 320;
+    this.camera.updateProjectionMatrix();
     this.mode = payload.mode || 'tdm';
     this.modeConfig = payload.modeConfig;
     this.latestBomb = null;
     this.latestStorm = payload.storm || null;
+    this.dropPlaneData = payload.dropPlane ? { ...payload.dropPlane } : null;
+    this.mapPingMarker = null;
     this.lastWorldStateAt = 0;
 
     this.hud.setRoomCode(payload.room?.code || '');
@@ -395,43 +528,111 @@ export class FPSGameClient {
       team: 'alpha'
     };
 
-    this.local.primaryId = this.localMeta.primary || 'ak47';
-    this.local.secondaryId = this.localMeta.secondary || 'deagle';
     this.local.meleeId = this.localMeta.melee || 'knife';
-    this.local.grenades = this.localMeta.grenades ?? (this.mode === 'practice' ? 5 : 1);
+    if (this.mode === 'survival') {
+      const ws = this.localMeta.weaponsState || {
+        1: { id: null, ammo: 0, reserve: 0, magSize: 0 },
+        2: { id: null, ammo: 0, reserve: 0, magSize: 0 },
+        3: { id: this.local.meleeId, ammo: 0, reserve: 0, magSize: 0 }
+      };
+      this.local.weaponsState = ws;
+      this.local.primaryId = ws[1]?.id || null;
+      this.local.secondaryId = ws[2]?.id || null;
+      this.local.slot = this.localMeta.slot ?? 3;
+      this.local.weaponId = this.localMeta.weaponId || this.local.meleeId;
+      this.local.grenades = this.localMeta.grenades ?? 0;
+      this.local.ammo = this.localMeta.ammo ?? 0;
+      this.local.reserveAmmo = this.localMeta.reserveAmmo ?? 0;
+      this.local.armor = this.localMeta.armor ?? 0;
+      this.local.dropPhase = this.dropPlaneData?.active ? 'plane' : (this.localMeta.dropPhase || 'ground');
+    } else {
+      this.local.primaryId = this.localMeta.primary || 'ak47';
+      this.local.secondaryId = this.localMeta.secondary || 'deagle';
+      this.local.weaponsState = {
+        1: { id: this.local.primaryId },
+        2: { id: this.local.secondaryId },
+        3: { id: this.local.meleeId }
+      };
+      this.local.grenades = this.localMeta.grenades ?? (this.mode === 'practice' ? 5 : 1);
+      this.local.dropPhase = 'ground';
+      this.local.slot = 1;
+      this.local.weaponId = this.local.primaryId;
+      const wStatsInit = getEffectiveWeaponStats(
+        this.local.primaryId,
+        this.localMeta?.attachments?.[this.local.primaryId] || {},
+        this.localMeta?.operator || 'vanguard'
+      );
+      this.local.ammo = this.localMeta.ammo ?? wStatsInit.magSize;
+      this.local.reserveAmmo = this.localMeta.reserveAmmo ?? wStatsInit.reserveAmmo;
+      this.local.armor = this.localMeta.armor ?? 100;
+    }
 
-    // Initialize local position directly to authoritative spawn point so we never start at (0,0,0) inside a central block!
-    const fallbackSpawn = this.mapData.spawns?.alpha?.[0] || { x: -6, y: 0, z: -28, yaw: Math.PI };
-    this.local.x = Number.isFinite(this.localMeta.x) ? this.localMeta.x : fallbackSpawn.x;
-    this.local.y = Number.isFinite(this.localMeta.y) ? this.localMeta.y : (fallbackSpawn.y || 0);
-    this.local.z = Number.isFinite(this.localMeta.z) ? this.localMeta.z : fallbackSpawn.z;
-    this.local.yaw = Number.isFinite(this.localMeta.yaw) ? this.localMeta.yaw : (fallbackSpawn.yaw || Math.PI);
-    this.local.pitch = 0;
-    this.local.vx = 0;
-    this.local.vy = 0;
-    this.local.vz = 0;
-    this.local.dead = false;
-    this.local.onGround = true;
-    depenetratePlayerXZ(this.local, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS, this.mapData);
+    // Initialize local position directly to C-130 plane (BR) or authoritative spawn point
+    if (this.mode === 'survival' && this.dropPlaneData?.active) {
+      this.local.x = this.dropPlaneData.x;
+      this.local.y = this.dropPlaneData.y;
+      this.local.z = this.dropPlaneData.z;
+      this.local.yaw = this.dropPlaneData.yaw || 0;
+      this.local.pitch = -0.38;
+      this.local.vx = 0;
+      this.local.vy = 0;
+      this.local.vz = 0;
+      this.local.dead = false;
+      this.local.onGround = false;
+    } else {
+      const fallbackSpawn = this.mapData.spawns?.alpha?.[0] || { x: -6, y: 0, z: -28, yaw: Math.PI };
+      this.local.x = Number.isFinite(this.localMeta.x) ? this.localMeta.x : fallbackSpawn.x;
+      this.local.y = Number.isFinite(this.localMeta.y) ? this.localMeta.y : (fallbackSpawn.y || 0);
+      this.local.z = Number.isFinite(this.localMeta.z) ? this.localMeta.z : fallbackSpawn.z;
+      this.local.yaw = Number.isFinite(this.localMeta.yaw) ? this.localMeta.yaw : (fallbackSpawn.yaw || Math.PI);
+      this.local.pitch = 0;
+      this.local.vx = 0;
+      this.local.vy = 0;
+      this.local.vz = 0;
+      this.local.dead = false;
+      this.local.onGround = true;
+      if (this.local.dropPhase === 'ground') {
+        depenetratePlayerXZ(this.local, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS, this.mapData);
+      }
+    }
 
-    const wStats = getEffectiveWeaponStats(
-      this.local.primaryId,
-      this.localMeta?.attachments?.[this.local.primaryId] || {},
-      this.localMeta?.operator || 'vanguard'
-    );
-    this.local.slot = 1;
-    this.local.weaponId = this.local.primaryId;
-    this.local.ammo = this.localMeta.ammo ?? wStats.magSize;
-    this.local.reserveAmmo = this.localMeta.reserveAmmo ?? wStats.reserveAmmo;
     this.local.hp = this.localMeta.hp ?? 100;
-    this.local.armor = this.localMeta.armor ?? 100;
     this.local.maxArmor = this.localMeta.maxArmor ?? 100;
 
     this.mapObjects = buildThreeMap(this.scene, this.mapData, this.mode, this.quality);
 
+    if (this.mode === 'survival') {
+      this.dropPlaneMesh = createDropPlaneMesh();
+      if (this.dropPlaneData?.active) {
+        this.dropPlaneMesh.position.set(this.dropPlaneData.x, this.dropPlaneData.y, this.dropPlaneData.z);
+        this.dropPlaneMesh.rotation.y = this.dropPlaneData.yaw || 0;
+      } else {
+        this.dropPlaneMesh.visible = false;
+      }
+      this.mapObjects.worldGroup.add(this.dropPlaneMesh);
+
+      const chuteRig = createOperatorRig({
+        operator: this.localMeta?.operator || 'vanguard',
+        outfit: this.localMeta?.outfit || 'urban',
+        team: this.localMeta?.team || 'ffa',
+        weaponId: this.local.meleeId || 'knife',
+        skins: {},
+        attachments: {},
+        name: '',
+        isAlly: true
+      });
+      chuteRig.chuteCanopy = createParachuteMesh();
+      chuteRig.chuteCanopy.visible = false;
+      chuteRig.group.add(chuteRig.chuteCanopy);
+      chuteRig.group.visible = false;
+      this.mapObjects.worldGroup.add(chuteRig.group);
+      this.localChuteRig = chuteRig;
+    }
+
     for (const crate of payload.lootCrates || []) {
       if (!crate.active) continue;
-      const m = createLootCrateMesh(crate.type);
+      this.lootData.set(crate.id, crate);
+      const m = createLootCrateMesh(crate);
       m.position.set(crate.x, crate.y, crate.z);
       this.mapObjects.worldGroup.add(m);
       this.lootMeshes.set(crate.id, m);
@@ -439,9 +640,10 @@ export class FPSGameClient {
 
     this.camera.position.set(this.local.x, this.local.y + PHYSICS.EYE_STAND, this.local.z);
     this.camera.rotation.y = this.local.yaw;
-    this.camera.rotation.x = 0;
+    this.camera.rotation.x = this.local.pitch;
 
-    this.rebuildFirstPersonRig(this.local.primaryId);
+    this.rebuildFirstPersonRig(this.local.weaponId);
+    if (this.fpRig && this.local.dropPhase !== 'ground') this.fpRig.visible = false;
     this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
     this.refreshHudWeapon();
 
@@ -457,7 +659,17 @@ export class FPSGameClient {
     this.adsBlend = 0;
     this.sniperZoomStage = 0;
     this.uiModalOpen = false;
+    this.backpackOpen = false;
+    this.bigMapOpen = false;
+    this.mapPingMarker = null;
     this.radioOpen = false;
+    this.dropPlaneData = null;
+    this.dropPlaneMesh = null;
+    this.localChuteRig = null;
+    document.getElementById('br-backpack-modal')?.classList.add('hidden');
+    document.getElementById('br-bigmap-modal')?.classList.add('hidden');
+    this.hud.updateDropBanner?.(null);
+    this.hud.updateSurvivalGear?.(null);
     soundEngine.cancelReloadSequence();
     this.hud.toggleRadioMenu(false);
     this.hud.updateCrosshair(6, false, false, 'iron', 0, 1.0);
@@ -473,6 +685,7 @@ export class FPSGameClient {
     }
     this.remoteEntities.clear();
     this.lootMeshes.clear();
+    this.lootData.clear();
 
     for (const gm of this.grenadeMeshes.values()) {
       this.scene.remove(gm);
@@ -523,8 +736,25 @@ export class FPSGameClient {
     this.camera.add(this.fpRig);
   }
 
+  triggerDropAction(action) {
+    if (!this.active || this.local.dead || this.mode !== 'survival') return;
+    if (action === 'jump' && this.local.dropPhase === 'plane') {
+      this.local.dropPhase = 'skydive';
+      this.local.y = (this.dropPlaneData?.y ?? 82) - 2.2;
+      this.local.vy = -12;
+      this.local.onGround = false;
+      this.net.send({ type: 'drop_action', action: 'jump' });
+      soundEngine.playUiTone(620, 0.14);
+    } else if (action === 'open_chute' && this.local.dropPhase === 'skydive') {
+      this.local.dropPhase = 'parachute';
+      this.local.vy = Math.max(this.local.vy || -14, -8.5);
+      this.net.send({ type: 'drop_action', action: 'open_chute' });
+      soundEngine.playUiTone(840, 0.16);
+    }
+  }
+
   getLocalWeaponStats() {
-    const wId = this.local.weaponId || 'ak47';
+    const wId = this.local.weaponId || this.local.meleeId || 'knife';
     const att = this.localMeta?.attachments?.[wId] || {};
     const op = this.localMeta?.operator || 'vanguard';
     return getEffectiveWeaponStats(wId, att, op);
@@ -532,6 +762,7 @@ export class FPSGameClient {
 
   requestWeaponSwitch(slot) {
     if (this.local.dead || slot === this.local.slot) return;
+    if (this.mode === 'survival' && !this.local.weaponsState?.[slot]?.id) return;
     this.adsActive = false;
     this.adsBlend = 0;
     this.sniperZoomStage = 0;
@@ -541,7 +772,7 @@ export class FPSGameClient {
   }
 
   requestReload() {
-    if (this.local.dead) return;
+    if (this.local.dead || this.local.dropPhase !== 'ground') return;
     const st = this.getLocalWeaponStats();
     if (st.isMelee || this.local.ammo >= st.magSize || this.local.reserveAmmo <= 0) return;
     if (performance.now() < this.local.reloadingEnd) return;
@@ -552,7 +783,7 @@ export class FPSGameClient {
   }
 
   requestThrowGrenade() {
-    if (!this.active || this.local.dead || this.uiModalOpen || this.local.grenades <= 0) return;
+    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen || this.local.grenades <= 0) return;
     soundEngine.playGrenadeThrow();
     this.net.send({
       type: 'throw_grenade',
@@ -562,7 +793,7 @@ export class FPSGameClient {
   }
 
   tryFireWeapon(heavyMelee = false) {
-    if (!this.active || this.local.dead || this.uiModalOpen) return;
+    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen) return;
     const now = performance.now();
     if (now < this.local.reloadingEnd) return;
 
@@ -646,17 +877,24 @@ export class FPSGameClient {
       this.local.hp = msg.hp;
       this.local.armor = msg.armor;
       this.local.maxArmor = msg.maxArmor || 100;
-      this.local.slot = msg.slot || 1;
-      this.local.weaponId = msg.weaponId || this.local.primaryId;
+      this.local.slot = msg.slot ?? 1;
+      if (msg.weaponsState) {
+        this.local.weaponsState = msg.weaponsState;
+        this.local.primaryId = msg.weaponsState[1]?.id ?? null;
+        this.local.secondaryId = msg.weaponsState[2]?.id ?? null;
+      }
+      if (msg.dropPhase) this.local.dropPhase = msg.dropPhase;
+      this.local.weaponId = msg.weaponId || this.local.meleeId;
       this.local.ammo = msg.ammo;
       this.local.reserveAmmo = msg.reserveAmmo;
-      this.local.grenades = msg.grenades ?? 1;
+      this.local.grenades = msg.grenades ?? (this.mode === 'survival' ? 0 : 1);
       this.local.reloadingEnd = 0;
       this.adsActive = false;
       this.adsBlend = 0;
       this.sniperZoomStage = 0;
 
       this.rebuildFirstPersonRig(this.local.weaponId);
+      if (this.fpRig && this.local.dropPhase !== 'ground') this.fpRig.visible = false;
       this.hud.setRespawnState(false);
       this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
       this.refreshHudWeapon();
@@ -804,21 +1042,81 @@ export class FPSGameClient {
     }
   }
 
+  onWeaponsSync(msg) {
+    if (msg.weaponsState) this.local.weaponsState = msg.weaponsState;
+    this.local.primaryId = msg.weaponsState?.[1]?.id ?? msg.primary ?? null;
+    this.local.secondaryId = msg.weaponsState?.[2]?.id ?? msg.secondary ?? null;
+    if (msg.slot) this.local.slot = msg.slot;
+    this.local.weaponId = msg.weaponId || this.local.meleeId;
+    this.local.ammo = msg.ammo ?? 0;
+    this.local.reserveAmmo = msg.reserveAmmo ?? 0;
+    if (msg.grenades !== undefined) this.local.grenades = msg.grenades;
+    this.rebuildFirstPersonRig(this.local.weaponId);
+    if (this.fpRig && this.local.dropPhase !== 'ground') this.fpRig.visible = false;
+    this.refreshHudWeapon();
+  }
+
+  onInventorySync(msg) {
+    if (msg.hp !== undefined) this.local.hp = msg.hp;
+    if (msg.maxHp !== undefined) this.local.maxHp = msg.maxHp;
+    if (msg.armor !== undefined) this.local.armor = msg.armor;
+    if (msg.maxArmor !== undefined) this.local.maxArmor = msg.maxArmor;
+    if (msg.gear) this.local.gear = msg.gear;
+    if (msg.backpack) this.local.backpack = msg.backpack;
+    if (msg.backpackWeight !== undefined) this.local.backpackWeight = msg.backpackWeight;
+    if (msg.weaponsState) this.local.weaponsState = msg.weaponsState;
+    if (msg.grenades !== undefined) this.local.grenades = msg.grenades;
+    this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor || 100);
+    this.hud.updateSurvivalGear?.(this.local);
+    this.refreshHudWeapon();
+    this.refreshBackpackUI();
+  }
+
+  onLootUpdated(msg) {
+    if (!msg?.crate) return;
+    if (!msg.crate.active) {
+      this.onLootPicked({ crateId: msg.crate.id });
+      return;
+    }
+    this.lootData.set(msg.crate.id, msg.crate);
+    this.refreshBackpackUI();
+  }
+
+  onLootSpawned(msg) {
+    if (!this.mapObjects?.worldGroup) return;
+    for (const crate of msg.crates || []) {
+      if (!crate.active) continue;
+      this.lootData.set(crate.id, crate);
+      if (this.lootMeshes.has(crate.id)) {
+        this.mapObjects.worldGroup.remove(this.lootMeshes.get(crate.id));
+      }
+      const m = createLootCrateMesh(crate);
+      m.position.set(crate.x, crate.y || 0, crate.z);
+      this.mapObjects.worldGroup.add(m);
+      this.lootMeshes.set(crate.id, m);
+    }
+    this.refreshBackpackUI();
+  }
+
   onLootPicked(msg) {
     const mesh = this.lootMeshes.get(msg.crateId);
     if (mesh && this.mapObjects?.worldGroup) {
       this.mapObjects.worldGroup.remove(mesh);
       this.lootMeshes.delete(msg.crateId);
     }
+    this.lootData.delete(msg.crateId);
     if (msg.playerId === this.localId) {
       this.local.hp = msg.hp;
       this.local.armor = msg.armor;
+      if (msg.maxArmor !== undefined) this.local.maxArmor = msg.maxArmor;
       this.local.ammo = msg.ammo;
       this.local.reserveAmmo = msg.reserveAmmo;
-      this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
+      if (msg.grenades !== undefined) this.local.grenades = msg.grenades;
+      this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor || 100);
       this.refreshHudWeapon();
       soundEngine.playUiTone(880, 0.14);
     }
+    this.refreshBackpackUI();
   }
 
   onWorldState(msg) {
@@ -828,6 +1126,21 @@ export class FPSGameClient {
     this.lastSnapshotPlayers = msg.players || [];
     this.latestBomb = msg.bomb || null;
     this.latestStorm = msg.storm || this.latestStorm;
+    if (msg.dropPlane !== undefined) {
+      this.dropPlaneData = msg.dropPlane;
+    } else if (this.dropPlaneData && this.mode === 'survival') {
+      this.dropPlaneData.active = false;
+    }
+
+    if (this.dropPlaneMesh) {
+      if (this.dropPlaneData?.active) {
+        this.dropPlaneMesh.visible = true;
+        this.dropPlaneMesh.position.set(this.dropPlaneData.x, this.dropPlaneData.y, this.dropPlaneData.z);
+        this.dropPlaneMesh.rotation.y = this.dropPlaneData.yaw || 0;
+      } else {
+        this.dropPlaneMesh.visible = false;
+      }
+    }
 
     // Sync live grenade projectiles
     const activeGrenIds = new Set();
@@ -862,10 +1175,27 @@ export class FPSGameClient {
         this.local.dead = Boolean(ps.dead);
         this.local.hasBomb = Boolean(ps.hasBomb);
         this.local.kills = ps.k || 0;
+        if (this.mode === 'survival' && ps.dp !== undefined) {
+          if (ps.dp === 1) {
+            this.local.dropPhase = 'plane';
+            this.local.x = ps.x;
+            this.local.y = ps.y;
+            this.local.z = ps.z;
+          } else if (this.local.dropPhase === 'plane' && ps.dp >= 2) {
+            this.local.dropPhase = ps.dp === 3 ? 'parachute' : 'skydive';
+            this.local.x = ps.x;
+            this.local.y = ps.y;
+            this.local.z = ps.z;
+            this.local.vy = ps.vy || -12;
+          } else if (ps.dp === 0 && this.local.dropPhase !== 'ground') {
+            this.local.dropPhase = 'ground';
+            if (this.localChuteRig) this.localChuteRig.group.visible = false;
+          }
+        }
         if (this.fpRig) {
           const wSt = this.getLocalWeaponStats();
           const acogHidden = this.adsActive && wSt.opticId === 'acog' && this.adsBlend > 0.62;
-          this.fpRig.visible = !this.local.dead && this.sniperZoomStage === 0 && !acogHidden;
+          this.fpRig.visible = !this.local.dead && this.local.dropPhase === 'ground' && this.sniperZoomStage === 0 && !acogHidden;
         }
         this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
         continue;
@@ -892,6 +1222,12 @@ export class FPSGameClient {
           name: meta.name,
           isAlly
         });
+        let chuteCanopy = null;
+        if (this.mode === 'survival') {
+          chuteCanopy = createParachuteMesh();
+          chuteCanopy.visible = false;
+          rig.group.add(chuteCanopy);
+        }
         rig.group.position.set(ps.x, ps.y, ps.z);
         this.scene.add(rig.group);
         ent = {
@@ -899,6 +1235,7 @@ export class FPSGameClient {
           meta,
           isAlly,
           rig,
+          chuteCanopy,
           current: { x: ps.x, y: ps.y, z: ps.z, yaw: ps.yaw, pitch: ps.pitch },
           pred: { x: ps.x, y: ps.y, z: ps.z },
           predAge: 0,
@@ -939,7 +1276,13 @@ export class FPSGameClient {
       aliveCount
     });
 
-    this.hud.updateBombHUD(this.latestBomb, this.local, this.mapData);
+    if (this.mode === 'bomb') {
+      this.hud.updateBombHUD(this.latestBomb, this.local, this.mapData);
+    } else if (this.hud.bombBannerEl) {
+      this.hud.bombBannerEl.classList.add('hidden');
+      this.hud.bombActionWrap?.classList.add('hidden');
+      if (this.mode !== 'survival') this.hud.interactHintEl?.classList.add('hidden');
+    }
     this.updateWorldModeVisuals();
   }
 
@@ -1061,8 +1404,44 @@ export class FPSGameClient {
       }
     }
 
-    for (const mesh of this.lootMeshes.values()) {
-      mesh.rotation.y += dt * 1.6;
+    for (const [id, mesh] of this.lootMeshes.entries()) {
+      const lc = this.lootData.get(id);
+      if (lc && this.mapData?.terrain) {
+        const d = Math.hypot(lc.x - this.local.x, lc.z - this.local.z);
+        const maxD = lc.kind === 'deathbox' ? 220 : 120;
+        mesh.visible = d <= maxD;
+        if (!mesh.visible) continue;
+      }
+      if (lc?.kind !== 'deathbox') mesh.rotation.y += dt * 1.6;
+    }
+
+    if (this.mapObjects?.sectorGroups?.length) {
+      const cullDist = this.local.dropPhase === 'ground' ? 1250 : 2900;
+      for (const sec of this.mapObjects.sectorGroups) {
+        const c = sec.userData.sectorCenter;
+        if (c) sec.visible = Math.hypot(c.x - this.local.x, c.z - this.local.z) <= cullDist;
+      }
+    }
+
+    if (this.mapObjects?.sun && this.mapData?.terrain) {
+      this.mapObjects.sun.target.position.set(this.local.x, this.local.y, this.local.z);
+      this.mapObjects.sun.position.set(this.local.x + 55, this.local.y + 92, this.local.z + 45);
+    }
+
+    if (this.bigMapOpen) {
+      this.hud.drawBigMap?.(
+        this.mapData,
+        { ...this.local, id: this.localId },
+        this.latestStorm,
+        this.dropPlaneData,
+        this.mapPingMarker
+      );
+    }
+
+    if (this.dropPlaneMesh?.visible && this.dropPlaneMesh.userData?.props) {
+      for (const prop of this.dropPlaneMesh.userData.props) {
+        prop.rotation.z += dt * 26;
+      }
     }
 
     if (this.mapObjects?.bombMarkers) {
@@ -1097,7 +1476,9 @@ export class FPSGameClient {
       enrichedPlayers,
       Boolean(this.modeConfig?.teamBased),
       this.latestBomb,
-      this.latestStorm
+      this.latestStorm,
+      this.dropPlaneData,
+      this.mapPingMarker
     );
 
     this.renderer.render(this.scene, this.camera);
@@ -1134,6 +1515,128 @@ export class FPSGameClient {
       interact: !this.uiModalOpen && interact
     };
 
+    // Battle Royale C-130 Drop Plane / Skydive / Parachute Phase
+    if (this.mode === 'survival' && this.local.dropPhase && this.local.dropPhase !== 'ground') {
+      if (this.fpRig) this.fpRig.visible = false;
+      this.adsActive = false;
+      this.hud.updateCrosshair(6, false, false, 'iron', 0, 1.0);
+
+      if (this.local.dropPhase === 'plane') {
+        const dp = this.dropPlaneData;
+        if (dp) {
+          if (dp.endAt > dp.startAt) {
+            const spanSec = Math.max(1, (dp.endAt - dp.startAt) / 1000);
+            dp.x += ((dp.endX - dp.startX) / spanSec) * dt;
+            dp.z += ((dp.endZ - dp.startZ) / spanSec) * dt;
+          }
+          this.local.x = dp.x;
+          this.local.y = dp.y;
+          this.local.z = dp.z;
+          if (this.dropPlaneMesh) {
+            this.dropPlaneMesh.position.set(dp.x, dp.y, dp.z);
+          }
+        }
+        if (this.localChuteRig) this.localChuteRig.group.visible = false;
+        const cosP = Math.cos(this.local.pitch);
+        const fwdX = -Math.sin(this.local.yaw) * cosP;
+        const fwdY = Math.sin(this.local.pitch);
+        const fwdZ = -Math.cos(this.local.yaw) * cosP;
+        const planeCamDist = this.mapData.terrain ? 24.0 : 16.5;
+        this.camera.position.set(
+          this.local.x - fwdX * planeCamDist,
+          this.local.y - fwdY * planeCamDist + 2.4,
+          this.local.z - fwdZ * planeCamDist
+        );
+        this.camera.rotation.y = this.local.yaw;
+        this.camera.rotation.x = this.local.pitch;
+        const floorY = this.mapData.terrain ? this.mapData.terrain.floorAt(this.local.x, this.local.z) : 0;
+        this.hud.updateDropBanner({
+          phase: 'plane',
+          altitude: Math.max(0, Math.round((this.local.y || 260) - floorY)),
+          vy: 0
+        });
+      } else {
+        stepAirbornePhysics(this.local, input, this.mapData, dt, this.dropPlaneData);
+        if (this.local.dropPhase === 'ground') {
+          if (this.localChuteRig) this.localChuteRig.group.visible = false;
+          this.hud.updateDropBanner(null);
+          if (!this.fpRig) this.rebuildFirstPersonRig(this.local.weaponId);
+          if (this.fpRig) this.fpRig.visible = true;
+          soundEngine.playFootstep(false);
+        } else {
+          if (this.localChuteRig) {
+            this.localChuteRig.group.visible = true;
+            this.localChuteRig.group.position.set(this.local.x, this.local.y, this.local.z);
+            this.localChuteRig.group.rotation.y = this.local.yaw;
+            if (this.localChuteRig.chuteCanopy) {
+              this.localChuteRig.chuteCanopy.visible = this.local.dropPhase === 'parachute';
+            }
+            animateOperatorRig(
+              this.localChuteRig,
+              {
+                dead: false,
+                crouch: false,
+                sprint: this.local.dropPhase === 'skydive',
+                moveSpeed: Math.hypot(this.local.vx, this.local.vz),
+                pitch: this.local.pitch,
+                showNameplate: false
+              },
+              dt,
+              now * 0.001
+            );
+          }
+          const camDist = this.local.dropPhase === 'parachute' ? 5.6 : 4.4;
+          const cosP = Math.cos(this.local.pitch);
+          const fwdX = -Math.sin(this.local.yaw) * cosP;
+          const fwdY = Math.sin(this.local.pitch);
+          const fwdZ = -Math.cos(this.local.yaw) * cosP;
+          this.camera.position.set(
+            this.local.x - fwdX * camDist,
+            this.local.y + 1.65 - fwdY * camDist,
+            this.local.z - fwdZ * camDist
+          );
+          this.camera.rotation.y = this.local.yaw;
+          this.camera.rotation.x = this.local.pitch;
+          const floorY = this.mapData.terrain ? this.mapData.terrain.floorAt(this.local.x, this.local.z) : 0;
+          this.hud.updateDropBanner({
+            phase: this.local.dropPhase,
+            altitude: Math.max(0, Math.round(this.local.y - floorY)),
+            vy: Math.round(Math.abs(this.local.vy || 0))
+          });
+        }
+      }
+
+      if (now - this.lastInputSendAt >= 25) {
+        this.lastInputSendAt = now;
+        this.net.send({
+          type: 'input',
+          ...input,
+          dropPhase: this.local.dropPhase,
+          onGround: this.local.onGround,
+          x: Number(this.local.x.toFixed(3)),
+          y: Number(this.local.y.toFixed(3)),
+          z: Number(this.local.z.toFixed(3)),
+          vx: Number((this.local.vx || 0).toFixed(2)),
+          vy: Number((this.local.vy || 0).toFixed(2)),
+          vz: Number((this.local.vz || 0).toFixed(2))
+        });
+      }
+      if (this.local.dropPhase !== 'ground') return;
+    } else if (this.mode === 'survival') {
+      this.hud.updateDropBanner(null);
+      if (this.localChuteRig) this.localChuteRig.group.visible = false;
+      let nearestLoot = null;
+      let nearestDist = 2.6;
+      for (const lc of this.lootData.values()) {
+        const d = Math.hypot(lc.x - this.local.x, lc.z - this.local.z);
+        if (d < nearestDist && Math.abs((lc.y || 0) - this.local.y) < 2.2) {
+          nearestDist = d;
+          nearestLoot = lc;
+        }
+      }
+      this.hud.updateLootHint(nearestLoot, this.local.weaponsState);
+    }
+
     const opMult = OPERATORS[this.localMeta?.operator]?.speedMult || 1.0;
     stepPlayerPhysics(this.local, input, this.mapData, dt, wStats.moveSpeedMult, opMult);
 
@@ -1142,6 +1645,7 @@ export class FPSGameClient {
       this.net.send({
         type: 'input',
         ...input,
+        dropPhase: this.local.dropPhase,
         onGround: this.local.onGround,
         x: Number(this.local.x.toFixed(3)),
         y: Number(this.local.y.toFixed(3)),
@@ -1266,6 +1770,15 @@ export class FPSGameClient {
     for (const ent of this.remoteEntities.values()) {
       const tgt = ent.target;
       const cur = ent.current;
+      if (tgt.dp === 1) {
+        ent.rig.group.visible = false;
+        if (ent.chuteCanopy) ent.chuteCanopy.visible = false;
+        continue;
+      }
+      ent.rig.group.visible = !tgt.dead;
+      if (ent.chuteCanopy) {
+        ent.chuteCanopy.visible = !tgt.dead && tgt.dp === 3;
+      }
       const pred = ent.pred || (ent.pred = { x: tgt.x, y: tgt.y, z: tgt.z });
       const prevX = cur.x;
       const prevZ = cur.z;

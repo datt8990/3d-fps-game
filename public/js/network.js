@@ -321,6 +321,7 @@ export class NetworkClient {
         break;
       }
 
+      case 'queue_join':
       case 'quick_match': {
         await this.cleanupP2PSession();
         if (msg.mode === 'practice') {
@@ -336,33 +337,36 @@ export class NetworkClient {
           return;
         }
 
+        const p2pMode = msg.mode || 'tdm';
+        const p2pMap = msg.mapId || (p2pMode === 'survival' ? 'br_island' : 'warehouse');
+        const p2pMax = p2pMode === 'survival' ? 50 : 10;
+
         // Check Serverless Matchmaking for an active human room first!
         const mm = await this.apiCall('/api/matchmaking/find', 'POST', {
-          mode: msg.mode || 'tdm',
-          mapId: msg.mapId || 'warehouse'
+          mode: p2pMode,
+          mapId: p2pMap
         }).catch(() => ({ action: 'host_new' }));
 
         if (mm?.action === 'join' && mm.room?.code) {
           this.joinRemoteP2PRoom(mm.room.code, () => {
-            // Fallback to hosting immediately if remote peer already closed
             this.createHostedP2PRoom({
-              name: `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`,
-              mode: msg.mode || 'tdm',
-              mapId: msg.mapId || 'warehouse',
-              maxPlayers: 10,
+              name: p2pMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`,
+              mode: p2pMode,
+              mapId: p2pMap,
+              maxPlayers: p2pMax,
               fillBots: true,
-              botDifficulty: msg.mode === 'ranked' ? 'hard' : 'normal',
+              botDifficulty: p2pMode === 'ranked' ? 'hard' : 'normal',
               autoStart: true
             });
           });
         } else {
           this.createHostedP2PRoom({
-            name: `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`,
-            mode: msg.mode || 'tdm',
-            mapId: msg.mapId || 'warehouse',
-            maxPlayers: 10,
+            name: p2pMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`,
+            mode: p2pMode,
+            mapId: p2pMap,
+            maxPlayers: p2pMax,
             fillBots: true,
-            botDifficulty: msg.mode === 'ranked' ? 'hard' : 'normal',
+            botDifficulty: p2pMode === 'ranked' ? 'hard' : 'normal',
             autoStart: true
           });
         }
@@ -678,13 +682,16 @@ export class NetworkClient {
         }
 
         const wasWaiting = this.hostRoom.status === 'waiting';
-        const res = this.hostRoom.addHumanPlayer({
+        const joinOpts = {
           id: remotePlayerId,
           userId: msg.user?.id || null,
           username: msg.user?.username || 'Bạn_Chiến_Đấu',
           loadout: msg.user?.loadout || {},
           rp: msg.user?.rp || 1200
-        });
+        };
+        const res = !wasWaiting && this.hostRoom.getBots().length > 0
+          ? this.hostRoom.replaceBotWithHuman(joinOpts)
+          : this.hostRoom.addHumanPlayer(joinOpts);
         if (res.error) {
           conn.send({ type: 'error_msg', text: res.error });
           conn.close();
@@ -729,6 +736,10 @@ export class NetworkClient {
       case 'room_chat': this.hostRoom.addChatMessage(playerId, msg.text, msg.scope); break;
       case 'radio': this.hostRoom.handleRadioCommand(playerId, msg.key); break;
       case 'input': this.hostRoom.handleClientInput(playerId, msg); break;
+      case 'drop_action': this.hostRoom.handleDropAction(playerId, msg.action); break;
+      case 'loot_item': this.hostRoom.handleLootItem(playerId, msg); break;
+      case 'drop_item': this.hostRoom.handleDropItem(playerId, msg); break;
+      case 'use_med': this.hostRoom.handleUseMed(playerId, msg); break;
       case 'fire': this.hostRoom.handleClientFire(playerId, msg); break;
       case 'throw_grenade': this.hostRoom.handleThrowGrenade(playerId, msg); break;
       case 'reload': {

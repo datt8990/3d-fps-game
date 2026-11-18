@@ -33,6 +33,66 @@ export const GRENADE_CONFIG = {
   bounceRestitution: 0.42
 };
 
+// Battle Royale (PUBG-style) Backpack, Gear Tiers, Medical Consumables & Caliber Groups
+export const BR_BACKPACKS = {
+  0: { tier: 0, name: 'Túi Quân Nhân Cơ Bản', capacity: 120 },
+  1: { tier: 1, name: 'Balo Chiến Thuật Lv.1', capacity: 220 },
+  2: { tier: 2, name: 'Balo Quân Dụng Lv.2', capacity: 340 },
+  3: { tier: 3, name: 'Balo Đổ Bộ Đặc Nhiệm Lv.3', capacity: 480 }
+};
+
+export const BR_VESTS = {
+  1: { tier: 1, name: 'Áo Giáp Chống Đạn Lv.1', maxArmor: 65, bodyReduce: 0.35 },
+  2: { tier: 2, name: 'Áo Giáp Chiến Thuật Lv.2', maxArmor: 100, bodyReduce: 0.48 },
+  3: { tier: 3, name: 'Áo Giáp Spetsnaz Kevlar Lv.3', maxArmor: 145, bodyReduce: 0.60 }
+};
+
+export const BR_HELMETS = {
+  1: { tier: 1, name: 'Mũ Bảo Hộ Lv.1', maxHelmet: 55, headReduce: 0.25 },
+  2: { tier: 2, name: 'Mũ Chiến Thuật Lv.2', maxHelmet: 85, headReduce: 0.40 },
+  3: { tier: 3, name: 'Mũ Spetsnaz K6-3 Lv.3', maxHelmet: 125, headReduce: 0.55 }
+};
+
+export const BR_MEDS = {
+  bandage: { id: 'bandage', name: 'Băng Gạc Y Tế', heal: 18, maxCap: 75, armorBoost: 0, weight: 2.5 },
+  firstaid: { id: 'firstaid', name: 'Túi Sơ Cứu Nhanh', heal: 60, maxCap: 85, armorBoost: 0, weight: 10 },
+  medkit: { id: 'medkit', name: 'Hộp Cứu Thương Lớn', heal: 100, maxCap: 100, armorBoost: 15, weight: 20 },
+  energy: { id: 'energy', name: 'Nước Tăng Lực', heal: 22, maxCap: 100, armorBoost: 14, weight: 5 }
+};
+
+export const BR_AMMO_TYPES = {
+  '7.62mm': { id: '7.62mm', name: 'Đạn 7.62mm', weight: 0.65, dropStep: 30, color: '#f59e0b' },
+  '5.56mm': { id: '5.56mm', name: 'Đạn 5.56mm', weight: 0.48, dropStep: 30, color: '#22c55e' },
+  '9mm': { id: '9mm', name: 'Đạn 9mm / SMG', weight: 0.35, dropStep: 30, color: '#eab308' },
+  '12G': { id: '12G', name: 'Đạn 12-Gauge', weight: 1.05, dropStep: 12, color: '#ef4444' },
+  '.338': { id: '.338', name: 'Đạn Tỉa .338/.50', weight: 1.25, dropStep: 10, color: '#a855f7' }
+};
+
+export const WEAPON_AMMO_MAP = {
+  ak47: '7.62mm', scarh: '7.62mm', galil: '7.62mm', rpk: '7.62mm', kar98k: '7.62mm', svd: '7.62mm',
+  m4a1: '5.56mm', aug: '5.56mm', m16a4: '5.56mm', famas: '5.56mm', hk416: '5.56mm', m249: '5.56mm',
+  mp5: '9mm', p90: '9mm', vector: '9mm', ump45: '9mm', mp7: '9mm', glock18: '9mm', usps: '9mm', fiveseven: '9mm',
+  spas12: '12G', aa12: '12G', m870: '12G',
+  awp: '.338', barrett: '.338', m200: '.338', deagle: '.338', magnum: '.338'
+};
+
+export function getWeaponAmmoType(weaponId) {
+  return WEAPON_AMMO_MAP[weaponId] || '7.62mm';
+}
+
+export function computeBackpackWeight(backpack) {
+  if (!backpack) return 0;
+  let w = 0;
+  for (const [k, qty] of Object.entries(backpack.ammo || {})) {
+    w += Math.max(0, Number(qty) || 0) * (BR_AMMO_TYPES[k]?.weight || 0.5);
+  }
+  for (const [k, qty] of Object.entries(backpack.meds || {})) {
+    w += Math.max(0, Number(qty) || 0) * (BR_MEDS[k]?.weight || 5);
+  }
+  w += Math.max(0, Number(backpack.frag_grenade) || 0) * 14;
+  return Math.round(w * 10) / 10;
+}
+
 export const GAME_MODES = {
   tdm: {
     id: 'tdm',
@@ -80,17 +140,18 @@ export const GAME_MODES = {
   },
   survival: {
     id: 'survival',
-    name: 'Sinh Tồn',
-    shortName: 'Sinh Tồn Bo Độc',
-    icon: '☣',
-    description: 'Vòng bo độc thu hẹp liên tục. Thu thập hòm tiếp tế và trở thành người sống sót cuối cùng!',
-    maxPlayers: 10,
+    name: 'Sinh Tồn 50 Người (Battle Royale 5km)',
+    shortName: 'Sinh Tồn BR 50',
+    icon: '🪂',
+    description: 'Đảo 5km×5km có núi, sông, cầu, chòi & khu dân cư! 50 chiến binh nhảy dù C-130, nhặt súng/balo/giáp & loot hòm xác!',
+    maxPlayers: 50,
     teamBased: false,
     scoreLimit: 1,
-    matchDurationSec: 180,
+    matchDurationSec: 720,
     respawnDelaySec: 0,
     hasStorm: true,
     hasLoot: true,
+    hasDropPlane: true,
     isRanked: false
   },
   ranked: {

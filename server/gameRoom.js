@@ -65,6 +65,24 @@ export class ServerGameRoom extends GameRoomCore {
     return res;
   }
 
+  replaceWsBotWithHuman(clientInfo, ws) {
+    const acc = clientInfo.userId ? gameDB.getUserById(clientInfo.userId) : null;
+    this.clients.set(clientInfo.id, ws);
+    const res = this.replaceBotWithHuman({
+      id: clientInfo.id,
+      userId: clientInfo.userId,
+      username: clientInfo.username,
+      loadout: acc?.loadout || clientInfo.loadout || {},
+      rp: acc?.rp || 1200
+    });
+    if (res.error) {
+      this.clients.delete(clientInfo.id);
+    } else if (acc) {
+      acc.currentRoomCode = this.code;
+    }
+    return res;
+  }
+
   removeWsPlayer(playerId) {
     const p = this.combatants.get(playerId);
     if (p?.userId) {

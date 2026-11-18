@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws';
 import app, { registerLocalServerHooks } from './app.js';
 import { gameDB } from './db.js';
 import { ServerGameRoom } from './gameRoom.js';
+import { HumanPriorityMatchmaker } from './matchmaker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -128,6 +129,17 @@ createRoom({
   botDifficulty: 'normal',
   isPersistentDefault: true
 });
+createRoom({
+  id: 'rm_BS5005',
+  code: 'BS5005',
+  name: '[BR 50P] Đảo Tử Thần - Sinh Tồn',
+  mode: 'survival',
+  mapId: 'br_island',
+  maxPlayers: 50,
+  fillBots: true,
+  botDifficulty: 'normal',
+  isPersistentDefault: true
+});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -142,6 +154,28 @@ function leaveCurrentRoom(client) {
   client.roomId = null;
   if (room) room.removeWsPlayer(client.id);
 }
+
+const matchmaker = new HumanPriorityMatchmaker({
+  rooms,
+  createRoom,
+  leaveCurrentRoom,
+  sendToClient: (client, payload) => safeSend(client.ws, payload),
+  addClientToRoom: (client, room, replaceBot = false) => {
+    const wasWaiting = room.status === 'waiting';
+    const joined = replaceBot
+      ? room.replaceWsBotWithHuman(client, client.ws)
+      : room.addWsPlayer(client, client.ws);
+    if (joined.error) {
+      safeSend(client.ws, { type: 'error_msg', text: joined.error });
+      return joined;
+    }
+    client.roomId = room.id;
+    if (wasWaiting) {
+      safeSend(client.ws, { type: 'joined_room', room: room.getLobbyPayload() });
+    }
+    return joined;
+  }
+});
 
 wss.on('connection', (ws) => {
   const clientId = 'p_' + crypto.randomBytes(5).toString('hex');
@@ -223,11 +257,13 @@ wss.on('connection', (ws) => {
 
       case 'create_room': {
         leaveCurrentRoom(client);
+        matchmaker.removeClient(client.id, true);
+        const mode = msg.mode || 'tdm';
         const room = createRoom({
           name: msg.name || `Phòng của ${client.username}`,
-          mode: msg.mode || 'tdm',
-          mapId: msg.mapId || 'warehouse',
-          maxPlayers: msg.maxPlayers || 10,
+          mode,
+          mapId: msg.mapId || (mode === 'survival' ? 'br_island' : 'warehouse'),
+          maxPlayers: msg.maxPlayers || (mode === 'survival' ? 50 : 10),
           fillBots: msg.fillBots !== false,
           botDifficulty: msg.botDifficulty || 'normal',
           hostId: client.id
@@ -259,8 +295,10 @@ wss.on('connection', (ws) => {
           break;
         }
         leaveCurrentRoom(client);
+        matchmaker.removeClient(client.id, true);
         const wasWaiting = target.status === 'waiting';
-        const joined = target.addWsPlayer(client, ws);
+        const useSwap = !wasWaiting && target.getBots().length > 0;
+        const joined = useSwap ? target.replaceWsBotWithHuman(client, ws) : target.addWsPlayer(client, ws);
         if (joined.error) {
           safeSend(ws, { type: 'error_msg', text: joined.error });
           break;
@@ -272,42 +310,19 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case 'queue_join':
       case 'quick_match': {
-        leaveCurrentRoom(client);
-        const desiredMode = msg.mode || 'tdm';
-        const desiredMap = msg.mapId || null;
+        matchmaker.enqueueClient(client, { mode: msg.mode || 'tdm', mapId: msg.mapId || null });
+        break;
+      }
 
-        let candidate = desiredMode === 'practice'
-          ? null
-          : [...rooms.values()].find((r) => {
-              if (r.mode !== desiredMode) return false;
-              if (desiredMap && r.mapId !== desiredMap && r.getHumanPlayers().length === 0) return false;
-              return r.getHumanPlayers().length > 0 && r.getHumanPlayers().length < r.maxPlayers;
-            });
+      case 'queue_cancel': {
+        matchmaker.removeClient(client.id, false);
+        break;
+      }
 
-        if (!candidate) {
-          candidate = createRoom({
-            name: desiredMode === 'practice' ? `Trường Bắn của ${client.username}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`,
-            mode: desiredMode,
-            mapId: desiredMap || 'warehouse',
-            maxPlayers: desiredMode === 'practice' ? 6 : 10,
-            fillBots: true,
-            botDifficulty: desiredMode === 'ranked' ? 'hard' : (desiredMode === 'practice' ? 'easy' : 'normal'),
-            hostId: client.id
-          });
-        }
-
-        const wasWaiting = candidate.status === 'waiting';
-        const joined = candidate.addWsPlayer(client, ws);
-        if (joined.error) {
-          safeSend(ws, { type: 'error_msg', text: joined.error });
-          break;
-        }
-        client.roomId = candidate.id;
-        if (wasWaiting) {
-          safeSend(ws, { type: 'joined_room', room: candidate.getLobbyPayload() });
-          candidate.startMatch(candidate.hostId);
-        }
+      case 'queue_force_start': {
+        matchmaker.forceLaunchClientQueue(client.id);
         break;
       }
 
@@ -348,6 +363,26 @@ wss.on('connection', (ws) => {
 
       case 'input': {
         rooms.get(client.roomId)?.handleClientInput(client.id, msg);
+        break;
+      }
+
+      case 'drop_action': {
+        rooms.get(client.roomId)?.handleDropAction(client.id, msg.action);
+        break;
+      }
+
+      case 'loot_item': {
+        rooms.get(client.roomId)?.handleLootItem(client.id, msg);
+        break;
+      }
+
+      case 'drop_item': {
+        rooms.get(client.roomId)?.handleDropItem(client.id, msg);
+        break;
+      }
+
+      case 'use_med': {
+        rooms.get(client.roomId)?.handleUseMed(client.id, msg);
         break;
       }
 
@@ -395,6 +430,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    matchmaker.removeClient(clientId, true);
     leaveCurrentRoom(client);
     clientsById.delete(clientId);
     broadcastLobbyRoomList();

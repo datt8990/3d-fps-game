@@ -270,6 +270,14 @@ function renderQuickModes() {
   container.querySelectorAll('.mode-card').forEach((card) => {
     card.addEventListener('click', () => {
       state.selectedQuickMode = card.dataset.mode;
+      const mapSelect = document.getElementById('quick-map-select');
+      if (card.dataset.mode === 'survival') {
+        state.selectedQuickMap = 'br_island';
+        if (mapSelect) mapSelect.value = 'br_island';
+      } else if (state.selectedQuickMap === 'br_island') {
+        state.selectedQuickMap = 'warehouse';
+        if (mapSelect) mapSelect.value = 'warehouse';
+      }
       soundEngine.playUiTone(740, 0.05);
       renderQuickModes();
     });
@@ -1095,7 +1103,29 @@ function bindNetworkEvents() {
     gLog.scrollTop = gLog.scrollHeight;
   });
 
+  const hideQueueModal = () => {
+    document.getElementById('matchmaking-queue-overlay')?.classList.add('hidden');
+  };
+
+  net.on('queue_status', (msg) => {
+    const overlay = document.getElementById('matchmaking-queue-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('hidden');
+    const badgeEl = document.getElementById('queue-mode-badge');
+    const countEl = document.getElementById('queue-humans-count');
+    const waitEl = document.getElementById('queue-wait-sec');
+    if (badgeEl) badgeEl.textContent = `TÌM TRẬN: ${String(msg.modeName || msg.mode || '').toUpperCase()}`;
+    if (countEl) countEl.textContent = String(msg.searchingHumans || 1);
+    if (waitEl) waitEl.textContent = `${Math.max(0, msg.waitLeftSec ?? 0)}s`;
+  });
+
+  net.on('queue_cancelled', () => {
+    hideQueueModal();
+    showToast('Đã hủy tìm trận.');
+  });
+
   net.on('joined_room', ({ room }) => {
+    hideQueueModal();
     state.currentRoom = room;
     switchTab('rooms');
     updateRoomTabPanels();
@@ -1113,6 +1143,7 @@ function bindNetworkEvents() {
   });
 
   net.on('left_room', (msg) => {
+    hideQueueModal();
     state.currentRoom = null;
     if (msg.rooms) state.roomsList = msg.rooms;
     voice.stop();
@@ -1144,6 +1175,7 @@ function bindNetworkEvents() {
   net.on('system_toast', (msg) => showToast(msg.text));
 
   net.on('match_started', (msg) => {
+    hideQueueModal();
     state.currentRoom = msg.room;
     renderInGameBuyModal();
     document.getElementById('postmatch-modal')?.classList.add('hidden');
@@ -1179,7 +1211,15 @@ function bindNetworkEvents() {
   net.on('hit_confirm', (msg) => fpsClient.onHitConfirm(msg));
   net.on('damage_taken', (msg) => fpsClient.onDamageTaken(msg));
   net.on('kill_event', (msg) => fpsClient.onKillEvent(msg));
+  net.on('weapons_sync', (msg) => fpsClient.onWeaponsSync(msg));
+  net.on('inventory_sync', (msg) => fpsClient.onInventorySync(msg));
+  net.on('loot_spawned', (msg) => fpsClient.onLootSpawned(msg));
+  net.on('loot_updated', (msg) => fpsClient.onLootUpdated(msg));
   net.on('loot_picked', (msg) => fpsClient.onLootPicked(msg));
+  net.on('drop_plane_ended', () => {
+    if (fpsClient.dropPlaneData) fpsClient.dropPlaneData.active = false;
+    if (fpsClient.dropPlaneMesh) fpsClient.dropPlaneMesh.visible = false;
+  });
 
   net.on('bomb_planted', (msg) => {
     soundEngine.playBombBeep(true);
@@ -1360,10 +1400,19 @@ function bindUIEvents() {
   document.getElementById('btn-quick-play')?.addEventListener('click', () => {
     soundEngine.ensureContext();
     net.send({
-      type: 'quick_match',
+      type: 'queue_join',
       mode: state.selectedQuickMode,
       mapId: state.selectedQuickMap
     });
+  });
+  document.getElementById('btn-queue-force-start')?.addEventListener('click', () => {
+    soundEngine.ensureContext();
+    net.send({ type: 'queue_force_start' });
+  });
+  document.getElementById('btn-queue-cancel')?.addEventListener('click', () => {
+    soundEngine.ensureContext();
+    net.send({ type: 'queue_cancel' });
+    document.getElementById('matchmaking-queue-overlay')?.classList.add('hidden');
   });
   document.getElementById('btn-practice-range')?.addEventListener('click', () => {
     soundEngine.ensureContext();
@@ -1383,7 +1432,7 @@ function bindUIEvents() {
   document.getElementById('btn-go-rooms')?.addEventListener('click', () => switchTab('rooms'));
   document.getElementById('btn-queue-ranked')?.addEventListener('click', () => {
     soundEngine.ensureContext();
-    net.send({ type: 'quick_match', mode: 'ranked', mapId: 'urban_city' });
+    net.send({ type: 'queue_join', mode: 'ranked', mapId: 'urban_city' });
   });
 
   const quickCreatePresetRoom = (presetType) => {
@@ -1475,8 +1524,23 @@ function bindUIEvents() {
     soundEngine.ensureContext();
     net.send({ type: 'start_match' });
   });
+  document.getElementById('cr-mode')?.addEventListener('change', (e) => {
+    if (e.target.value === 'survival') {
+      const mEl = document.getElementById('cr-map');
+      const maxEl = document.getElementById('cr-max');
+      if (mEl) mEl.value = 'br_island';
+      if (maxEl) maxEl.value = '50';
+    }
+  });
+
   ['room-edit-mode', 'room-edit-map', 'room-edit-max', 'room-edit-botdiff', 'room-edit-fillbots'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', () => {
+      if (id === 'room-edit-mode' && document.getElementById('room-edit-mode').value === 'survival') {
+        const mEl = document.getElementById('room-edit-map');
+        const maxEl = document.getElementById('room-edit-max');
+        if (mEl) mEl.value = 'br_island';
+        if (maxEl) maxEl.value = '50';
+      }
       net.send({
         type: 'update_room',
         mode: document.getElementById('room-edit-mode').value,
@@ -1639,11 +1703,25 @@ function bindUIEvents() {
   document.getElementById('btn-leave-match')?.addEventListener('click', () => net.send({ type: 'leave_room' }));
   document.getElementById('hud-btn-reload')?.addEventListener('click', () => fpsClient.requestReload());
   document.getElementById('hud-btn-grenade')?.addEventListener('click', () => fpsClient.requestThrowGrenade());
-  document.getElementById('hud-btn-swap-primary')?.addEventListener('click', () => fpsClient.toggleBuyWeaponModal());
+  document.getElementById('hud-btn-swap-primary')?.addEventListener('click', () => {
+    if (fpsClient.mode === 'survival') fpsClient.toggleBackpackModal();
+    else fpsClient.toggleBuyWeaponModal();
+  });
   document.querySelectorAll('.weapon-slots-row .hud-slot-btn').forEach((btn) => {
     btn.addEventListener('click', () => fpsClient.requestWeaponSwitch(Number(btn.dataset.slot)));
   });
   document.getElementById('btn-close-buy-modal')?.addEventListener('click', () => fpsClient.toggleBuyWeaponModal(false));
+  document.getElementById('btn-close-backpack')?.addEventListener('click', () => fpsClient.toggleBackpackModal(false));
+  document.getElementById('btn-close-bigmap')?.addEventListener('click', () => fpsClient.toggleBigMapModal(false));
+  document.getElementById('br-bigmap-canvas')?.addEventListener('click', (e) => {
+    const canvas = e.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const u = (e.clientX - rect.left) / rect.width;
+    const v = (e.clientY - rect.top) / rect.height;
+    const half = fpsClient.mapData?.bounds?.halfW || 2500;
+    fpsClient.mapPingMarker = { x: (u * 2 - 1) * half, z: (v * 2 - 1) * half };
+    soundEngine.playUiTone(920, 0.06);
+  });
 
   // In-Game Chat
   document.getElementById('ingame-chat-form')?.addEventListener('submit', (e) => {

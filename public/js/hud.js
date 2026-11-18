@@ -1,5 +1,14 @@
-// High-Performance Tactical HUD v2.0: Zero-Reflow DOM Diffing, Offscreen Minimap Cache, Dynamic Crosshair & Scoreboard
-import { WEAPONS } from '/shared/constants.js';
+// High-Performance Tactical HUD v2.0: Zero-Reflow DOM Diffing, 5km Terrain Minimap/BigMap, Parachute Guide & PUBG Backpack
+import {
+  WEAPONS,
+  BR_BACKPACKS,
+  BR_VESTS,
+  BR_HELMETS,
+  BR_MEDS,
+  BR_AMMO_TYPES,
+  computeBackpackWeight
+} from '/shared/constants.js';
+import { renderTerrainRGBA } from '/shared/terrain.js';
 
 export class MatchHUD {
   constructor() {
@@ -36,6 +45,12 @@ export class MatchHUD {
     this.bombActionLabel = document.getElementById('hud-bomb-progress-label');
     this.bombActionFill = document.getElementById('hud-bomb-progress-fill');
     this.interactHintEl = document.getElementById('hud-interact-hint');
+    this.dropBannerEl = document.getElementById('hud-drop-banner');
+    this.dropGuideEl = document.getElementById('hud-drop-guide');
+    this.survivalGearEl = document.getElementById('hud-survival-gear');
+    this.bigMapCanvas = document.getElementById('br-bigmap-canvas');
+    this.bigMapCtx = this.bigMapCanvas?.getContext('2d');
+    this._terrainCanvasCache = new Map();
 
     this.killFeedEl = document.getElementById('hud-killfeed');
     this.streakBannerEl = document.getElementById('hud-streak-banner');
@@ -121,7 +136,7 @@ export class MatchHUD {
   }
 
   updateWeaponHUD(slot, weaponId, ammo, reserveAmmo, primaryId = 'ak47', secondaryId = 'deagle', meleeId = 'knife', grenades = 1) {
-    const w = WEAPONS[weaponId] || WEAPONS.ak47;
+    const w = WEAPONS[weaponId] || WEAPONS[meleeId] || WEAPONS.knife;
     if (weaponId !== this._cache.weaponId) {
       this._cache.weaponId = weaponId;
       if (this.weaponNameEl) this.weaponNameEl.textContent = w.name;
@@ -149,13 +164,21 @@ export class MatchHUD {
       if (this.grenadeCountEl) this.grenadeCountEl.textContent = String(grenades ?? 0);
     }
 
-    if (primaryId !== this._cache.primaryId) {
-      this._cache.primaryId = primaryId;
-      if (this.slot1NameEl && WEAPONS[primaryId]) this.slot1NameEl.textContent = WEAPONS[primaryId].name;
+    const pKey = primaryId || '__EMPTY__';
+    if (pKey !== this._cache.primaryId) {
+      this._cache.primaryId = pKey;
+      if (this.slot1NameEl) {
+        this.slot1NameEl.textContent = primaryId && WEAPONS[primaryId] ? WEAPONS[primaryId].name : '--- (Trống)';
+      }
+      this.slotBtns.find((b) => Number(b.dataset.slot) === 1)?.classList.toggle('empty-slot', !primaryId);
     }
-    if (secondaryId !== this._cache.secondaryId) {
-      this._cache.secondaryId = secondaryId;
-      if (this.slot2NameEl && WEAPONS[secondaryId]) this.slot2NameEl.textContent = WEAPONS[secondaryId].name;
+    const sKey = secondaryId || '__EMPTY__';
+    if (sKey !== this._cache.secondaryId) {
+      this._cache.secondaryId = sKey;
+      if (this.slot2NameEl) {
+        this.slot2NameEl.textContent = secondaryId && WEAPONS[secondaryId] ? WEAPONS[secondaryId].name : '--- (Trống)';
+      }
+      this.slotBtns.find((b) => Number(b.dataset.slot) === 2)?.classList.toggle('empty-slot', !secondaryId);
     }
     if (meleeId !== this._cache.meleeId) {
       this._cache.meleeId = meleeId;
@@ -449,9 +472,339 @@ export class MatchHUD {
     }
   }
 
+  updateDropBanner(info) {
+    if (!this.dropBannerEl && !this.dropGuideEl) return;
+    if (!info) {
+      this.dropBannerEl?.classList.add('hidden');
+      this.dropGuideEl?.classList.add('hidden');
+      return;
+    }
+
+    this.dropBannerEl?.classList.remove('hidden');
+    this.dropGuideEl?.classList.remove('hidden');
+    const alt = Math.max(0, info.altitude || 0);
+    const vy = Math.max(0, info.vy || 0);
+    const altPct = Math.min(100, Math.round((alt / 260) * 100));
+
+    if (this.dropBannerEl) {
+      if (info.phase === 'plane') {
+        this.dropBannerEl.textContent = `✈ MÁY BAY C-130 (${alt}m) — Nhấn [F] hoặc [SPACE] NHẢY DÙ • [M] Xem Bản Đồ 5km`;
+      } else if (info.phase === 'skydive') {
+        this.dropBannerEl.textContent = `🪂 RƠI TỰ DO (${alt}m • ${vy} m/s) — [SPACE] Mở Dù Sớm (Tự bung ở 55m)`;
+      } else {
+        this.dropBannerEl.textContent = `🪂 ĐANG LƯỢN DÙ (${alt}m • ${vy} m/s) — [W] Tới • [S] Hãm Rơi Chậm • [A/D] Lượn`;
+      }
+    }
+
+    if (this.dropGuideEl) {
+      const phaseBadge = info.phase === 'plane'
+        ? 'TRÊN MÁY BAY C-130'
+        : (info.phase === 'skydive' ? 'RƠI TỰ DO (SKYDIVING)' : 'ĐANG LƯỢN DÙ (CHẬM & ỔN ĐỊNH)');
+      const hintRows = info.phase === 'plane'
+        ? `
+          <div><kbd>F</kbd> / <kbd>Space</kbd> Nhảy khỏi máy bay</div>
+          <div><kbd>M</kbd> Mở bản đồ 5km chọn Nhà / Chòi / Cầu</div>
+          <div><kbd>Chuột</kbd> Xoay quan sát địa hình</div>
+        `
+        : (info.phase === 'skydive'
+          ? `
+            <div><kbd>W</kbd> Bay tới xa • <kbd>A/D</kbd> Lệch hướng</div>
+            <div><kbd>Nhìn xuống</kbd> Lao nhanh xuống mục tiêu</div>
+            <div><kbd>Space</kbd> Bung dù sớm ngay bây giờ</div>
+          `
+          : `
+            <div><kbd>W</kbd> Lướt nhanh về phía trước</div>
+            <div><kbd>S</kbd> Hãm dù rơi cực chậm (~2.4 m/s)</div>
+            <div><kbd>A/D</kbd> + <kbd>Chuột</kbd> Chỉnh điểm đáp nóc nhà / chòi</div>
+          `);
+
+      this.dropGuideEl.innerHTML = `
+        <div class="dg-head">
+          <span class="dg-phase">${phaseBadge}</span>
+          <span class="dg-alt">${alt}m • ${vy} m/s</span>
+        </div>
+        <div class="dg-alt-bar">
+          <div class="dg-alt-fill" style="width:${altPct}%"></div>
+          <span class="dg-auto-mark" style="left:21%" title="Mốc tự bung dù 55m"></span>
+        </div>
+        <div class="dg-hints">${hintRows}</div>
+      `;
+    }
+  }
+
+  updateLootHint(crate, weaponsState) {
+    if (!this.interactHintEl) return;
+    if (!crate) {
+      this.interactHintEl.classList.add('hidden');
+      return;
+    }
+    let hint = '';
+    if (crate.kind === 'deathbox') {
+      const count = crate.items?.length || 0;
+      hint = `⚰ HÒM XÁC ${crate.ownerName || ''} (${count} món) — Nhấn [E] hoặc [Tab] để nhặt toàn bộ đồ!`;
+    } else if (crate.kind === 'weapon' && crate.weaponId) {
+      const slotNum = WEAPONS[crate.weaponId]?.category === 'secondary' ? 2 : 1;
+      const occupied = Boolean(weaponsState?.[slotNum]?.id);
+      const label = crate.label || WEAPONS[crate.weaponId]?.name || crate.weaponId;
+      hint = occupied
+        ? `Nhấn [E] ĐỔI súng hoặc [Tab] Balo để lấy ${label}`
+        : `Tiến sát để NHẶT ${label} • [Tab] Mở Balo`;
+    } else if (crate.label) {
+      hint = `📦 ${crate.label} — Nhấn [E] nhặt hoặc [Tab] mở Balo`;
+    }
+    if (hint) {
+      if (this.interactHintEl.textContent !== hint) this.interactHintEl.textContent = hint;
+      this.interactHintEl.classList.remove('hidden');
+    } else {
+      this.interactHintEl.classList.add('hidden');
+    }
+  }
+
+  updateSurvivalGear(local) {
+    if (!this.survivalGearEl) return;
+    if (!local || !local.gear || !local.backpack) {
+      this.survivalGearEl.classList.add('hidden');
+      return;
+    }
+    this.survivalGearEl.classList.remove('hidden');
+    const g = local.gear;
+    const meds = local.backpack.meds || {};
+    const wt = Math.round(local.backpackWeight ?? computeBackpackWeight(local.backpack));
+    const cap = local.backpack.capacity || 120;
+    const quickBand = (meds.bandage || 0) + (meds.energy || 0);
+    const quickFirstAid = (meds.firstaid || 0) + (meds.medkit || 0);
+
+    this.survivalGearEl.innerHTML = `
+      <span class="gear-pill ${g.helmetTier ? 't' + g.helmetTier : ''}">🪖 Mũ Lv.${g.helmetTier || 0}</span>
+      <span class="gear-pill ${g.vestTier ? 't' + g.vestTier : ''}">🦺 Giáp Lv.${g.vestTier || 0}</span>
+      <span class="gear-pill ${g.bagTier ? 't' + g.bagTier : ''}">🎒 Balo Lv.${g.bagTier || 0} (${wt}/${cap})</span>
+      <span class="gear-pill med"><kbd>7</kbd> Băng ×${quickBand}</span>
+      <span class="gear-pill med"><kbd>8</kbd> Y Tế ×${quickFirstAid}</span>
+      <span class="gear-pill hint"><kbd>Tab</kbd>/<kbd>I</kbd> Balo • <kbd>M</kbd> Bản Đồ</span>
+    `;
+  }
+
+  renderBackpackModal({ nearbyCrates = [], local, onLootItem, onDropItem, onUseMed }) {
+    const vicEl = document.getElementById('br-vicinity-list');
+    const bagEl = document.getElementById('br-bag-list');
+    const eqEl = document.getElementById('br-equip-list');
+    const wtTxt = document.getElementById('br-bag-weight-text');
+    const wtFill = document.getElementById('br-bag-weight-fill');
+    if (!vicEl || !bagEl || !eqEl || !local) return;
+
+    const bag = local.backpack || { tier: 0, capacity: 120, ammo: {}, meds: {}, frag_grenade: 0 };
+    const gear = local.gear || { vestTier: 0, helmetTier: 0, helmetArmor: 0, bagTier: 0 };
+    const wt = computeBackpackWeight(bag);
+    const cap = bag.capacity || 120;
+    if (wtTxt) wtTxt.textContent = `${wt.toFixed(0)} / ${cap} kg (${BR_BACKPACKS[bag.tier || 0]?.name || 'Balo'})`;
+    if (wtFill) wtFill.style.width = `${Math.min(100, Math.round((wt / cap) * 100))}%`;
+
+    // 1. Left Column: Vicinity & Death Boxes
+    const vicCards = [];
+    for (const c of nearbyCrates) {
+      if (c.kind === 'deathbox') {
+        vicCards.push(`<div class="inv-group-title">⚰ Hòm Xác: ${this.escape(c.ownerName || 'Kẻ Địch')} (${c.items?.length || 0})</div>`);
+        for (const it of c.items || []) {
+          vicCards.push(`
+            <div class="inv-row">
+              <span>${this.escape(it.label || it.weaponId || it.kind)}</span>
+              <button class="inv-btn pick" data-loot="${c.id}" data-item="${it.itemId}">Nhặt</button>
+            </div>
+          `);
+        }
+      } else {
+        vicCards.push(`
+          <div class="inv-row">
+            <span>📦 ${this.escape(c.label || c.weaponId || c.kind)}</span>
+            <button class="inv-btn pick" data-loot="${c.id}" data-item="">Nhặt</button>
+          </div>
+        `);
+      }
+    }
+    vicEl.innerHTML = vicCards.length ? vicCards.join('') : '<div class="inv-empty">Không có vật phẩm hoặc hòm xác nào quanh đây (bước lại gần để nhặt).</div>';
+
+    // 2. Center Column: Backpack Contents (Meds, Ammo, Grenades)
+    const bagCards = [];
+    for (const [mId, qty] of Object.entries(bag.meds || {})) {
+      if (qty <= 0) continue;
+      const mCfg = BR_MEDS[mId];
+      bagCards.push(`
+        <div class="inv-row">
+          <span>✚ ${this.escape(mCfg?.name || mId)} ×<strong>${qty}</strong></span>
+          <div class="inv-acts">
+            <button class="inv-btn use" data-use="${mId}">Dùng</button>
+            <button class="inv-btn drop" data-drop="med" data-key="${mId}" data-qty="1">Vứt 1</button>
+          </div>
+        </div>
+      `);
+    }
+    if ((bag.frag_grenade || 0) > 0) {
+      bagCards.push(`
+        <div class="inv-row">
+          <span>💣 Lựu Đạn Nổ ×<strong>${bag.frag_grenade}</strong></span>
+          <div class="inv-acts">
+            <button class="inv-btn drop" data-drop="grenade" data-key="frag" data-qty="1">Vứt 1</button>
+          </div>
+        </div>
+      `);
+    }
+    for (const [aType, qty] of Object.entries(bag.ammo || {})) {
+      if (qty <= 0) continue;
+      const aCfg = BR_AMMO_TYPES[aType];
+      const step = aCfg?.dropStep || 30;
+      bagCards.push(`
+        <div class="inv-row">
+          <span>🔸 ${this.escape(aCfg?.name || aType)} ×<strong>${qty}</strong></span>
+          <div class="inv-acts">
+            <button class="inv-btn drop" data-drop="ammo" data-key="${aType}" data-qty="${Math.min(qty, step)}">Vứt ${Math.min(qty, step)}</button>
+            <button class="inv-btn drop" data-drop="ammo" data-key="${aType}" data-qty="${qty}">Hết</button>
+          </div>
+        </div>
+      `);
+    }
+    bagEl.innerHTML = bagCards.length ? bagCards.join('') : '<div class="inv-empty">Balo trống rỗng. Hãy nhặt súng, đạn và hồi máu từ nhà dân hoặc hòm xác!</div>';
+
+    // 3. Right Column: Equipped Gear & Firearms
+    const eqCards = [];
+    const s1 = local.weaponsState?.[1]?.id;
+    const s2 = local.weaponsState?.[2]?.id;
+    eqCards.push(`
+      <div class="inv-row">
+        <span><strong>[1] Súng Chính:</strong> ${s1 ? this.escape(WEAPONS[s1]?.name || s1) : '<em>Trống</em>'}</span>
+        ${s1 ? `<button class="inv-btn drop" data-drop="weapon" data-key="1">Vứt Súng</button>` : ''}
+      </div>
+      <div class="inv-row">
+        <span><strong>[2] Súng Phụ:</strong> ${s2 ? this.escape(WEAPONS[s2]?.name || s2) : '<em>Trống</em>'}</span>
+        ${s2 ? `<button class="inv-btn drop" data-drop="weapon" data-key="2">Vứt Súng</button>` : ''}
+      </div>
+      <div class="inv-row">
+        <span><strong>🪖 Mũ:</strong> ${gear.helmetTier ? `${BR_HELMETS[gear.helmetTier]?.name} (${gear.helmetArmor} AP)` : '<em>Chưa có</em>'}</span>
+        ${gear.helmetTier ? `<button class="inv-btn drop" data-drop="helmet" data-key="helmet">Vứt</button>` : ''}
+      </div>
+      <div class="inv-row">
+        <span><strong>🦺 Giáp:</strong> ${gear.vestTier ? `${BR_VESTS[gear.vestTier]?.name} (${Math.round(local.armor)} AP)` : '<em>Chưa có</em>'}</span>
+        ${gear.vestTier ? `<button class="inv-btn drop" data-drop="vest" data-key="vest">Vứt</button>` : ''}
+      </div>
+      <div class="inv-row">
+        <span><strong>🎒 Balo:</strong> ${BR_BACKPACKS[bag.tier || 0]?.name}</span>
+      </div>
+    `);
+    eqEl.innerHTML = eqCards.join('');
+
+    // Wire buttons directly
+    vicEl.querySelectorAll('[data-loot]').forEach((btn) => {
+      btn.addEventListener('click', () => onLootItem(btn.dataset.loot, btn.dataset.item || null));
+    });
+    bagEl.querySelectorAll('[data-use]').forEach((btn) => {
+      btn.addEventListener('click', () => onUseMed(btn.dataset.use));
+    });
+    document.querySelectorAll('#br-backpack-modal [data-drop]').forEach((btn) => {
+      btn.addEventListener('click', () => onDropItem(btn.dataset.drop, btn.dataset.key, Number(btn.dataset.qty || 1)));
+    });
+  }
+
+  _getTerrainCanvas(mapData) {
+    if (this._terrainCanvasCache.has(mapData.id)) {
+      return this._terrainCanvasCache.get(mapData.id);
+    }
+    const size = 512;
+    const rgba = renderTerrainRGBA(mapData.terrain, size);
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(size, size);
+    img.data.set(rgba);
+    ctx.putImageData(img, 0, 0);
+    this._terrainCanvasCache.set(mapData.id, c);
+    return c;
+  }
+
+  drawBigMap(mapData, localPlayer, storm, dropPlane = null, pingMarker = null) {
+    if (!this.bigMapCtx || !mapData || !localPlayer) return;
+    const ctx = this.bigMapCtx;
+    const w = this.bigMapCanvas.width;
+    const h = this.bigMapCanvas.height;
+    const half = mapData.bounds?.halfW || 2500;
+    const toPx = (wx, wz) => [((wx + half) / (half * 2)) * w, ((wz + half) / (half * 2)) * h];
+
+    ctx.clearRect(0, 0, w, h);
+    if (mapData.terrain) {
+      ctx.drawImage(this._getTerrainCanvas(mapData), 0, 0, w, h);
+    } else {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // 1km Grid Lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.lineWidth = 1;
+    for (let g = -2000; g <= 2000; g += 1000) {
+      const [gx, gz] = toPx(g, g);
+      ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, gz); ctx.lineTo(w, gz); ctx.stroke();
+    }
+
+    // Named Towns, Compounds & Outposts
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    for (const np of mapData.namedPlaces || []) {
+      const [px, pz] = toPx(np.x, np.z);
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+      ctx.fillRect(px - 52, pz - 9, 104, 16);
+      ctx.fillStyle = '#fef08a';
+      ctx.fillText(np.name, px, pz + 3);
+    }
+
+    if (storm) {
+      const [sx, sz] = toPx(storm.x, storm.z);
+      const sr = (storm.r / (half * 2)) * w;
+      ctx.strokeStyle = '#c084fc';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(sx, sz, sr, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    if (dropPlane?.active) {
+      const [sx, sz] = toPx(dropPlane.startX, dropPlane.startZ);
+      const [ex, ez] = toPx(dropPlane.endX, dropPlane.endZ);
+      const [px, pz] = toPx(dropPlane.x, dropPlane.z);
+      ctx.strokeStyle = '#f97316';
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(sx, sz); ctx.lineTo(ex, ez); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#f97316';
+      ctx.beginPath(); ctx.arc(px, pz, 6, 0, Math.PI * 2); ctx.fill();
+    }
+
+    if (pingMarker) {
+      const [mx, mz] = toPx(pingMarker.x, pingMarker.z);
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath(); ctx.arc(mx, mz, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    const [lx, lz] = toPx(localPlayer.x, localPlayer.z);
+    ctx.save();
+    ctx.translate(lx, lz);
+    ctx.rotate(-localPlayer.yaw);
+    ctx.fillStyle = '#22c55e';
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.lineTo(6, 6);
+    ctx.lineTo(0, 3);
+    ctx.lineTo(-6, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   _getStaticMapCanvas(mapData, scale) {
-    if (this._staticMapCache.has(mapData.id)) {
-      return this._staticMapCache.get(mapData.id);
+    const cacheKey = `${mapData.id}_${scale.toFixed(2)}`;
+    if (this._staticMapCache.has(cacheKey)) {
+      return this._staticMapCache.get(cacheKey);
     }
     const c = document.createElement('canvas');
     c.width = 256;
@@ -470,18 +823,19 @@ export class MatchHUD {
       ctx.arc(site.x * scale, site.z * scale, site.radius * scale, 0, Math.PI * 2);
       ctx.stroke();
     }
-    this._staticMapCache.set(mapData.id, c);
+    this._staticMapCache.set(cacheKey, c);
     return c;
   }
 
-  drawMinimap(mapData, localPlayer, allPlayers, teamBased, bomb, storm) {
+  drawMinimap(mapData, localPlayer, allPlayers, teamBased, bomb, storm, dropPlane = null, pingMarker = null) {
     if (!this.mmCtx || !mapData || !localPlayer) return;
     const ctx = this.mmCtx;
     const w = this.minimapCanvas.width;
     const h = this.minimapCanvas.height;
     const cx = w / 2;
     const cy = h / 2;
-    const scale = 2.25;
+    const halfSpan = Math.max(mapData.bounds?.halfW || 40, mapData.bounds?.halfD || 40);
+    const scale = mapData.terrain ? (localPlayer.dropPhase === 'plane' ? 0.045 : 0.28) : (halfSpan > 55 ? 1.15 : 2.25);
 
     ctx.clearRect(0, 0, w, h);
     ctx.save();
@@ -500,9 +854,34 @@ export class MatchHUD {
     ctx.translate(cx, cy);
     ctx.rotate(localPlayer.yaw);
 
-    // Draw pre-rendered static map geometry in a single hardware-accelerated blit
-    const staticCanvas = this._getStaticMapCanvas(mapData, scale);
-    ctx.drawImage(staticCanvas, -128 - localPlayer.x * scale, -128 - localPlayer.z * scale);
+    if (mapData.terrain) {
+      const tCanvas = this._getTerrainCanvas(mapData);
+      const drawW = halfSpan * 2 * scale;
+      ctx.drawImage(tCanvas, (-halfSpan - localPlayer.x) * scale, (-halfSpan - localPlayer.z) * scale, drawW, drawW);
+      for (const np of mapData.namedPlaces || []) {
+        const nx = (np.x - localPlayer.x) * scale;
+        const nz = (np.z - localPlayer.z) * scale;
+        if (Math.hypot(nx, nz) > 92) continue;
+        ctx.save();
+        ctx.translate(nx, nz);
+        ctx.rotate(-localPlayer.yaw);
+        ctx.fillStyle = 'rgba(254, 240, 138, 0.9)';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(np.name, 0, 0);
+        ctx.restore();
+      }
+    } else {
+      const staticCanvas = this._getStaticMapCanvas(mapData, scale);
+      ctx.drawImage(staticCanvas, -128 - localPlayer.x * scale, -128 - localPlayer.z * scale);
+    }
+
+    if (pingMarker) {
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc((pingMarker.x - localPlayer.x) * scale, (pingMarker.z - localPlayer.z) * scale, 4.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     for (const site of mapData.bombSites || []) {
       const sx = (site.x - localPlayer.x) * scale;
@@ -524,6 +903,23 @@ export class MatchHUD {
       ctx.beginPath();
       ctx.arc((storm.x - localPlayer.x) * scale, (storm.z - localPlayer.z) * scale, storm.r * scale, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    if (dropPlane?.active) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(249, 115, 22, 0.6)';
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo((dropPlane.startX - localPlayer.x) * scale, (dropPlane.startZ - localPlayer.z) * scale);
+      ctx.lineTo((dropPlane.endX - localPlayer.x) * scale, (dropPlane.endZ - localPlayer.z) * scale);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#f97316';
+      ctx.beginPath();
+      ctx.arc((dropPlane.x - localPlayer.x) * scale, (dropPlane.z - localPlayer.z) * scale, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
 
     if (bomb && (bomb.planted || bomb.dropped)) {

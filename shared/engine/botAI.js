@@ -14,7 +14,14 @@ import {
 const BOT_NAMES = [
   'Sói_Đêm', 'Đại_Bàng', 'Tia_Chớp', 'Bóng_Ma', 'Hổ_Xám',
   'Lưỡi_Hái', 'Thiết_Giáp', 'Phượng_Hoàng', 'Diều_Hâu', 'Bão_Lửa',
-  'Sấm_Sét', 'Cobra_VN'
+  'Sấm_Sét', 'Cobra_VN', 'Hắc_Long', 'Thần_Gió', 'Ưng_Chiến',
+  'Báo_Đen', 'Xạ_Thủ_99', 'Sát_Thủ_Pro', 'Lính_Thép', 'Bắc_Cực',
+  'Đặc_Nhiêm_X', 'Hoàng_Kim', 'Chiến_Lang', 'Cận_Vệ_Zero', 'Hỏa_Tiễn',
+  'Vệ_Binh_77', 'Ác_Quỷ_Đỏ', 'Khắc_Tinh', 'Thanh_Kiếm', 'Kỵ_Sĩ_Đêm',
+  'Biệt_Kích_01', 'Tân_Binh_Alpha', 'Độc_Cô_Cầu_Bại', 'Vũ_Bão', 'Không_Kỵ',
+  'Phong_Vân', 'Phi_Long', 'Huyết_Ưng', 'Kẻ_Săn_Mồi', 'Tia_Nắng',
+  'Lục_Quân', 'Thủ_Lĩnh', 'Bản_Năng', 'Cảnh_Vệ', 'Băng_Giá',
+  'Ngân_Hà', 'Siêu_Phàm', 'Chiến_Binh_S', 'Huyền_Thoại'
 ];
 
 const BOT_LOADOUTS = [
@@ -38,6 +45,7 @@ const DIFFICULTY_PRESETS = {
 export function createBotProfile(index = 0) {
   const preset = BOT_LOADOUTS[index % BOT_LOADOUTS.length];
   const baseName = BOT_NAMES[index % BOT_NAMES.length];
+  const suffix = index >= BOT_NAMES.length ? `_${index - BOT_NAMES.length + 2}` : '';
   const skins = {};
   for (const k of [
     'ak47', 'm4a1', 'scarh', 'aug', 'm16a4', 'famas', 'galil', 'hk416',
@@ -48,7 +56,7 @@ export function createBotProfile(index = 0) {
     skins[k] = preset.skin;
   }
   return {
-    name: `[BOT] ${baseName}`,
+    name: `[BOT] ${baseName}${suffix}`,
     operator: preset.operator,
     outfit: preset.outfit,
     primary: preset.primary,
@@ -189,7 +197,11 @@ export function updateBotAI(bot, room, dt, now) {
     crouchCombat: false,
     stuckCheckAt: now + 700,
     lastPos: { x: bot.x, z: bot.z },
-    avoidYawOffset: 0
+    avoidYawOffset: 0,
+    scanTick: Math.floor(Math.random() * 3),
+    jumpAt: 0,
+    dropTargetX: 0,
+    dropTargetZ: 0
   });
 
   const input = {
@@ -203,6 +215,50 @@ export function updateBotAI(bot, room, dt, now) {
     ads: false,
     interact: false
   };
+
+  // Battle Royale Plane Jump & Parachute Glide AI
+  if (room.mode === 'survival' && bot.dropPhase && bot.dropPhase !== 'ground') {
+    if (bot.dropPhase === 'plane') {
+      if (!ai.jumpAt) {
+        const dp = room.dropPlane;
+        const flightMs = dp ? Math.max(2500, dp.endAt - dp.startAt - 1200) : 7000;
+        const jumpFrac = Math.random();
+        ai.jumpAt = (dp?.startAt || now) + 500 + jumpFrac * flightMs;
+        // Aim at a named compound / loot spawn relatively close to where the plane will be when jumping!
+        const estX = dp ? (dp.startX + (dp.endX - dp.startX) * jumpFrac) : 0;
+        const estZ = dp ? (dp.startZ + (dp.endZ - dp.startZ) * jumpFrac) : 0;
+        const pool = (room.lootCrates && room.lootCrates.length) ? room.lootCrates : map.waypoints;
+        let pick = pool[Math.floor(Math.random() * pool.length)] || { x: estX, z: estZ };
+        let bestClose = Infinity;
+        for (let k = 0; k < Math.min(18, pool.length); k++) {
+          const cand = pool[Math.floor(Math.random() * pool.length)];
+          if (!cand) continue;
+          const d = Math.hypot(cand.x - estX, cand.z - estZ);
+          if (d < bestClose) { bestClose = d; pick = cand; }
+        }
+        ai.dropTargetX = pick.x + (Math.random() - 0.5) * 18;
+        ai.dropTargetZ = pick.z + (Math.random() - 0.5) * 18;
+      }
+      if (now >= ai.jumpAt && room.handleDropAction) {
+        room.handleDropAction(bot.id, 'jump');
+      }
+      bot.input = input;
+      return;
+    }
+
+    const dx = ai.dropTargetX - bot.x;
+    const dz = ai.dropTargetZ - bot.z;
+    const floorHere = map.terrain ? map.terrain.floorAt(bot.x, bot.z) : 0;
+    const agl = bot.y - floorHere;
+    input.yaw = Math.atan2(-dx, -dz);
+    input.pitch = bot.dropPhase === 'skydive' ? -0.35 : -0.08;
+    input.forward = Math.hypot(dx, dz) > 4 ? 1 : 0;
+    if (bot.dropPhase === 'skydive' && agl < 72 && Math.random() < 0.14) {
+      room.handleDropAction?.(bot.id, 'open_chute');
+    }
+    bot.input = input;
+    return;
+  }
 
   const wStats = room.getPlayerWeaponStats(bot);
 
@@ -231,26 +287,30 @@ export function updateBotAI(bot, room, dt, now) {
     }
   }
 
-  // 2. Scan for Visible Enemies (with FOV & Damage-Reaction Awareness)
+  // 2. Scan for Visible Enemies (staggered every 3rd tick + distance culled so 50-player BR stays smooth)
   const botEye = {
     x: bot.x,
     y: bot.y + (bot.crouching ? PHYSICS.EYE_CROUCH : PHYSICS.EYE_STAND),
     z: bot.z
   };
 
+  ai.scanTick = (ai.scanTick + 1) % 3;
   let visibleEnemy = null;
   let bestScore = Infinity;
 
   for (const other of room.getLivingCombatants()) {
     if (other.id === bot.id) continue;
     if (room.modeConfig.teamBased && other.team === bot.team) continue;
+    if (other.dropPhase && other.dropPhase !== 'ground') continue;
 
     const dx = other.x - bot.x;
     const dz = other.z - bot.z;
     const dist = Math.hypot(dx, dz);
-    if (dist > 82) continue;
+    if (dist > (map.terrain ? 115 : 64)) continue;
 
-    // Check angle relative to bot's look direction (bots notice enemies within 130° cone or close < 12m or if recently damaged)
+    // On off-ticks in heavy lobbies (>14 combatants), only verify current target or very close enemies (<15m)
+    if (ai.scanTick !== 0 && room.combatants.size > 14 && other.id !== ai.targetId && dist > 15) continue;
+
     const angleToEnemy = Math.atan2(-dx, -dz);
     const yawDelta = Math.abs(shortestAngleDiff(bot.yaw, angleToEnemy));
     const recentlyShot = now - (bot.lastDamagedAt || 0) < 2200;
@@ -366,7 +426,7 @@ export function updateBotAI(bot, room, dt, now) {
 
   // 4. Verified Waypoint Pathfinding + String-Pulling Lookahead
   if (now >= ai.repathAt || !ai.path || ai.path.length === 0) {
-    ai.repathAt = now + 1500 + Math.random() * 600;
+    ai.repathAt = now + (waypoints.length > 80 ? 2800 : 1500) + Math.random() * 600;
     const startWp = nearestVisibleWaypoint(bot.x, bot.z, waypoints, map);
 
     let goalWp = null;
@@ -378,6 +438,22 @@ export function updateBotAI(bot, room, dt, now) {
         const site = map.bombSites[bot.aiBombSiteIdx] || map.bombSites[0];
         goalWp = nearestVisibleWaypoint(site.x, site.z, waypoints, map);
       }
+    } else if (room.mode === 'survival' && !bot.weaponsState?.[1]?.id && room.lootCrates?.length) {
+      let bestLoot = null;
+      let bestLootDist = Infinity;
+      for (const lc of room.lootCrates) {
+        if (!lc.active || lc.kind !== 'weapon') continue;
+        const d = Math.hypot(lc.x - bot.x, lc.z - bot.z);
+        if (d < bestLootDist) { bestLootDist = d; bestLoot = lc; }
+      }
+      if (bestLoot) {
+        if (bestLootDist < 85) {
+          ai.path = [{ id: -1, x: bestLoot.x, z: bestLoot.z, links: [] }];
+        } else {
+          goalWp = nearestVisibleWaypoint(bestLoot.x, bestLoot.z, waypoints, map);
+        }
+        if (bestLootDist < 14) input.interact = true;
+      }
     } else if (room.mode === 'survival' && room.storm) {
       const distFromSafe = Math.hypot(bot.x - room.storm.x, bot.z - room.storm.z);
       if (distFromSafe > room.storm.radius * 0.72) {
@@ -388,15 +464,16 @@ export function updateBotAI(bot, room, dt, now) {
       goalWp = nearestVisibleWaypoint(ai.lastSeenEnemyPos.x, ai.lastSeenEnemyPos.z, waypoints, map);
     }
 
-    if (!goalWp) {
+    if (goalWp) {
+      ai.path = computeWaypointPath(startWp.id, goalWp.id, waypoints);
+    } else if (!ai.path || ai.path.length === 0) {
       if (ai.goalWpId === null || startWp.id === ai.goalWpId) {
         const picked = pickTacticalGoalWaypoint(bot, room, waypoints);
         ai.goalWpId = picked.id;
       }
       goalWp = waypoints.find((w) => w.id === ai.goalWpId) || waypoints[0];
+      ai.path = computeWaypointPath(startWp.id, goalWp.id, waypoints);
     }
-
-    ai.path = computeWaypointPath(startWp.id, goalWp.id, waypoints);
   }
 
   // Advance along path using String-Pulling:

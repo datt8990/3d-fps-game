@@ -7,12 +7,20 @@ import {
   OPERATORS,
   WEAPONS,
   RADIO_COMMANDS,
+  BR_BACKPACKS,
+  BR_VESTS,
+  BR_HELMETS,
+  BR_MEDS,
+  BR_AMMO_TYPES,
+  getWeaponAmmoType,
+  computeBackpackWeight,
   getEffectiveWeaponStats,
   getRankByRp
 } from '../constants.js';
 import { MAPS } from '../maps.js';
 import {
   stepPlayerPhysics,
+  stepAirbornePhysics,
   depenetratePlayerXZ,
   canStandAt,
   directionFromAngles,
@@ -43,12 +51,15 @@ export class GameRoomCore {
     this.name = (options.name || `Phòng Chiến Thuật #${this.code}`).slice(0, 34);
     this.mode = GAME_MODES[options.mode] ? options.mode : 'tdm';
     this.modeConfig = GAME_MODES[this.mode];
-    this.mapId = MAPS[options.mapId] ? options.mapId : 'warehouse';
+    const defaultMapId = this.mode === 'survival' && !options.mapId && MAPS.br_island ? 'br_island' : 'warehouse';
+    this.mapId = MAPS[options.mapId] ? options.mapId : defaultMapId;
     this.map = MAPS[this.mapId];
-    this.maxPlayers = Math.min(12, Math.max(2, Number(options.maxPlayers) || this.modeConfig.maxPlayers));
+    this.maxPlayers = Math.min(50, Math.max(2, Number(options.maxPlayers) || this.modeConfig.maxPlayers));
     this.fillBots = options.fillBots !== undefined ? Boolean(options.fillBots) : true;
+    this.targetBotFillCount = options.targetBotFillCount ?? null; // null = fill up to maxPlayers
     this.botDifficulty = ['easy', 'normal', 'hard'].includes(options.botDifficulty) ? options.botDifficulty : 'normal';
     this.isPersistentDefault = Boolean(options.isPersistentDefault);
+    this.isMatchmaking = Boolean(options.isMatchmaking);
     this.peerHostId = options.peerHostId || `bstrike_v2_${this.code}`;
 
     this.hostId = options.hostId || null;
@@ -77,6 +88,10 @@ export class GameRoomCore {
     this.grenades = [];
     this.storm = null;
     this.lootCrates = [];
+    this.dropPlane = null;
+    this.airdropSpawned = false;
+    this.lootSeq = 0;
+    this.matchStartedAt = 0;
     this.lastStormDamageAt = 0;
     this.lastRegenTickAt = 0;
 
@@ -131,7 +146,9 @@ export class GameRoomCore {
       maxPlayers: this.maxPlayers,
       fillBots: this.fillBots,
       botDifficulty: this.botDifficulty,
-      isRanked: Boolean(this.modeConfig.isRanked)
+      isRanked: Boolean(this.modeConfig.isRanked),
+      isMatchmaking: this.isMatchmaking,
+      matchStartedAt: this.matchStartedAt
     };
   }
 
@@ -185,11 +202,26 @@ export class GameRoomCore {
       crouching: false,
       sprinting: false,
       ads: false,
+      dropPhase: 'ground',
 
       hp: PHYSICS.MAX_HP,
       maxHp: PHYSICS.MAX_HP,
       armor: op.maxArmor,
       maxArmor: op.maxArmor,
+      gear: {
+        vestTier: 0,
+        helmetTier: 0,
+        helmetArmor: 0,
+        helmetMax: 0,
+        bagTier: 0
+      },
+      backpack: {
+        tier: 0,
+        capacity: BR_BACKPACKS[0].capacity,
+        ammo: { '7.62mm': 0, '5.56mm': 0, '9mm': 0, '12G': 0, '.338': 0 },
+        meds: { bandage: 0, firstaid: 0, medkit: 0, energy: 0 },
+        frag_grenade: 0
+      },
       dead: false,
       respawnAt: 0,
       spawnProtectedUntil: 0,
@@ -253,7 +285,20 @@ export class GameRoomCore {
     }
 
     if (this.status === 'playing') {
-      this.spawnPlayer(player, Date.now(), false);
+      const now = Date.now();
+      this.spawnPlayer(player, now, false);
+      if (this.mode === 'survival' && !this.dropPlane?.active) {
+        const sx = this.storm?.x || 0;
+        const sz = this.storm?.z || 0;
+        const px = sx + (Math.random() - 0.5) * 40;
+        const pz = sz + (Math.random() - 0.5) * 40;
+        const groundY = this.map.terrain ? this.map.terrain.floorAt(px, pz) : 0;
+        player.dropPhase = 'parachute';
+        player.x = px;
+        player.z = pz;
+        player.y = groundY + (this.map.bounds.halfW > 500 ? 115 : 44);
+        player.onGround = false;
+      }
       this.sendTo(player.id, {
         type: 'match_started',
         room: this.getLobbyPayload(),
@@ -264,8 +309,11 @@ export class GameRoomCore {
         roundEndsAt: this.roundEndsAt,
         roundNumber: this.roundNumber,
         storm: this.storm,
+        dropPlane: this.dropPlane,
         lootCrates: this.lootCrates
       });
+      this.sendWeaponsSync(player);
+      this.sendInventorySync(player);
       this.broadcastPlayerSpawned(player);
     }
 
@@ -273,6 +321,83 @@ export class GameRoomCore {
     this.broadcastRoomLobby();
     this.onListChangedFn();
     return { player };
+  }
+
+  replaceBotWithHuman(clientInfo) {
+    const bots = this.getBots();
+    const chosenBot =
+      bots.find((b) => !b.dead && b.dropPhase === 'plane') ||
+      bots.find((b) => !b.dead && b.dropPhase !== 'ground') ||
+      bots.find((b) => !b.dead) ||
+      bots[0];
+
+    if (!chosenBot) {
+      return this.addHumanPlayer(clientInfo);
+    }
+
+    const inheritedTeam = this.modeConfig.teamBased ? chosenBot.team : this.pickTeamForJoiner();
+    const inheritedDropPhase = chosenBot.dropPhase || 'ground';
+    const inheritedPos = { x: chosenBot.x, y: chosenBot.y, z: chosenBot.z };
+    this.combatants.delete(chosenBot.id);
+
+    const player = this.createCombatantObject({
+      id: clientInfo.id,
+      userId: clientInfo.userId || null,
+      name: clientInfo.username || 'Chiến_Binh',
+      isBot: false,
+      team: inheritedTeam,
+      loadout: clientInfo.loadout || {},
+      rp: clientInfo.rp || 1200
+    });
+
+    this.combatants.set(player.id, player);
+    if (!this.hostId || !this.combatants.has(this.hostId)) {
+      this.hostId = player.id;
+    }
+
+    if (this.status === 'playing') {
+      const now = Date.now();
+      this.spawnPlayer(player, now, false);
+      if (this.mode === 'survival') {
+        if (this.dropPlane?.active && inheritedDropPhase === 'plane') {
+          player.dropPhase = 'plane';
+          player.x = this.dropPlane.x;
+          player.y = this.dropPlane.y;
+          player.z = this.dropPlane.z;
+          player.onGround = false;
+        } else {
+          const px = (this.storm?.x ?? inheritedPos.x) + (Math.random() - 0.5) * 35;
+          const pz = (this.storm?.z ?? inheritedPos.z) + (Math.random() - 0.5) * 35;
+          const groundY = this.map.terrain ? this.map.terrain.floorAt(px, pz) : 0;
+          player.dropPhase = 'parachute';
+          player.x = px;
+          player.z = pz;
+          player.y = groundY + (this.map.bounds.halfW > 500 ? 115 : 46);
+          player.onGround = false;
+        }
+      }
+      this.sendTo(player.id, {
+        type: 'match_started',
+        room: this.getLobbyPayload(),
+        mapId: this.mapId,
+        mode: this.mode,
+        modeConfig: this.modeConfig,
+        matchEndsAt: this.matchEndsAt,
+        roundEndsAt: this.roundEndsAt,
+        roundNumber: this.roundNumber,
+        storm: this.storm,
+        dropPlane: this.dropPlane,
+        lootCrates: this.lootCrates
+      });
+      this.sendWeaponsSync(player);
+      this.sendInventorySync(player);
+      this.broadcastPlayerSpawned(player);
+    }
+
+    this.addSystemChat(`${player.name} đã tham gia thay thế ${chosenBot.name}!`);
+    this.broadcastRoomLobby();
+    this.onListChangedFn();
+    return { player, replacedBotId: chosenBot.id, replacedBotName: chosenBot.name };
   }
 
   removeHumanPlayer(playerId) {
@@ -344,6 +469,13 @@ export class GameRoomCore {
     if (settings.mode && GAME_MODES[settings.mode]) {
       this.mode = settings.mode;
       this.modeConfig = GAME_MODES[this.mode];
+      if (settings.maxPlayers === undefined) {
+        this.maxPlayers = Math.max(this.getHumanPlayers().length, this.modeConfig.maxPlayers);
+      }
+      if (!settings.mapId && this.mode === 'survival' && MAPS.br_island) {
+        this.mapId = 'br_island';
+        this.map = MAPS.br_island;
+      }
       let idx = 0;
       for (const p of this.combatants.values()) {
         p.team = this.modeConfig.teamBased ? (idx % 2 === 0 ? 'alpha' : 'bravo') : `ffa_${p.id}`;
@@ -356,7 +488,7 @@ export class GameRoomCore {
     }
     if (settings.maxPlayers !== undefined) {
       const minAllowed = Math.max(2, this.getHumanPlayers().length);
-      this.maxPlayers = Math.min(12, Math.max(minAllowed, Number(settings.maxPlayers) || 10));
+      this.maxPlayers = Math.min(50, Math.max(minAllowed, Number(settings.maxPlayers) || 10));
     }
     if (settings.fillBots !== undefined) {
       this.fillBots = Boolean(settings.fillBots);
@@ -378,8 +510,18 @@ export class GameRoomCore {
       return;
     }
 
+    const desiredTotal =
+      this.targetBotFillCount !== null
+        ? Math.min(this.maxPlayers, this.getHumanPlayers().length + Math.max(0, Number(this.targetBotFillCount) || 0))
+        : this.maxPlayers;
+
+    while (this.combatants.size > desiredTotal && this.getBots().length > 0) {
+      const b = this.getBots().pop();
+      this.combatants.delete(b.id);
+    }
+
     let botIndex = this.getBots().length;
-    while (this.combatants.size < this.maxPlayers) {
+    while (this.combatants.size < desiredTotal) {
       const profile = createBotProfile(botIndex++);
       const id = 'bot_' + randHex(5);
       const team = this.pickTeamForJoiner();
@@ -414,9 +556,18 @@ export class GameRoomCore {
     this.roundPhase = 'live';
     this.firstBloodAwarded = false;
     this.grenades = [];
+    this.dropPlane = null;
+    this.airdropSpawned = false;
+    this.storm = null;
+    this.lootCrates = [];
+    this.matchStartedAt = now;
     this.matchEndsAt = now + this.modeConfig.matchDurationSec * 1000;
     this.roundEndsAt = this.mode === 'bomb' ? now + this.modeConfig.roundDurationSec * 1000 : this.matchEndsAt;
     this.bombState = this.createInitialBombState();
+
+    if (this.mode === 'survival') {
+      this.initSurvivalMode(now);
+    }
 
     for (const p of this.combatants.values()) {
       p.kills = 0;
@@ -426,13 +577,12 @@ export class GameRoomCore {
       p.currentStreak = 0;
       p.score = 0;
       p.hasBomb = false;
+      p.aiState = null;
       this.spawnPlayer(p, now, false);
     }
 
     if (this.mode === 'bomb') {
       this.assignBombCarrier();
-    } else if (this.mode === 'survival') {
-      this.initSurvivalMode();
     }
 
     this.broadcast({
@@ -445,10 +595,13 @@ export class GameRoomCore {
       roundEndsAt: this.roundEndsAt,
       roundNumber: this.roundNumber,
       storm: this.storm,
+      dropPlane: this.dropPlane,
       lootCrates: this.lootCrates
     });
 
     for (const p of this.combatants.values()) {
+      this.sendWeaponsSync(p);
+      this.sendInventorySync(p);
       this.broadcastPlayerSpawned(p);
     }
 
@@ -456,24 +609,275 @@ export class GameRoomCore {
     this.startMatchLoop();
   }
 
-  initSurvivalMode() {
-    const maxR = Math.max(this.map.bounds.halfW, this.map.bounds.halfD) * 1.25;
-    this.storm = {
-      x: (Math.random() - 0.5) * 14,
-      z: (Math.random() - 0.5) * 14,
-      radius: maxR,
-      minRadius: 5.5,
-      shrinkSpeed: (maxR - 5.5) / 145
-    };
-    const types = ['medkit', 'armor', 'overcharge'];
-    this.lootCrates = (this.map.lootSpawns || []).map((sp, idx) => ({
-      id: 'loot_' + idx,
-      type: types[idx % types.length],
-      x: sp.x,
-      y: sp.y || 0,
-      z: sp.z,
+  createLootCrate(spec, x, y, z) {
+    const id = 'loot_' + (++this.lootSeq);
+    const py = Number.isFinite(Number(y))
+      ? Number(y)
+      : (this.map.terrain ? this.map.terrain.floorAt(x, z) : 0);
+
+    if (spec.kind === 'deathbox') {
+      return {
+        id,
+        kind: 'deathbox',
+        type: 'deathbox',
+        ownerName: spec.ownerName || 'Chiến Binh',
+        label: `Hòm Đồ (${spec.ownerName || 'Chiến Binh'})`,
+        items: spec.items || [],
+        x: Number(x.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        z: Number(z.toFixed(2)),
+        active: true
+      };
+    }
+
+    if (spec.kind === 'weapon' && WEAPONS[spec.weaponId]) {
+      const w = WEAPONS[spec.weaponId];
+      const ammoType = getWeaponAmmoType(w.id);
+      return {
+        id,
+        kind: 'weapon',
+        type: w.id,
+        weaponId: w.id,
+        ammoType,
+        label: w.name,
+        ammo: spec.ammo ?? w.magSize,
+        reserve: spec.reserve ?? 0,
+        bonusAmmo: spec.bonusAmmo ?? w.magSize,
+        x: Number(x.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        z: Number(z.toFixed(2)),
+        active: true
+      };
+    }
+
+    if (spec.kind === 'ammo') {
+      const ammoType = BR_AMMO_TYPES[spec.ammoType] ? spec.ammoType : '7.62mm';
+      const cfg = BR_AMMO_TYPES[ammoType];
+      const qty = Math.max(1, Number(spec.qty) || cfg.dropStep || 30);
+      return {
+        id,
+        kind: 'ammo',
+        type: 'ammo',
+        ammoType,
+        qty,
+        label: `${cfg.name} ×${qty}`,
+        x: Number(x.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        z: Number(z.toFixed(2)),
+        active: true
+      };
+    }
+
+    if (spec.kind === 'vest' || spec.kind === 'armor') {
+      const tier = Math.max(1, Math.min(3, Number(spec.tier) || 1));
+      const v = BR_VESTS[tier];
+      return {
+        id,
+        kind: 'vest',
+        type: 'armor',
+        tier,
+        armor: spec.armor ?? v.maxArmor,
+        maxArmor: v.maxArmor,
+        label: v.name,
+        x: Number(x.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        z: Number(z.toFixed(2)),
+        active: true
+      };
+    }
+
+    if (spec.kind === 'helmet') {
+      const tier = Math.max(1, Math.min(3, Number(spec.tier) || 1));
+      const hm = BR_HELMETS[tier];
+      return {
+        id,
+        kind: 'helmet',
+        type: 'helmet',
+        tier,
+        helmetArmor: spec.helmetArmor ?? hm.maxHelmet,
+        maxHelmet: hm.maxHelmet,
+        label: hm.name,
+        x: Number(x.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        z: Number(z.toFixed(2)),
+        active: true
+      };
+    }
+
+    if (spec.kind === 'bag') {
+      const tier = Math.max(1, Math.min(3, Number(spec.tier) || 1));
+      const bg = BR_BACKPACKS[tier];
+      return {
+        id,
+        kind: 'bag',
+        type: 'bag',
+        tier,
+        capacity: bg.capacity,
+        label: bg.name,
+        x: Number(x.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        z: Number(z.toFixed(2)),
+        active: true
+      };
+    }
+
+    if (spec.kind === 'med' || BR_MEDS[spec.medId] || spec.kind === 'medkit') {
+      const medId = BR_MEDS[spec.medId] ? spec.medId : (spec.kind === 'medkit' ? 'medkit' : 'bandage');
+      const m = BR_MEDS[medId];
+      const qty = Math.max(1, Number(spec.qty) || (medId === 'bandage' ? 5 : 1));
+      return {
+        id,
+        kind: 'med',
+        type: 'medkit',
+        medId,
+        qty,
+        label: qty > 1 ? `${m.name} ×${qty}` : m.name,
+        x: Number(x.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        z: Number(z.toFixed(2)),
+        active: true
+      };
+    }
+
+    if (spec.kind === 'grenade') {
+      const qty = Math.max(1, Number(spec.qty) || 1);
+      return {
+        id,
+        kind: 'grenade',
+        type: 'grenade',
+        qty,
+        label: qty > 1 ? `Lựu Đạn Nổ ×${qty}` : 'Lựu Đạn Nổ Frag',
+        x: Number(x.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        z: Number(z.toFixed(2)),
+        active: true
+      };
+    }
+
+    const kind = spec.kind || spec.type || 'overcharge';
+    return {
+      id,
+      kind,
+      type: kind,
+      label: 'Hòm Tiếp Tế Tăng Lực',
+      x: Number(x.toFixed(2)),
+      y: Number(py.toFixed(2)),
+      z: Number(z.toFixed(2)),
       active: true
-    }));
+    };
+  }
+
+  initSurvivalMode(now = Date.now()) {
+    const hw = this.map.bounds.halfW;
+    const hd = this.map.bounds.halfD;
+    const isBig = hw > 500;
+    const maxR = Math.max(hw, hd) * 1.25;
+
+    // Pick final storm center near a dry land town/valley so final fights aren't in ocean corners
+    const places = this.map.namedPlaces || [];
+    const safeCenter = places.length > 0
+      ? places[Math.floor(Math.random() * places.length)]
+      : { x: (Math.random() - 0.5) * hw * 0.4, z: (Math.random() - 0.5) * hd * 0.4 };
+
+    this.storm = {
+      x: safeCenter.x + (Math.random() - 0.5) * (isBig ? 180 : 12),
+      z: safeCenter.z + (Math.random() - 0.5) * (isBig ? 180 : 12),
+      radius: maxR,
+      minRadius: isBig ? 22 : 6.0,
+      shrinkSpeed: (maxR - (isBig ? 22 : 6.0)) / (isBig ? 540 : 215)
+    };
+
+    // High-altitude tactical C-130 cargo plane flight across the island
+    const corridors = isBig
+      ? [
+          { sx: -2100, sz: -1800, ex: 2100, ez: 1700 },
+          { sx: 2100, sz: -1700, ex: -2000, ez: 1750 },
+          { sx: -1650, sz: 2050, ex: 1650, ez: -2050 },
+          { sx: 300, sz: -2150, ex: -250, ez: 2150 }
+        ]
+      : [
+          { sx: -hw * 0.84, sz: -hd * 0.72, ex: hw * 0.84, ez: hd * 0.72 },
+          { sx: hw * 0.84, sz: -hd * 0.72, ex: -hw * 0.84, ez: hd * 0.72 }
+        ];
+    const path = corridors[Math.floor(Math.random() * corridors.length)];
+    const planeY = isBig ? 260 : 82;
+    const durationMs = isBig ? 36000 : 13500;
+    const startAt = now + 800;
+    const endAt = startAt + durationMs;
+    this.dropPlane = {
+      active: true,
+      startX: path.sx,
+      startZ: path.sz,
+      endX: path.ex,
+      endZ: path.ez,
+      x: path.sx,
+      y: planeY,
+      z: path.sz,
+      vx: (path.ex - path.sx) / (durationMs / 1000),
+      vz: (path.ez - path.sz) / (durationMs / 1000),
+      yaw: Math.atan2(-(path.ex - path.sx), -(path.ez - path.sz)),
+      startAt,
+      endAt
+    };
+    this.airdropSpawned = false;
+    this.lootSeq = 0;
+
+    const lootPoints = [...(this.map.lootSpawns || [])];
+    let tries = 0;
+    while (lootPoints.length < 40 && tries < 240) {
+      tries++;
+      const rx = (Math.random() * 2 - 1) * (hw - 8);
+      const rz = (Math.random() * 2 - 1) * (hd - 8);
+      const ry = this.map.terrain ? this.map.terrain.floorAt(rx, rz) : 0;
+      if (canStandAt(rx, ry, rz, PHYSICS.HEIGHT_STAND, 0.85, this.map.blocks)) {
+        lootPoints.push({ x: Number(rx.toFixed(1)), y: ry, z: Number(rz.toFixed(1)) });
+      }
+    }
+
+    const primaryPool = Object.values(WEAPONS).filter((w) => w.category === 'primary');
+    const secondaryPool = Object.values(WEAPONS).filter((w) => w.category === 'secondary');
+    const ammoKeys = Object.keys(BR_AMMO_TYPES);
+    const medKeys = ['bandage', 'firstaid', 'bandage', 'energy', 'medkit'];
+
+    this.lootCrates = [];
+    for (let idx = 0; idx < lootPoints.length; idx++) {
+      const sp = lootPoints[idx];
+      const baseY = sp.y ?? (this.map.terrain ? this.map.terrain.floorAt(sp.x, sp.z) : 0);
+      const r = idx % 10;
+
+      if (r <= 4) {
+        // Firearm + companion ammo box right next to it (PUBG floor loot style!)
+        const useSec = r === 4 && secondaryPool.length > 0;
+        const pool = useSec ? secondaryPool : primaryPool;
+        const w = pool[Math.floor(Math.random() * pool.length)];
+        const ammoType = getWeaponAmmoType(w.id);
+        this.lootCrates.push(this.createLootCrate({ kind: 'weapon', weaponId: w.id }, sp.x, baseY, sp.z));
+        this.lootCrates.push(
+          this.createLootCrate(
+            { kind: 'ammo', ammoType, qty: w.magSize },
+            sp.x + 0.85,
+            baseY,
+            sp.z + 0.55
+          )
+        );
+      } else if (r === 5) {
+        const tier = (idx % 7 === 0) ? 3 : ((idx % 3 === 0) ? 2 : 1);
+        this.lootCrates.push(this.createLootCrate({ kind: 'vest', tier }, sp.x, baseY, sp.z));
+      } else if (r === 6) {
+        const tier = (idx % 8 === 0) ? 3 : ((idx % 2 === 0) ? 2 : 1);
+        this.lootCrates.push(this.createLootCrate({ kind: 'helmet', tier }, sp.x, baseY, sp.z));
+      } else if (r === 7) {
+        const tier = (idx % 5 === 0) ? 3 : ((idx % 2 === 0) ? 2 : 1);
+        this.lootCrates.push(this.createLootCrate({ kind: 'bag', tier }, sp.x, baseY, sp.z));
+      } else if (r === 8) {
+        const medId = medKeys[idx % medKeys.length];
+        this.lootCrates.push(this.createLootCrate({ kind: 'med', medId }, sp.x, baseY, sp.z));
+      } else {
+        const ammoType = ammoKeys[idx % ammoKeys.length];
+        this.lootCrates.push(this.createLootCrate({ kind: 'ammo', ammoType }, sp.x - 0.5, baseY, sp.z));
+        this.lootCrates.push(this.createLootCrate({ kind: 'grenade', qty: 1 }, sp.x + 0.6, baseY, sp.z + 0.4));
+      }
+    }
   }
 
   assignBombCarrier() {
@@ -496,6 +900,30 @@ export class GameRoomCore {
   }
 
   resetWeaponsForSpawn(player) {
+    if (this.mode === 'survival') {
+      const meleeId = player.melee || 'knife';
+      player.weaponsState = {
+        1: { id: null, ammo: 0, reserve: 0, magSize: 0 },
+        2: { id: null, ammo: 0, reserve: 0, magSize: 0 },
+        3: { id: meleeId, ammo: 0, reserve: 0, magSize: 0 }
+      };
+      player.slot = 3;
+      player.weaponId = meleeId;
+      player.ammo = 0;
+      player.reserveAmmo = 0;
+      player.grenades = 0;
+      player.reloadingUntil = 0;
+      player.gear = { vestTier: 0, helmetTier: 0, helmetArmor: 0, helmetMax: 0, bagTier: 0 };
+      player.backpack = {
+        tier: 0,
+        capacity: BR_BACKPACKS[0].capacity,
+        ammo: { '7.62mm': 0, '5.56mm': 0, '9mm': 0, '12G': 0, '.338': 0 },
+        meds: { bandage: 0, firstaid: 0, medkit: 0, energy: 0 },
+        frag_grenade: 0
+      };
+      return;
+    }
+
     if (player.pendingPrimary && WEAPONS[player.pendingPrimary]?.category === 'primary') {
       player.primary = player.pendingPrimary;
       player.pendingPrimary = null;
@@ -553,35 +981,428 @@ export class GameRoomCore {
   }
 
   spawnPlayer(player, now = Date.now(), emitPacket = true) {
-    const pt = this.pickSpawnPoint(player);
     const op = OPERATORS[player.operator] || OPERATORS.vanguard;
-    player.x = pt.x;
-    player.y = pt.y;
-    player.z = pt.z;
-    player.vx = 0;
-    player.vy = 0;
-    player.vz = 0;
-    player.yaw = pt.yaw;
-    player.pitch = 0;
-    player.onGround = true;
-    player.crouching = false;
-    depenetratePlayerXZ(player, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS, this.map);
+    if (this.mode === 'survival' && this.dropPlane) {
+      player.dropPhase = 'plane';
+      player.x = this.dropPlane.x;
+      player.y = this.dropPlane.y;
+      player.z = this.dropPlane.z;
+      player.vx = 0;
+      player.vy = 0;
+      player.vz = 0;
+      player.yaw = this.dropPlane.yaw || 0;
+      player.pitch = -0.35;
+      player.onGround = false;
+      player.crouching = false;
+      player.armor = 0;
+    } else {
+      const pt = this.pickSpawnPoint(player);
+      player.dropPhase = 'ground';
+      player.x = pt.x;
+      player.y = pt.y;
+      player.z = pt.z;
+      player.vx = 0;
+      player.vy = 0;
+      player.vz = 0;
+      player.yaw = pt.yaw;
+      player.pitch = 0;
+      player.onGround = true;
+      player.crouching = false;
+      depenetratePlayerXZ(player, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS, this.map);
+      player.armor = this.mode === 'survival' ? 0 : op.maxArmor;
+    }
 
     player.hp = PHYSICS.MAX_HP;
     player.maxHp = PHYSICS.MAX_HP;
-    player.armor = op.maxArmor;
-    player.maxArmor = op.maxArmor;
+    player.maxArmor = this.mode === 'survival' ? 0 : op.maxArmor;
     player.dead = false;
     player.respawnAt = 0;
     player.currentStreak = 0;
     player.spawnedAt = now;
     player.lastClientPosAt = 0;
-    player.spawnProtectedUntil = now + PHYSICS.SPAWN_PROTECT_MS;
+    player.spawnProtectedUntil = this.mode === 'survival' ? 0 : now + PHYSICS.SPAWN_PROTECT_MS;
     player.damageTakenBy.clear();
     this.resetWeaponsForSpawn(player);
 
     if (emitPacket) {
       this.broadcastPlayerSpawned(player);
+    }
+  }
+
+  sendWeaponsSync(player) {
+    if (!player || player.isBot) return;
+    this.sendTo(player.id, {
+      type: 'weapons_sync',
+      slot: player.slot,
+      weaponId: player.weaponId,
+      ammo: player.ammo,
+      reserveAmmo: player.reserveAmmo,
+      grenades: player.grenades,
+      primary: player.primary,
+      secondary: player.secondary,
+      weaponsState: player.weaponsState
+    });
+  }
+
+  sendInventorySync(player) {
+    if (!player || player.isBot || this.mode !== 'survival') return;
+    this.sendTo(player.id, {
+      type: 'inventory_sync',
+      hp: player.hp,
+      maxHp: player.maxHp,
+      armor: player.armor,
+      maxArmor: player.maxArmor,
+      gear: player.gear,
+      backpack: player.backpack,
+      backpackWeight: computeBackpackWeight(player.backpack),
+      weaponsState: player.weaponsState,
+      grenades: player.grenades
+    });
+  }
+
+  syncPlayerBrAmmo(player) {
+    if (this.mode !== 'survival' || !player.backpack) return;
+    for (const sNum of [1, 2]) {
+      const ws = player.weaponsState?.[sNum];
+      if (ws?.id) {
+        const aType = getWeaponAmmoType(ws.id);
+        ws.reserve = Math.max(0, player.backpack.ammo[aType] || 0);
+      }
+    }
+    player.grenades = Math.max(0, player.backpack.frag_grenade || 0);
+    if (player.slot === 1 || player.slot === 2) {
+      player.reserveAmmo = player.weaponsState?.[player.slot]?.reserve || 0;
+    }
+  }
+
+  addBrItemToPlayer(player, item, now = Date.now(), allowSwap = false) {
+    if (!player.backpack || !player.gear) return { ok: false, overflow: [] };
+    const overflow = [];
+
+    if (item.kind === 'weapon' && item.weaponId && WEAPONS[item.weaponId]) {
+      const wCfg = WEAPONS[item.weaponId];
+      const targetSlot = wCfg.category === 'secondary' ? 2 : 1;
+      const existing = player.weaponsState?.[targetSlot];
+      const slotEmpty = !existing || !existing.id;
+      if (!slotEmpty && !allowSwap) return { ok: false, overflow };
+
+      if (!slotEmpty && existing.id) {
+        const oldAmmo = player.slot === targetSlot ? player.ammo : existing.ammo;
+        overflow.push({ kind: 'weapon', weaponId: existing.id, ammo: oldAmmo, reserve: 0, bonusAmmo: 0 });
+      }
+
+      const stats = getEffectiveWeaponStats(item.weaponId, player.attachments?.[item.weaponId], player.operator);
+      const loadedAmmo = Math.max(0, Number(item.ammo ?? stats.magSize));
+      player.weaponsState[targetSlot] = {
+        id: item.weaponId,
+        ammo: loadedAmmo,
+        reserve: 0,
+        magSize: stats.magSize
+      };
+      if (targetSlot === 1) player.primary = item.weaponId;
+      else player.secondary = item.weaponId;
+
+      if (item.bonusAmmo > 0) {
+        const aType = getWeaponAmmoType(item.weaponId);
+        const uWeight = BR_AMMO_TYPES[aType]?.weight || 0.5;
+        const freeW = Math.max(0, player.backpack.capacity - computeBackpackWeight(player.backpack));
+        const fit = Math.min(item.bonusAmmo, Math.floor(freeW / uWeight));
+        if (fit > 0) player.backpack.ammo[aType] = (player.backpack.ammo[aType] || 0) + fit;
+        item.bonusAmmo = 0;
+      }
+
+      this.syncPlayerBrAmmo(player);
+
+      if (player.slot === 3 || player.slot === targetSlot || (targetSlot === 1 && player.slot === 2)) {
+        if (player.weaponsState[player.slot] && player.slot !== targetSlot) {
+          player.weaponsState[player.slot].ammo = player.ammo;
+        }
+        player.slot = targetSlot;
+        player.weaponId = item.weaponId;
+        player.ammo = loadedAmmo;
+        player.reserveAmmo = player.weaponsState[targetSlot].reserve;
+        player.reloadingUntil = 0;
+        this.broadcast({
+          type: 'weapon_switched',
+          id: player.id,
+          slot: player.slot,
+          weaponId: player.weaponId,
+          ammo: player.ammo,
+          reserveAmmo: player.reserveAmmo
+        });
+      }
+      this.sendWeaponsSync(player);
+      this.sendInventorySync(player);
+      return { ok: true, consumedAll: true, overflow };
+    }
+
+    if (item.kind === 'vest') {
+      const tier = item.tier || 1;
+      const curTier = player.gear.vestTier || 0;
+      const newArmor = item.armor ?? (BR_VESTS[tier]?.maxArmor || 65);
+      if (tier < curTier && !allowSwap) return { ok: false, overflow };
+      if (tier === curTier && player.armor >= newArmor) return { ok: false, overflow };
+      if (curTier > 0 && player.armor > 0) {
+        overflow.push({ kind: 'vest', tier: curTier, armor: player.armor });
+      }
+      player.gear.vestTier = tier;
+      player.maxArmor = item.maxArmor ?? (BR_VESTS[tier]?.maxArmor || 65);
+      player.armor = newArmor;
+      this.sendInventorySync(player);
+      return { ok: true, consumedAll: true, overflow };
+    }
+
+    if (item.kind === 'helmet') {
+      const tier = item.tier || 1;
+      const curTier = player.gear.helmetTier || 0;
+      const newArmor = item.helmetArmor ?? (BR_HELMETS[tier]?.maxHelmet || 55);
+      if (tier < curTier && !allowSwap) return { ok: false, overflow };
+      if (tier === curTier && player.gear.helmetArmor >= newArmor) return { ok: false, overflow };
+      if (curTier > 0 && player.gear.helmetArmor > 0) {
+        overflow.push({ kind: 'helmet', tier: curTier, helmetArmor: player.gear.helmetArmor });
+      }
+      player.gear.helmetTier = tier;
+      player.gear.helmetMax = item.maxHelmet ?? (BR_HELMETS[tier]?.maxHelmet || 55);
+      player.gear.helmetArmor = newArmor;
+      this.sendInventorySync(player);
+      return { ok: true, consumedAll: true, overflow };
+    }
+
+    if (item.kind === 'bag') {
+      const tier = item.tier || 1;
+      const curTier = player.gear.bagTier || 0;
+      if (tier <= curTier) return { ok: false, overflow };
+      if (curTier > 0) overflow.push({ kind: 'bag', tier: curTier });
+      player.gear.bagTier = tier;
+      player.backpack.tier = tier;
+      player.backpack.capacity = BR_BACKPACKS[tier]?.capacity || 220;
+      this.sendInventorySync(player);
+      return { ok: true, consumedAll: true, overflow };
+    }
+
+    if (item.kind === 'ammo') {
+      const aType = item.ammoType || '7.62mm';
+      const uWeight = BR_AMMO_TYPES[aType]?.weight || 0.5;
+      const freeW = Math.max(0, player.backpack.capacity - computeBackpackWeight(player.backpack));
+      const maxFit = Math.floor(freeW / uWeight);
+      const qty = Math.max(0, Number(item.qty) || 0);
+      const take = Math.min(qty, maxFit);
+      if (take <= 0) return { ok: false, error: 'Balo đã đầy! Hãy vứt bớt đồ hoặc nhặt Balo lớn hơn.', overflow };
+      player.backpack.ammo[aType] = (player.backpack.ammo[aType] || 0) + take;
+      this.syncPlayerBrAmmo(player);
+      this.sendWeaponsSync(player);
+      this.sendInventorySync(player);
+      return { ok: true, takenQty: take, consumedAll: take >= qty, overflow };
+    }
+
+    if (item.kind === 'med') {
+      const medId = BR_MEDS[item.medId] ? item.medId : 'bandage';
+      const uWeight = BR_MEDS[medId].weight || 5;
+      const freeW = Math.max(0, player.backpack.capacity - computeBackpackWeight(player.backpack));
+      const maxFit = Math.floor(freeW / uWeight);
+      const qty = Math.max(1, Number(item.qty) || 1);
+      const take = Math.min(qty, maxFit);
+      if (take <= 0) return { ok: false, error: 'Balo đã đầy không thể nhặt thêm Y Tế!', overflow };
+      player.backpack.meds[medId] = (player.backpack.meds[medId] || 0) + take;
+      this.sendInventorySync(player);
+      return { ok: true, takenQty: take, consumedAll: take >= qty, overflow };
+    }
+
+    if (item.kind === 'grenade') {
+      const uWeight = 14;
+      const freeW = Math.max(0, player.backpack.capacity - computeBackpackWeight(player.backpack));
+      const maxFit = Math.floor(freeW / uWeight);
+      const qty = Math.max(1, Number(item.qty) || 1);
+      const take = Math.min(qty, maxFit);
+      if (take <= 0) return { ok: false, error: 'Balo đã đầy không thể nhặt thêm Lựu Đạn!', overflow };
+      player.backpack.frag_grenade = (player.backpack.frag_grenade || 0) + take;
+      this.syncPlayerBrAmmo(player);
+      this.sendWeaponsSync(player);
+      this.sendInventorySync(player);
+      return { ok: true, takenQty: take, consumedAll: take >= qty, overflow };
+    }
+
+    if (item.kind === 'overcharge') {
+      player.damageBoostUntil = now + 22000;
+      player.hp = Math.min(player.maxHp, player.hp + 30);
+      this.sendInventorySync(player);
+      return { ok: true, consumedAll: true, overflow };
+    }
+
+    return { ok: false, overflow };
+  }
+
+  handleLootItem(playerId, payload = {}) {
+    if (this.status !== 'playing' || this.mode !== 'survival') return;
+    const p = this.combatants.get(playerId);
+    if (!p || p.dead || p.dropPhase !== 'ground') return;
+    const crate = this.lootCrates.find((c) => c.id === payload.crateId && c.active);
+    if (!crate) return;
+    if (Math.hypot(p.x - crate.x, p.z - crate.z) > 4.2 || Math.abs(p.y - crate.y) > 3.2) return;
+
+    const now = Date.now();
+    const spawned = [];
+
+    if (crate.kind === 'deathbox') {
+      const idx = (crate.items || []).findIndex((it) => it.itemId === payload.itemId);
+      if (idx < 0) return;
+      const subItem = crate.items[idx];
+      const res = this.addBrItemToPlayer(p, subItem, now, true);
+      if (!res.ok) {
+        if (res.error) this.sendTo(p.id, { type: 'system_toast', text: res.error });
+        return;
+      }
+      if (res.consumedAll) {
+        crate.items.splice(idx, 1);
+      } else if (res.takenQty > 0 && subItem.qty !== undefined) {
+        subItem.qty -= res.takenQty;
+      }
+      for (const ov of res.overflow) {
+        spawned.push(this.createLootCrate(ov, p.x + (Math.random() - 0.5), p.y, p.z + (Math.random() - 0.5)));
+      }
+      if (crate.items.length === 0) {
+        crate.active = false;
+        this.broadcast({ type: 'loot_picked', crateId: crate.id, playerId: p.id, kind: 'deathbox', label: crate.label, hp: p.hp, armor: p.armor, maxArmor: p.maxArmor, ammo: p.ammo, reserveAmmo: p.reserveAmmo, grenades: p.grenades });
+      } else {
+        this.broadcast({ type: 'loot_updated', crate });
+      }
+    } else {
+      const res = this.addBrItemToPlayer(p, crate, now, true);
+      if (!res.ok) {
+        if (res.error) this.sendTo(p.id, { type: 'system_toast', text: res.error });
+        return;
+      }
+      for (const ov of res.overflow) {
+        spawned.push(this.createLootCrate(ov, crate.x + (Math.random() - 0.5) * 0.7, crate.y, crate.z + (Math.random() - 0.5) * 0.7));
+      }
+      if (res.consumedAll) {
+        crate.active = false;
+        this.broadcast({ type: 'loot_picked', crateId: crate.id, playerId: p.id, kind: crate.kind, weaponId: crate.weaponId || null, label: crate.label, hp: p.hp, armor: p.armor, maxArmor: p.maxArmor, ammo: p.ammo, reserveAmmo: p.reserveAmmo, grenades: p.grenades });
+      } else {
+        if (res.takenQty > 0 && crate.qty !== undefined) {
+          crate.qty -= res.takenQty;
+          const unitCfg = crate.kind === 'ammo' ? BR_AMMO_TYPES[crate.ammoType] : BR_MEDS[crate.medId];
+          crate.label = `${unitCfg?.name || crate.kind} ×${crate.qty}`;
+        }
+        this.broadcast({ type: 'loot_updated', crate });
+      }
+    }
+
+    if (spawned.length > 0) {
+      this.lootCrates.push(...spawned);
+      this.broadcast({ type: 'loot_spawned', crates: spawned });
+    }
+  }
+
+  handleDropItem(playerId, payload = {}) {
+    if (this.status !== 'playing' || this.mode !== 'survival') return;
+    const p = this.combatants.get(playerId);
+    if (!p || p.dead || p.dropPhase !== 'ground') return;
+    const dropX = p.x - Math.sin(p.yaw || 0) * 0.9 + (Math.random() - 0.5) * 0.4;
+    const dropZ = p.z - Math.cos(p.yaw || 0) * 0.9 + (Math.random() - 0.5) * 0.4;
+    const dropY = this.map.terrain ? Math.max(p.y, this.map.terrain.floorAt(dropX, dropZ)) : p.y;
+    let newCrate = null;
+
+    if (payload.category === 'weapon') {
+      const slotNum = Number(payload.key);
+      if (slotNum !== 1 && slotNum !== 2) return;
+      const ws = p.weaponsState?.[slotNum];
+      if (!ws?.id) return;
+      const curAmmo = p.slot === slotNum ? p.ammo : ws.ammo;
+      newCrate = this.createLootCrate({ kind: 'weapon', weaponId: ws.id, ammo: curAmmo, bonusAmmo: 0 }, dropX, dropY, dropZ);
+      p.weaponsState[slotNum] = { id: null, ammo: 0, reserve: 0, magSize: 0 };
+      if (slotNum === 1) p.primary = 'ak47';
+      else p.secondary = 'deagle';
+
+      if (p.slot === slotNum) {
+        const altSlot = slotNum === 1 ? (p.weaponsState[2]?.id ? 2 : 3) : (p.weaponsState[1]?.id ? 1 : 3);
+        p.slot = altSlot;
+        p.weaponId = p.weaponsState[altSlot].id || p.melee || 'knife';
+        p.ammo = p.weaponsState[altSlot].ammo || 0;
+        p.reserveAmmo = p.weaponsState[altSlot].reserve || 0;
+        this.broadcast({ type: 'weapon_switched', id: p.id, slot: p.slot, weaponId: p.weaponId, ammo: p.ammo, reserveAmmo: p.reserveAmmo });
+      }
+    } else if (payload.category === 'ammo') {
+      const aType = payload.key;
+      const have = p.backpack?.ammo?.[aType] || 0;
+      if (have <= 0) return;
+      const step = BR_AMMO_TYPES[aType]?.dropStep || 30;
+      const dropQty = Math.min(have, Math.max(1, Number(payload.qty) || step));
+      p.backpack.ammo[aType] -= dropQty;
+      newCrate = this.createLootCrate({ kind: 'ammo', ammoType: aType, qty: dropQty }, dropX, dropY, dropZ);
+    } else if (payload.category === 'med') {
+      const medId = payload.key;
+      const have = p.backpack?.meds?.[medId] || 0;
+      if (have <= 0) return;
+      const dropQty = Math.min(have, Math.max(1, Number(payload.qty) || 1));
+      p.backpack.meds[medId] -= dropQty;
+      newCrate = this.createLootCrate({ kind: 'med', medId, qty: dropQty }, dropX, dropY, dropZ);
+    } else if (payload.category === 'grenade') {
+      const have = p.backpack?.frag_grenade || 0;
+      if (have <= 0) return;
+      const dropQty = Math.min(have, Math.max(1, Number(payload.qty) || 1));
+      p.backpack.frag_grenade -= dropQty;
+      newCrate = this.createLootCrate({ kind: 'grenade', qty: dropQty }, dropX, dropY, dropZ);
+    } else if (payload.category === 'vest') {
+      if (!p.gear?.vestTier) return;
+      newCrate = this.createLootCrate({ kind: 'vest', tier: p.gear.vestTier, armor: p.armor }, dropX, dropY, dropZ);
+      p.gear.vestTier = 0;
+      p.armor = 0;
+      p.maxArmor = 0;
+    } else if (payload.category === 'helmet') {
+      if (!p.gear?.helmetTier) return;
+      newCrate = this.createLootCrate({ kind: 'helmet', tier: p.gear.helmetTier, helmetArmor: p.gear.helmetArmor }, dropX, dropY, dropZ);
+      p.gear.helmetTier = 0;
+      p.gear.helmetArmor = 0;
+      p.gear.helmetMax = 0;
+    }
+
+    if (newCrate) {
+      this.lootCrates.push(newCrate);
+      this.syncPlayerBrAmmo(p);
+      this.sendWeaponsSync(p);
+      this.sendInventorySync(p);
+      this.broadcast({ type: 'loot_spawned', crates: [newCrate] });
+    }
+  }
+
+  handleUseMed(playerId, payload = {}) {
+    if (this.status !== 'playing' || this.mode !== 'survival') return;
+    const p = this.combatants.get(playerId);
+    if (!p || p.dead || p.dropPhase !== 'ground') return;
+    const medId = payload.medId;
+    const mCfg = BR_MEDS[medId];
+    if (!mCfg || !(p.backpack?.meds?.[medId] > 0)) return;
+    if (p.hp >= mCfg.maxCap && !mCfg.armorBoost) {
+      this.sendTo(p.id, { type: 'system_toast', text: `Máu đã đạt mức tối đa (${mCfg.maxCap} HP) của ${mCfg.name}!` });
+      return;
+    }
+    p.backpack.meds[medId] -= 1;
+    if (p.hp < mCfg.maxCap) {
+      p.hp = Math.min(mCfg.maxCap, p.hp + mCfg.heal);
+    }
+    if (mCfg.armorBoost && p.maxArmor > 0) {
+      p.armor = Math.min(p.maxArmor, p.armor + mCfg.armorBoost);
+    }
+    this.sendInventorySync(p);
+    this.sendTo(p.id, { type: 'system_toast', text: `Đã dùng ${mCfg.name} (+${mCfg.heal} Máu)` });
+  }
+
+  handleDropAction(playerId, action) {
+    if (this.status !== 'playing' || this.mode !== 'survival') return;
+    const p = this.combatants.get(playerId);
+    if (!p || p.dead) return;
+    if (action === 'jump' && p.dropPhase === 'plane') {
+      p.dropPhase = 'skydive';
+      p.x = (this.dropPlane?.x ?? p.x) + (Math.random() - 0.5) * 4.0;
+      p.y = (this.dropPlane?.y ?? 260) - 2.5;
+      p.z = (this.dropPlane?.z ?? p.z) + (Math.random() - 0.5) * 4.0;
+      p.vy = -14;
+      p.onGround = false;
+      p.lastClientPosAt = 0;
+    } else if (action === 'open_chute' && p.dropPhase === 'skydive') {
+      p.dropPhase = 'parachute';
+      p.vy = Math.max(p.vy || -14, -6.5);
     }
   }
 
@@ -600,12 +1421,14 @@ export class GameRoomCore {
       grenades: player.grenades,
       hp: player.hp,
       armor: player.armor,
-      maxArmor: player.maxArmor
+      maxArmor: player.maxArmor,
+      dropPhase: player.dropPhase || 'ground',
+      weaponsState: player.weaponsState
     });
   }
 
   getPlayerWeaponStats(player) {
-    const wId = player.weaponId || 'ak47';
+    const wId = player.weaponId || player.melee || 'knife';
     return getEffectiveWeaponStats(wId, player.attachments?.[wId] || {}, player.operator);
   }
 
@@ -613,12 +1436,13 @@ export class GameRoomCore {
     if (player.dead) return;
     const s = Number(slotNum);
     if (![1, 2, 3].includes(s) || s === player.slot) return;
+    const nextW = player.weaponsState[s];
+    if (!nextW || !nextW.id) return;
     if (player.weaponsState[player.slot]) {
       player.weaponsState[player.slot].ammo = player.ammo;
       player.weaponsState[player.slot].reserve = player.reserveAmmo;
     }
     player.slot = s;
-    const nextW = player.weaponsState[s];
     player.weaponId = nextW.id;
     player.ammo = nextW.ammo;
     player.reserveAmmo = nextW.reserve;
@@ -718,7 +1542,14 @@ export class GameRoomCore {
     if (needed > 0 && player.reserveAmmo > 0) {
       const add = Math.min(needed, player.reserveAmmo);
       player.ammo += add;
-      if (this.mode !== 'practice') player.reserveAmmo -= add;
+      if (this.mode === 'survival' && player.backpack?.ammo) {
+        const aType = getWeaponAmmoType(player.weaponId);
+        player.backpack.ammo[aType] = Math.max(0, (player.backpack.ammo[aType] || 0) - add);
+        this.syncPlayerBrAmmo(player);
+        this.sendInventorySync(player);
+      } else if (this.mode !== 'practice') {
+        player.reserveAmmo -= add;
+      }
       if (player.weaponsState[player.slot]) {
         player.weaponsState[player.slot].ammo = player.ammo;
         player.weaponsState[player.slot].reserve = player.reserveAmmo;
@@ -747,6 +1578,7 @@ export class GameRoomCore {
 
     if (
       !p.dead &&
+      !(this.mode === 'survival' && p.dropPhase === 'plane') &&
       Number.isFinite(rawInput.x) &&
       Number.isFinite(rawInput.y) &&
       Number.isFinite(rawInput.z)
@@ -754,16 +1586,21 @@ export class GameRoomCore {
       const now = Date.now();
       const dtSec = Math.max(0.02, Math.min(0.35, (now - (p.lastClientPosAt || now - 35)) / 1000));
       const drift = Math.hypot(rawInput.x - p.x, rawInput.z - p.z);
-      // Accept client position if within generous anti-speedhack envelope (< 8.5m)
-      if (drift < 8.5 && rawInput.y >= -0.05 && rawInput.y <= 9.5) {
+      const isBR = this.mode === 'survival';
+      const maxDrift = isBR ? 28 : 8.5;
+      const maxY = isBR ? 300 : 18;
+      const maxHorizV = isBR && p.dropPhase !== 'ground' ? 36 : 12;
+      const minVy = isBR && p.dropPhase !== 'ground' ? -50 : -18;
+      // Accept client position if within generous anti-speedhack envelope
+      if (drift < maxDrift && rawInput.y >= -0.05 && rawInput.y <= maxY) {
         const estVx = Number.isFinite(Number(rawInput.vx))
-          ? Math.max(-12, Math.min(12, Number(rawInput.vx)))
-          : Math.max(-12, Math.min(12, (rawInput.x - p.x) / dtSec));
+          ? Math.max(-maxHorizV, Math.min(maxHorizV, Number(rawInput.vx)))
+          : Math.max(-maxHorizV, Math.min(maxHorizV, (rawInput.x - p.x) / dtSec));
         const estVz = Number.isFinite(Number(rawInput.vz))
-          ? Math.max(-12, Math.min(12, Number(rawInput.vz)))
-          : Math.max(-12, Math.min(12, (rawInput.z - p.z) / dtSec));
+          ? Math.max(-maxHorizV, Math.min(maxHorizV, Number(rawInput.vz)))
+          : Math.max(-maxHorizV, Math.min(maxHorizV, (rawInput.z - p.z) / dtSec));
         const estVy = Number.isFinite(Number(rawInput.vy))
-          ? Math.max(-18, Math.min(18, Number(rawInput.vy)))
+          ? Math.max(minVy, Math.min(24, Number(rawInput.vy)))
           : 0;
         p.vx = estVx;
         p.vy = estVy;
@@ -772,8 +1609,17 @@ export class GameRoomCore {
         p.y = Math.max(0, rawInput.y);
         p.z = rawInput.z;
         p.onGround = rawInput.onGround !== undefined ? Boolean(rawInput.onGround) : p.onGround;
+        if (isBR && p.dropPhase !== 'ground') {
+          const groundY = this.map.terrain ? this.map.terrain.floorAt(p.x, p.z) : 0;
+          if (p.dropPhase === 'skydive' && p.y - groundY <= 55) p.dropPhase = 'parachute';
+          if (p.onGround || (rawInput.dropPhase === 'ground' && p.y < groundY + 28 && Math.abs(p.vy) < 4.5)) {
+            p.dropPhase = 'ground';
+          }
+        }
         const h = p.crouching ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
-        depenetratePlayerXZ(p, h, PHYSICS.PLAYER_RADIUS, this.map);
+        if (p.dropPhase === 'ground') {
+          depenetratePlayerXZ(p, h, PHYSICS.PLAYER_RADIUS, this.map);
+        }
         p.lastClientPosAt = now;
       }
     }
@@ -783,6 +1629,7 @@ export class GameRoomCore {
     if (this.status !== 'playing' || this.roundPhase !== 'live') return;
     const shooter = this.combatants.get(playerId);
     if (!shooter || shooter.dead) return;
+    if (shooter.dropPhase && shooter.dropPhase !== 'ground') return;
 
     const now = Date.now();
     const wStats = this.getPlayerWeaponStats(shooter);
@@ -798,6 +1645,7 @@ export class GameRoomCore {
 
   botFireWeapon(bot, yaw, pitch, now) {
     if (this.status !== 'playing' || this.roundPhase !== 'live') return;
+    if (bot.dropPhase && bot.dropPhase !== 'ground') return;
     const wStats = this.getPlayerWeaponStats(bot);
     const check = this.antiCheat.validateShot(bot, wStats, null, this.map, now);
     if (!check.valid) return;
@@ -901,10 +1749,16 @@ export class GameRoomCore {
     if (this.status !== 'playing' || this.roundPhase !== 'live') return;
     const p = this.combatants.get(playerId);
     if (!p || p.dead || p.grenades <= 0) return;
+    if (p.dropPhase && p.dropPhase !== 'ground') return;
     const now = Date.now();
     if (now - (p.lastGrenadeAt || 0) < 900) return;
 
     p.grenades -= 1;
+    if (this.mode === 'survival' && p.backpack) {
+      p.backpack.frag_grenade = Math.max(0, (p.backpack.frag_grenade || 1) - 1);
+      this.syncPlayerBrAmmo(p);
+      this.sendInventorySync(p);
+    }
     p.lastGrenadeAt = now;
     p.spawnProtectedUntil = 0;
 
@@ -1028,7 +1882,7 @@ export class GameRoomCore {
   }
 
   applyWeaponDamage(attacker, victim, wStats, hitZone, dist, now, heavyMelee = false, pelletCount = 1) {
-    if (victim.dead) return;
+    if (victim.dead || victim.dropPhase === 'plane') return;
     if (victim.spawnProtectedUntil && now < victim.spawnProtectedUntil) {
       this.sendTo(attacker.id, {
         type: 'hit_confirm',
@@ -1065,12 +1919,29 @@ export class GameRoomCore {
 
     if (attacker.damageBoostUntil && now < attacker.damageBoostUntil) rawDmg *= 1.18;
 
-    const absorbRatio = hitZone === 'head' ? PHYSICS.ARMOR_ABSORB_HEAD : PHYSICS.ARMOR_ABSORB_BODY;
     let hpDamage = rawDmg;
-    if (victim.armor > 0) {
+    if (hitZone === 'head' && this.mode === 'survival' && victim.gear?.helmetTier > 0 && victim.gear.helmetArmor > 0) {
+      const hm = BR_HELMETS[victim.gear.helmetTier];
+      const reduceRatio = hm?.headReduce || 0.3;
+      const hmDmg = Math.min(victim.gear.helmetArmor, Math.round(rawDmg * reduceRatio * 1.15));
+      hpDamage = rawDmg * (1 - reduceRatio);
+      victim.gear.helmetArmor = Math.max(0, victim.gear.helmetArmor - hmDmg);
+      if (victim.gear.helmetArmor <= 0) {
+        victim.gear.helmetTier = 0;
+        victim.gear.helmetMax = 0;
+      }
+      this.sendInventorySync(victim);
+    } else if (victim.armor > 0) {
+      const vestCfg = this.mode === 'survival' && victim.gear?.vestTier ? BR_VESTS[victim.gear.vestTier] : null;
+      const absorbRatio = hitZone === 'head' ? PHYSICS.ARMOR_ABSORB_HEAD : (vestCfg?.bodyReduce || PHYSICS.ARMOR_ABSORB_BODY);
       const armorDamage = Math.min(victim.armor, Math.round(rawDmg * absorbRatio));
       hpDamage = rawDmg - armorDamage * 0.85;
       victim.armor = Math.max(0, victim.armor - armorDamage);
+      if (this.mode === 'survival' && victim.armor <= 0 && victim.gear) {
+        victim.gear.vestTier = 0;
+        victim.maxArmor = 0;
+        this.sendInventorySync(victim);
+      }
     }
 
     const finalDmg = Math.max(1, Math.round(hpDamage));
@@ -1111,6 +1982,82 @@ export class GameRoomCore {
 
     if (victim.hasBomb && this.mode === 'bomb' && !this.bombState.planted) {
       this.dropBombFromPlayer(victim);
+    }
+
+    if (this.mode === 'survival') {
+      const boxItems = [];
+      const addItem = (obj) => boxItems.push({ itemId: 'it_' + randHex(4), ...obj });
+
+      for (const sNum of [1, 2]) {
+        const ws = victim.weaponsState?.[sNum];
+        if (ws?.id && WEAPONS[ws.id]) {
+          const curMag = victim.slot === sNum ? victim.ammo : (ws.ammo || 0);
+          addItem({
+            kind: 'weapon',
+            weaponId: ws.id,
+            ammo: curMag,
+            bonusAmmo: 0,
+            label: `${WEAPONS[ws.id].name} (${curMag}v)`
+          });
+        }
+      }
+
+      for (const [aType, qty] of Object.entries(victim.backpack?.ammo || {})) {
+        if (qty > 0) {
+          addItem({ kind: 'ammo', ammoType: aType, qty, label: `${BR_AMMO_TYPES[aType]?.name || aType} ×${qty}` });
+        }
+      }
+
+      for (const [mId, qty] of Object.entries(victim.backpack?.meds || {})) {
+        if (qty > 0) {
+          addItem({ kind: 'med', medId: mId, qty, label: `${BR_MEDS[mId]?.name || mId} ×${qty}` });
+        }
+      }
+
+      const grQty = Math.max(victim.grenades || 0, victim.backpack?.frag_grenade || 0);
+      if (grQty > 0) {
+        addItem({ kind: 'grenade', qty: grQty, label: `Lựu Đạn Nổ ×${grQty}` });
+      }
+
+      if (victim.gear?.vestTier > 0 && victim.armor > 0) {
+        addItem({
+          kind: 'vest',
+          tier: victim.gear.vestTier,
+          armor: victim.armor,
+          maxArmor: victim.maxArmor,
+          label: `${BR_VESTS[victim.gear.vestTier]?.name || 'Áo Giáp'} (${victim.armor} AP)`
+        });
+      }
+      if (victim.gear?.helmetTier > 0 && victim.gear.helmetArmor > 0) {
+        addItem({
+          kind: 'helmet',
+          tier: victim.gear.helmetTier,
+          helmetArmor: victim.gear.helmetArmor,
+          maxHelmet: victim.gear.helmetMax,
+          label: `${BR_HELMETS[victim.gear.helmetTier]?.name || 'Mũ Bảo Hộ'} (${victim.gear.helmetArmor} AP)`
+        });
+      }
+      if (victim.gear?.bagTier > 0) {
+        addItem({
+          kind: 'bag',
+          tier: victim.gear.bagTier,
+          capacity: BR_BACKPACKS[victim.gear.bagTier]?.capacity,
+          label: BR_BACKPACKS[victim.gear.bagTier]?.name || 'Balo'
+        });
+      }
+
+      // Clear victim inventory after spawning their Death Box
+      if (boxItems.length > 0) {
+        const dropY = this.map.terrain ? Math.max(victim.y, this.map.terrain.floorAt(victim.x, victim.z)) : victim.y;
+        const deathBox = this.createLootCrate(
+          { kind: 'deathbox', ownerName: victim.name, items: boxItems },
+          victim.x,
+          dropY,
+          victim.z
+        );
+        this.lootCrates.push(deathBox);
+        this.broadcast({ type: 'loot_spawned', crates: [deathBox] });
+      }
     }
 
     let streak = 0;
@@ -1193,6 +2140,34 @@ export class GameRoomCore {
     const doRegen = now - this.lastRegenTickAt >= 1000;
     if (doRegen) this.lastRegenTickAt = now;
 
+    if (this.mode === 'survival' && this.dropPlane?.active) {
+      const dp = this.dropPlane;
+      if (now >= dp.startAt) {
+        const span = Math.max(1, dp.endAt - dp.startAt);
+        const u = Math.min(1, (now - dp.startAt) / span);
+        dp.x = dp.startX + (dp.endX - dp.startX) * u;
+        dp.z = dp.startZ + (dp.endZ - dp.startZ) * u;
+      }
+      for (const p of this.combatants.values()) {
+        if (!p.dead && p.dropPhase === 'plane') {
+          p.x = dp.x;
+          p.y = dp.y;
+          p.z = dp.z;
+          if (now >= dp.endAt) {
+            p.dropPhase = 'skydive';
+            p.x += (Math.random() - 0.5) * 4;
+            p.y = dp.y - 2.2;
+            p.z += (Math.random() - 0.5) * 4;
+            p.vy = -13;
+          }
+        }
+      }
+      if (now >= dp.endAt) {
+        dp.active = false;
+        this.broadcast({ type: 'drop_plane_ended' });
+      }
+    }
+
     for (const p of this.combatants.values()) {
       if (p.dead) {
         if (p.respawnAt && now >= p.respawnAt && this.roundPhase === 'live') {
@@ -1215,9 +2190,13 @@ export class GameRoomCore {
       }
 
       // Only step physics on server for AI Bots or human players without recent client-predicted position packets
-      if (p.isBot || now - (p.lastClientPosAt || 0) > 450) {
-        const wStats = this.getPlayerWeaponStats(p);
-        stepPlayerPhysics(p, p.input, this.map, dt, wStats.moveSpeedMult, op.speedMult);
+      if (p.isBot || (this.mode === 'survival' && p.dropPhase === 'plane') || now - (p.lastClientPosAt || 0) > 450) {
+        if (this.mode === 'survival' && p.dropPhase && p.dropPhase !== 'ground') {
+          stepAirbornePhysics(p, p.input, this.map, dt, this.dropPlane);
+        } else {
+          const wStats = this.getPlayerWeaponStats(p);
+          stepPlayerPhysics(p, p.input, this.map, dt, wStats.moveSpeedMult, op.speedMult);
+        }
       }
       p.yaw = p.input.yaw;
       p.pitch = p.input.pitch;
@@ -1403,37 +2382,151 @@ export class GameRoomCore {
       this.storm.radius = Math.max(this.storm.minRadius, this.storm.radius - this.storm.shrinkSpeed * dt);
     }
 
-    for (const crate of this.lootCrates) {
-      if (!crate.active) continue;
-      for (const p of this.getLivingCombatants()) {
-        if (Math.hypot(p.x - crate.x, p.z - crate.z) < 1.65 && Math.abs(p.y - crate.y) < 1.8) {
-          crate.active = false;
-          if (crate.type === 'medkit') p.hp = Math.min(p.maxHp, p.hp + 50);
-          else if (crate.type === 'armor') p.armor = Math.min(p.maxArmor, p.armor + 60);
-          else if (crate.type === 'overcharge') {
-            p.damageBoostUntil = now + 18000;
-            const st = this.getPlayerWeaponStats(p);
-            p.ammo = st.magSize;
-            p.reserveAmmo += st.magSize;
-          }
-          this.broadcast({
-            type: 'loot_picked',
-            crateId: crate.id,
-            playerId: p.id,
-            lootType: crate.type,
-            hp: p.hp,
-            armor: p.armor,
-            ammo: p.ammo,
-            reserveAmmo: p.reserveAmmo
-          });
+    // Mid-match high-tier Airdrop Supply Crate near safe center (Level 3 Kit + Elite Sniper/LMG)
+    const airdropDelay = this.map.bounds.halfW > 500 ? 75000 : 45000;
+    if (!this.airdropSpawned && this.matchStartedAt && now - this.matchStartedAt >= airdropDelay) {
+      this.airdropSpawned = true;
+      const wps = this.map.waypoints || [{ x: this.storm.x, z: this.storm.z }];
+      let dropPt = wps[0] || { x: this.storm.x, z: this.storm.z };
+      let bestDist = Infinity;
+      for (const wp of wps) {
+        const d = Math.hypot(wp.x - this.storm.x, wp.z - this.storm.z);
+        if (d < bestDist) { bestDist = d; dropPt = wp; }
+      }
+      const elitePool = ['awp', 'barrett', 'm249', 'scarh', 'm200'].filter((id) => Boolean(WEAPONS[id]));
+      const eliteId = elitePool[Math.floor(Math.random() * elitePool.length)] || 'ak47';
+      const dropY = this.map.terrain ? this.map.terrain.floorAt(dropPt.x, dropPt.z) : 0;
+      const airdropCrates = [
+        this.createLootCrate({ kind: 'weapon', weaponId: eliteId, bonusAmmo: 60 }, dropPt.x, dropY, dropPt.z),
+        this.createLootCrate({ kind: 'vest', tier: 3 }, dropPt.x + 1.2, dropY, dropPt.z + 0.8),
+        this.createLootCrate({ kind: 'helmet', tier: 3 }, dropPt.x - 1.2, dropY, dropPt.z + 0.8),
+        this.createLootCrate({ kind: 'bag', tier: 3 }, dropPt.x, dropY, dropPt.z - 1.3),
+        this.createLootCrate({ kind: 'med', medId: 'medkit', qty: 1 }, dropPt.x + 0.8, dropY, dropPt.z - 0.8)
+      ];
+      this.lootCrates.push(...airdropCrates);
+      this.broadcast({ type: 'loot_spawned', crates: airdropCrates });
+      this.broadcast({
+        type: 'system_toast',
+        text: `TIẾP TẾ ĐẶC BIỆT (${WEAPONS[eliteId]?.name || eliteId} + Giáp/Mũ/Balo Lv.3) đã rơi tại khu vực an toàn!`
+      });
+    }
+
+    const living = this.getLivingCombatants();
+    const spawnedLoot = [];
+
+    // AI Bot auto-healing when damaged and carrying meds
+    for (const bot of living) {
+      if (!bot.isBot || bot.hp >= 65 || bot.dropPhase !== 'ground') continue;
+      if (now - (bot.lastBotHealAt || 0) < 2800) continue;
+      const healOrder = ['firstaid', 'medkit', 'bandage', 'energy'];
+      for (const mId of healOrder) {
+        if (bot.backpack?.meds?.[mId] > 0 && bot.hp < (BR_MEDS[mId]?.maxCap || 100)) {
+          bot.lastBotHealAt = now;
+          bot.backpack.meds[mId] -= 1;
+          bot.hp = Math.min(BR_MEDS[mId].maxCap, bot.hp + BR_MEDS[mId].heal);
           break;
         }
       }
     }
 
+    for (const crate of this.lootCrates) {
+      if (!crate.active) continue;
+      for (const p of living) {
+        if (p.dropPhase && p.dropPhase !== 'ground') continue;
+        if (Math.hypot(p.x - crate.x, p.z - crate.z) < 2.1 && Math.abs(p.y - crate.y) < 2.6) {
+          if (crate.kind === 'deathbox') {
+            // Humans open Death Box selectively via Tab/I or pressing E; AI Bots can scavenge 1 item per pass
+            if (!p.isBot) continue;
+            if (!crate.items || crate.items.length === 0) {
+              crate.active = false;
+              continue;
+            }
+            let lootedSomething = false;
+            for (let ii = crate.items.length - 1; ii >= 0; ii--) {
+              const sub = crate.items[ii];
+              const res = this.addBrItemToPlayer(p, sub, now, false);
+              if (res.ok) {
+                lootedSomething = true;
+                if (res.consumedAll) crate.items.splice(ii, 1);
+                else if (res.takenQty > 0 && sub.qty !== undefined) sub.qty -= res.takenQty;
+                break;
+              }
+            }
+            if (lootedSomething) {
+              if (crate.items.length === 0) {
+                crate.active = false;
+                this.broadcast({ type: 'loot_picked', crateId: crate.id, playerId: p.id, kind: 'deathbox', label: crate.label, hp: p.hp, armor: p.armor, maxArmor: p.maxArmor, ammo: p.ammo, reserveAmmo: p.reserveAmmo, grenades: p.grenades });
+              } else {
+                this.broadcast({ type: 'loot_updated', crate });
+              }
+              break;
+            }
+            continue;
+          }
+
+          // Ground crates: Humans & Bots auto-pick non-conflicting essentials, or swap on [E] interact
+          const wantsInteract = Boolean(p.input?.interact && now - (p.lastLootSwapAt || 0) > 650);
+          if (crate.kind === 'weapon') {
+            const targetSlot = WEAPONS[crate.weaponId]?.category === 'secondary' ? 2 : 1;
+            const slotEmpty = !p.weaponsState?.[targetSlot]?.id;
+            if (!slotEmpty && (!wantsInteract || p.isBot)) continue;
+            if (!slotEmpty && wantsInteract) p.lastLootSwapAt = now;
+          } else if (crate.kind === 'vest') {
+            if ((crate.tier || 1) <= (p.gear?.vestTier || 0) && !wantsInteract) continue;
+          } else if (crate.kind === 'helmet') {
+            if ((crate.tier || 1) <= (p.gear?.helmetTier || 0) && !wantsInteract) continue;
+          } else if (crate.kind === 'bag') {
+            if ((crate.tier || 1) <= (p.gear?.bagTier || 0)) continue;
+          }
+
+          const res = this.addBrItemToPlayer(p, crate, now, wantsInteract);
+          if (!res.ok) continue;
+
+          for (const ov of res.overflow) {
+            spawnedLoot.push(
+              this.createLootCrate(ov, crate.x + (Math.random() - 0.5) * 0.7, crate.y, crate.z + (Math.random() - 0.5) * 0.7)
+            );
+          }
+
+          if (res.consumedAll) {
+            crate.active = false;
+            this.broadcast({
+              type: 'loot_picked',
+              crateId: crate.id,
+              playerId: p.id,
+              kind: crate.kind || crate.type,
+              lootType: crate.type,
+              weaponId: crate.weaponId || null,
+              label: crate.label || crate.type,
+              hp: p.hp,
+              armor: p.armor,
+              maxArmor: p.maxArmor,
+              ammo: p.ammo,
+              reserveAmmo: p.reserveAmmo,
+              grenades: p.grenades
+            });
+          } else {
+            if (res.takenQty > 0 && crate.qty !== undefined) {
+              crate.qty -= res.takenQty;
+              const unitCfg = crate.kind === 'ammo' ? BR_AMMO_TYPES[crate.ammoType] : BR_MEDS[crate.medId];
+              crate.label = `${unitCfg?.name || crate.kind} ×${crate.qty}`;
+            }
+            this.broadcast({ type: 'loot_updated', crate });
+          }
+          break;
+        }
+      }
+    }
+
+    if (spawnedLoot.length > 0) {
+      this.lootCrates.push(...spawnedLoot);
+      this.broadcast({ type: 'loot_spawned', crates: spawnedLoot });
+    }
+
     if (now - this.lastStormDamageAt >= 1000) {
       this.lastStormDamageAt = now;
-      for (const p of this.getLivingCombatants()) {
+      for (const p of living) {
+        if (p.dropPhase === 'plane') continue;
         if (Math.hypot(p.x - this.storm.x, p.z - this.storm.z) > this.storm.radius) {
           p.hp = Math.max(0, p.hp - 7);
           this.sendTo(p.id, {
@@ -1553,8 +2646,9 @@ export class GameRoomCore {
 
   broadcastSnapshot(now) {
     const players = [];
+    const isBR = this.mode === 'survival';
     for (const p of this.combatants.values()) {
-      players.push({
+      const snap = {
         id: p.id,
         x: Number(p.x.toFixed(3)),
         y: Number(p.y.toFixed(3)),
@@ -1579,7 +2673,11 @@ export class GameRoomCore {
         d: p.deaths,
         a: p.assists,
         sc: p.score
-      });
+      };
+      if (isBR) {
+        snap.dp = p.dropPhase === 'plane' ? 1 : (p.dropPhase === 'skydive' ? 2 : (p.dropPhase === 'parachute' ? 3 : 0));
+      }
+      players.push(snap);
     }
 
     const timeLeftSec = Math.max(
@@ -1628,6 +2726,21 @@ export class GameRoomCore {
         z: Number(this.storm.z.toFixed(1)),
         r: Number(this.storm.radius.toFixed(2))
       };
+      if (this.dropPlane?.active) {
+        payload.dropPlane = {
+          active: true,
+          x: Number(this.dropPlane.x.toFixed(2)),
+          y: Number(this.dropPlane.y.toFixed(2)),
+          z: Number(this.dropPlane.z.toFixed(2)),
+          yaw: Number(this.dropPlane.yaw.toFixed(3)),
+          startX: this.dropPlane.startX,
+          startZ: this.dropPlane.startZ,
+          endX: this.dropPlane.endX,
+          endZ: this.dropPlane.endZ,
+          startAt: this.dropPlane.startAt,
+          endAt: this.dropPlane.endAt
+        };
+      }
     }
 
     this.broadcast(payload);

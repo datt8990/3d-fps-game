@@ -178,8 +178,9 @@
             <div><kbd>1 / 2 / 3</kbd> Đổi vũ khí</div>
             <div><kbd>G</kbd> Ném Lựu Đạn Nổ</div>
             <div><kbd>R</kbd> Nạp đạn</div>
-            <div><kbd>E</kbd> Đặt / Gỡ bom C4</div>
-            <div><kbd>B</kbd> Đổi súng nhanh</div>
+            <div><kbd>E / F</kbd> Nhặt / Nhảy Dù / C4</div>
+            <div><kbd>Tab / I</kbd> Balo & Hòm Xác (BR)</div>
+            <div><kbd>M</kbd> Bản đồ 5km (BR)</div>
             <div><kbd>Z</kbd> Radio Tổ Đội</div>
             <div><kbd>V</kbd> Nói voice đội</div>
             <div><kbd>N</kbd> Mic mở</div>
@@ -286,6 +287,7 @@
                     <option value="6">6 Người (3v3)</option>
                     <option value="8">8 Người (Solo Tự Do / 4v4)</option>
                     <option value="10" selected>10 Người (5v5 Chuẩn)</option>
+                    <option value="50">50 Người (Sinh Tồn BR)</option>
                   </select>
                 </div>
                 <div>
@@ -436,6 +438,7 @@
               <option value="8">8 Chiến binh (Solo Tự Do / 4v4)</option>
               <option value="6">6 Chiến binh (3v3)</option>
               <option value="2">2 Chiến binh (Solo 1v1 Tay Đôi)</option>
+              <option value="50">50 Chiến binh (Sinh Tồn Battle Royale)</option>
             </select>
           </div>
           <div>
@@ -562,6 +565,7 @@
         </div>
       </div>
       <div id="hud-bomb-banner" class="bomb-alert-banner hidden"></div>
+      <div id="hud-drop-banner" class="drop-alert-banner hidden"></div>
       <div id="hud-streak-banner" class="streak-banner hidden"></div>
     </div>
 
@@ -587,8 +591,11 @@
     <div id="hud-round-banner" class="hud-round-banner hidden"></div>
 
     <div id="hud-lock-prompt" class="lock-prompt">
-      🎯 Nhấp chuột khóa tâm ngắm • <kbd>G</kbd> Lựu đạn • <kbd>B</kbd> Kho súng • <kbd>Z</kbd> Radio • <kbd>ESC</kbd> Mở chuột
+      🎯 Nhấp chuột khóa tâm ngắm • <kbd>F</kbd> Nhảy Dù • <kbd>Tab</kbd>/<kbd>I</kbd> Balo & Hòm Đồ • <kbd>M</kbd> Bản Đồ 5km • <kbd>ESC</kbd> Mở chuột
     </div>
+
+    <!-- Battle Royale Parachute Altimeter & Guidance Card -->
+    <div id="hud-drop-guide" class="drop-guide-card glass-hud hidden"></div>
 
     <!-- Radio Quick Callouts Menu [Z] -->
     <div id="hud-radio-menu" class="radio-menu glass-hud hidden">
@@ -631,6 +638,8 @@
           <input id="ingame-chat-input" type="text" maxlength="120" placeholder="Nhấn Enter để gửi tin nhắn..." />
         </form>
       </div>
+
+      <div id="hud-survival-gear" class="survival-gear-strip glass-hud hidden"></div>
 
       <div class="vitals-box glass-hud">
         <div class="vital-row">
@@ -681,6 +690,46 @@
       </div>
     </div>
 
+    <!-- PUBG-Style 3-Column Backpack, Death Box & Ground Loot Modal [Tab / I] -->
+    <div id="br-backpack-modal" class="modal-backdrop hidden">
+      <div class="br-inv-card glass-panel">
+        <div class="br-inv-head">
+          <h3 class="section-title" style="margin:0;">🎒 BALO SINH TỒN &amp; HÒM ĐỒ XUNG QUANH <kbd>Tab</kbd> / <kbd>I</kbd></h3>
+          <div class="br-weight-wrap">
+            <span id="br-bag-weight-text">0 / 120 kg</span>
+            <div class="br-weight-track"><div id="br-bag-weight-fill" class="br-weight-fill" style="width:0%"></div></div>
+          </div>
+          <button id="btn-close-backpack" class="btn-secondary btn-sm">✕ Đóng</button>
+        </div>
+        <div class="br-inv-cols">
+          <div class="br-inv-col">
+            <div class="panel-tag">XUNG QUANH &amp; HÒM XÁC</div>
+            <div id="br-vicinity-list" class="br-inv-scroll"></div>
+          </div>
+          <div class="br-inv-col">
+            <div class="panel-tag">TRONG BALO (Y TẾ &amp; ĐẠN)</div>
+            <div id="br-bag-list" class="br-inv-scroll"></div>
+          </div>
+          <div class="br-inv-col">
+            <div class="panel-tag">TRANG BỊ &amp; SÚNG ĐANG DÙNG</div>
+            <div id="br-equip-list" class="br-inv-scroll"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full 5km x 5km Battle Royale Tactical Map [M] -->
+    <div id="br-bigmap-modal" class="modal-backdrop hidden">
+      <div class="br-map-card glass-panel">
+        <div class="br-inv-head">
+          <h3 class="section-title" style="margin:0;">🗺 BẢN ĐỒ ĐẢO 5×5 KM (Khu Nhà • Núi • Sông • Cầu • Chòi) <kbd>M</kbd></h3>
+          <button id="btn-close-bigmap" class="btn-secondary btn-sm">✕ Đóng</button>
+        </div>
+        <p class="muted" style="margin:4px 0 8px;">Nhấp vào bản đồ để ghim mốc dẫn đường xanh lam (Waypoint) giúp canh hướng nhảy dù hoặc di chuyển.</p>
+        <canvas id="br-bigmap-canvas" width="560" height="560" class="br-bigmap-canvas"></canvas>
+      </div>
+    </div>
+
     <!-- In-Game [B] Expanded Tactical Arsenal Selector Modal -->
     <div id="ingame-weapon-modal" class="modal-backdrop hidden">
       <div class="modal-card glass-panel" style="width:min(680px,94vw);">
@@ -708,6 +757,30 @@
           </thead>
           <tbody id="hud-scoreboard-body"></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- MATCHMAKING QUEUE OVERLAY (PRIORITIZE REAL HUMANS) -->
+  <div id="matchmaking-queue-overlay" class="modal-backdrop hidden">
+    <div class="queue-card glass-panel">
+      <div class="queue-radar-ring"></div>
+      <div id="queue-mode-badge" class="panel-tag">ĐANG GHÉP TRẬN TRỰC TUYẾN</div>
+      <h2 class="queue-title">ĐANG TÌM ĐỐI THỦ & ĐỒNG ĐỘI THẬT...</h2>
+      <p id="queue-subtitle" class="queue-sub">Hệ thống ưu tiên ghép người chơi đang tìm trận trước khi bổ sung AI.</p>
+      <div class="queue-stats-row">
+        <div class="queue-stat-box">
+          <span class="queue-stat-label">NGƯỜI CHƠI TRONG HÀNG CHỜ</span>
+          <strong id="queue-humans-count" class="queue-stat-val cyan">1</strong>
+        </div>
+        <div class="queue-stat-box">
+          <span class="queue-stat-label">THỜI GIAN CHỜ CÒN LẠI</span>
+          <strong id="queue-wait-sec" class="queue-stat-val gold">9s</strong>
+        </div>
+      </div>
+      <div class="row-gap" style="margin-top:18px;justify-content:center;">
+        <button id="btn-queue-force-start" class="btn-primary">⚡ Bắt Đầu Ngay</button>
+        <button id="btn-queue-cancel" class="btn-secondary">✕ Hủy Tìm Trận</button>
       </div>
     </div>
   </div>
