@@ -16,6 +16,8 @@ import {
   loadCharacterArchetype,
   instantiateGlbInstance
 } from './characterLoader.js';
+import { createMuzzleFlashRig } from './weaponEffects.js';
+import { hydrateGlbWeaponIfConfigured } from './weaponAssetLoader.js';
 
 export { preloadCharacterModels };
 
@@ -517,43 +519,47 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   const bodyMat = new THREE.MeshStandardMaterial({
     map: skinTex,
     bumpMap: metalBump,
-    bumpScale: 0.005,
-    metalness: skin.metalness,
-    roughness: skin.roughness
+    bumpScale: 0.006,
+    metalness: Math.min(0.95, skin.metalness + 0.08),
+    roughness: Math.max(0.14, skin.roughness - 0.05),
+    envMapIntensity: 1.4
   });
   const darkMetal = new THREE.MeshStandardMaterial({
     color: '#171a21',
     bumpMap: metalBump,
-    bumpScale: 0.004,
-    metalness: 0.86,
-    roughness: 0.28
+    bumpScale: 0.005,
+    metalness: 0.88,
+    roughness: 0.24,
+    envMapIntensity: 1.35
   });
   const polymerMat = new THREE.MeshStandardMaterial({
     map: polyTex,
     bumpMap: polyTex,
     bumpScale: 0.008,
     color: '#ffffff',
-    metalness: 0.14,
-    roughness: 0.66
+    metalness: 0.16,
+    roughness: 0.62
   });
   const woodMat = new THREE.MeshStandardMaterial({
     map: woodTex,
     bumpMap: woodTex,
     bumpScale: 0.006,
     metalness: 0.08,
-    roughness: 0.44
+    roughness: 0.40
   });
   const steelMat = new THREE.MeshStandardMaterial({
-    color: '#64748b',
+    color: '#7a8a9e',
     bumpMap: metalBump,
     bumpScale: 0.003,
-    metalness: 0.92,
-    roughness: 0.18
+    metalness: 0.94,
+    roughness: 0.16,
+    envMapIntensity: 1.5
   });
   const brassMat = new THREE.MeshStandardMaterial({
-    color: '#d97706',
-    metalness: 0.88,
-    roughness: 0.22
+    color: '#eab308',
+    metalness: 0.92,
+    roughness: 0.18,
+    envMapIntensity: 1.45
   });
   const useWoodGrip = skinId === 'default' && (weaponId === 'ak47' || weaponId === 'svd' || weaponId === 'rpk' || weaponId === 'm870' || weaponId === 'kar98k');
   const fdePolyTex = getPolymerGripTexture('#9c7e52');
@@ -605,6 +611,7 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
     const trigger = extrudeSideProfile([
       [-0.052, -0.004], [-0.062, -0.004], [-0.058, -0.018], [-0.066, -0.028], [-0.058, -0.029], [-0.050, -0.018]
     ], 0.0055, 0.001, steelMat);
+    trigger.name = 'gun_trigger';
 
     boltMesh = new THREE.Group();
     const boltSlide = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.015, 0.072), steelMat);
@@ -2043,14 +2050,19 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   if (magMesh) magMesh.name = 'gun_mag';
   if (boltMesh) boltMesh.name = 'gun_bolt';
 
+  const isSuppressed = attachments?.muzzle === 'suppressor' || weaponId === 'mp5' || weaponId === 'usps' || weaponId === 'm4a1';
+  const ejectPortPos = new THREE.Vector3(0.032, barrelY + 0.008, 0.012);
+
   group.userData = {
     weaponId,
     optic,
+    isSuppressed,
     magMesh,
     magBasePos: magMesh ? magMesh.position.clone() : null,
     boltMesh,
     boltBaseZ: boltMesh ? boltMesh.position.z : 0,
     muzzlePos: new THREE.Vector3(0, barrelY, muzzleZ),
+    ejectPortPos,
     aimSightLocalPos: new THREE.Vector3(0, aimSightY, aimSightZ),
     aimDistanceZ
   };
@@ -2068,15 +2080,20 @@ export function createWeaponModel(weaponId = 'ak47', skinId = 'default', attachm
   const cloned = template.clone(true);
   const clonedMag = cloned.getObjectByName('gun_mag');
   const clonedBolt = cloned.getObjectByName('gun_bolt');
+  const clonedTrigger = cloned.getObjectByName('gun_trigger');
   cloned.userData = {
     ...template.userData,
     magMesh: clonedMag,
     magBasePos: clonedMag ? clonedMag.position.clone() : null,
     boltMesh: clonedBolt,
     boltBaseZ: clonedBolt ? clonedBolt.position.z : 0,
+    triggerMesh: clonedTrigger,
     muzzlePos: template.userData.muzzlePos ? template.userData.muzzlePos.clone() : null,
+    ejectPortPos: template.userData.ejectPortPos ? template.userData.ejectPortPos.clone() : new THREE.Vector3(0.032, 0.038, 0.012),
     aimSightLocalPos: template.userData.aimSightLocalPos ? template.userData.aimSightLocalPos.clone() : null
   };
+  // Automatically hydrate optional external GLB weapon if registered in assets/weapons/manifest.json
+  hydrateGlbWeaponIfConfigured(cloned, weaponId);
   return cloned;
 }
 
@@ -2290,12 +2307,33 @@ export function createFirstPersonRig(weaponId, skinId, attachments, outfitId = '
   }
   lArmGroup.add(lThumb);
 
-  // Invisible barrel tip anchor for bullet tracer spawn (no obstructive yellow muzzle flash)
-  const flashGroup = new THREE.Object3D();
-  flashGroup.position.copy(gun.userData.muzzlePos);
+  // Volumetric 3D Muzzle Flash + Dynamic Light anchor at barrel tip
+  const flashGroup = createMuzzleFlashRig(true);
+  if (gun.userData.muzzlePos) {
+    flashGroup.position.copy(gun.userData.muzzlePos);
+  }
 
-  root.add(gun, rArmGroup, lArmGroup, flashGroup);
-  root.userData = { gun, flashGroup, lArm: lArmGroup, rArm: rArmGroup, operatorId: operatorId || 'vanguard', outfitId };
+  // Ejection port anchor on right side of receiver for 3D brass/shotgun shell casings
+  const ejectAnchor = new THREE.Object3D();
+  ejectAnchor.userData.keepWithGlb = true;
+  if (gun.userData.ejectPortPos) {
+    ejectAnchor.position.copy(gun.userData.ejectPortPos);
+  } else {
+    ejectAnchor.position.set(0.032, 0.038, 0.012);
+  }
+
+  root.add(gun, rArmGroup, lArmGroup, flashGroup, ejectAnchor);
+  root.userData = {
+    gun,
+    flashGroup,
+    ejectAnchor,
+    lArm: lArmGroup,
+    lArmBasePos: lArmGroup.position.clone(),
+    rArm: rArmGroup,
+    rArmBasePos: rArmGroup.position.clone(),
+    operatorId: operatorId || 'vanguard',
+    outfitId
+  };
   return root;
 }
 

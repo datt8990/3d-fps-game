@@ -585,19 +585,7 @@ export class GameRoomCore {
       this.assignBombCarrier();
     }
 
-    this.broadcast({
-      type: 'match_started',
-      room: this.getLobbyPayload(),
-      mapId: this.mapId,
-      mode: this.mode,
-      modeConfig: this.modeConfig,
-      matchEndsAt: this.matchEndsAt,
-      roundEndsAt: this.roundEndsAt,
-      roundNumber: this.roundNumber,
-      storm: this.storm,
-      dropPlane: this.dropPlane,
-      lootCrates: this.lootCrates
-    });
+    this.broadcast(this.getMatchStartedPayload());
 
     for (const p of this.combatants.values()) {
       this.sendWeaponsSync(p);
@@ -606,6 +594,51 @@ export class GameRoomCore {
     }
 
     this.onListChangedFn();
+  }
+
+  getMatchStartedPayload() {
+    return {
+      type: 'match_started',
+      room: this.getLobbyPayload(),
+      mapId: this.mapId,
+      mode: this.mode,
+      modeConfig: this.modeConfig,
+      matchStartedAt: this.matchStartedAt,
+      matchEndsAt: this.matchEndsAt,
+      roundEndsAt: this.roundEndsAt,
+      roundNumber: this.roundNumber,
+      storm: this.storm,
+      dropPlane: this.dropPlane,
+      lootCrates: this.lootCrates
+    };
+  }
+
+  resyncPlayerToMatch(playerId) {
+    if (this.status !== 'playing') return;
+    const p = this.combatants.get(playerId);
+    if (!p || p.isBot) return;
+    this.sendTo(playerId, this.getMatchStartedPayload());
+    this.sendWeaponsSync(p);
+    this.sendInventorySync(p);
+    this.sendTo(playerId, {
+      type: 'player_spawned',
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      yaw: p.yaw,
+      hp: p.hp,
+      maxHp: p.maxHp,
+      armor: p.armor,
+      maxArmor: p.maxArmor,
+      slot: p.slot,
+      weaponId: p.weaponId,
+      ammo: p.ammo,
+      reserveAmmo: p.reserveAmmo,
+      grenades: p.grenades,
+      dropPhase: p.dropPhase,
+      hasBomb: p.hasBomb
+    });
     this.startMatchLoop();
   }
 
@@ -1511,41 +1544,75 @@ export class GameRoomCore {
   changeInMatchPrimary(player, weaponId) {
     const w = WEAPONS[weaponId];
     if (!w) return;
-    const now = Date.now();
+
+    // Save current slot ammo before instant swap
+    if (player.weaponsState?.[player.slot]) {
+      player.weaponsState[player.slot].ammo = player.ammo;
+      player.weaponsState[player.slot].reserve = player.reserveAmmo;
+    }
 
     if (w.category === 'secondary') {
       player.secondary = weaponId;
       const sStats = getEffectiveWeaponStats(weaponId, player.attachments[weaponId], player.operator);
       player.weaponsState[2] = { id: weaponId, ammo: sStats.magSize, reserve: sStats.reserveAmmo, magSize: sStats.magSize };
-      if (player.slot === 2 || this.mode === 'practice') {
+      if (!player.dead) {
         player.slot = 2;
         player.weaponId = weaponId;
         player.ammo = sStats.magSize;
         player.reserveAmmo = sStats.reserveAmmo;
         player.reloadingUntil = 0;
+        this.broadcast({
+          type: 'weapon_switched',
+          id: player.id,
+          slot: 2,
+          weaponId: player.weaponId,
+          ammo: player.ammo,
+          reserveAmmo: player.reserveAmmo,
+          notice: `Đã đổi ngay súng phụ sang ${w.name}!`
+        });
+      } else {
+        this.sendTo(player.id, { type: 'system_toast', text: `Đã chọn súng phụ ${w.name}!` });
       }
-      this.sendTo(player.id, {
-        type: 'weapon_switched',
-        id: player.id,
-        slot: player.slot,
-        weaponId: player.weaponId,
-        ammo: player.ammo,
-        reserveAmmo: player.reserveAmmo,
-        notice: `Đã đổi súng phụ sang ${w.name}!`
-      });
+      return;
+    }
+
+    if (w.category === 'melee') {
+      player.melee = weaponId;
+      player.weaponsState[3] = { id: weaponId, ammo: 0, reserve: 0, magSize: 0 };
+      if (!player.dead) {
+        player.slot = 3;
+        player.weaponId = weaponId;
+        player.ammo = 0;
+        player.reserveAmmo = 0;
+        player.reloadingUntil = 0;
+        this.broadcast({
+          type: 'weapon_switched',
+          id: player.id,
+          slot: 3,
+          weaponId: player.weaponId,
+          ammo: 0,
+          reserveAmmo: 0,
+          notice: `Đã đổi ngay cận chiến sang ${w.name}!`
+        });
+      } else {
+        this.sendTo(player.id, { type: 'system_toast', text: `Đã chọn cận chiến ${w.name}!` });
+      }
       return;
     }
 
     if (w.category !== 'primary') return;
-    if (this.mode === 'practice' || (!player.dead && now - player.spawnedAt < 10000)) {
-      player.primary = weaponId;
-      const pStats = getEffectiveWeaponStats(weaponId, player.attachments[weaponId], player.operator);
-      player.weaponsState[1] = {
-        id: weaponId,
-        ammo: pStats.magSize,
-        reserve: pStats.reserveAmmo,
-        magSize: pStats.magSize
-      };
+    player.primary = weaponId;
+    player.pendingPrimary = null;
+    const pStats = getEffectiveWeaponStats(weaponId, player.attachments[weaponId], player.operator);
+    player.weaponsState[1] = {
+      id: weaponId,
+      ammo: pStats.magSize,
+      reserve: pStats.reserveAmmo,
+      magSize: pStats.magSize
+    };
+
+    if (!player.dead) {
+      // Instant weapon switch anywhere in-match — never requires dying/respawning!
       player.slot = 1;
       player.weaponId = weaponId;
       player.ammo = pStats.magSize;
@@ -1559,13 +1626,13 @@ export class GameRoomCore {
         weaponId: player.weaponId,
         ammo: player.ammo,
         reserveAmmo: player.reserveAmmo,
-        notice: `Đã trang bị ngay ${w.name}!`
+        notice: `Đã đổi ngay sang ${w.name}!`
       });
     } else {
       player.pendingPrimary = weaponId;
       this.sendTo(player.id, {
         type: 'system_toast',
-        text: `Sẽ trang bị ${w.name} ở lần hồi sinh tiếp theo!`
+        text: `Đã chọn ${w.name} — sẽ cầm ngay khi hồi sinh!`
       });
     }
   }

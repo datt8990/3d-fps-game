@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Drop-in GLB 3D weapons (CuiGames / 3DAssets.dev) and WAV audio packs (Free Firearm Sound Library / Gun Reload Sounds / Free Military SFX). Place files in public/assets/weapons/ and public/assets/sounds/ then register them below.",
+  "weapons": {},
+  "sounds": {}
+}

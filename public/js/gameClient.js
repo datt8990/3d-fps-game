@@ -18,6 +18,12 @@ import {
 } from './models.js';
 import { soundEngine } from './audio.js';
 import { getStudioEnvMap } from './textures.js';
+import {
+  triggerMuzzleFlash,
+  updateMuzzleFlash,
+  ShellEjectionPool,
+  BallisticVfxManager
+} from './weaponEffects.js';
 
 function shortestAngleDiff(from, to) {
   let diff = (to - from + Math.PI) % (Math.PI * 2);
@@ -117,6 +123,9 @@ export class FPSGameClient {
     this.fpSignature = '';
     this.vmKickZ = 0;
     this.vmKickPitch = 0;
+    this.vmKickRoll = 0;
+    this.cameraShake = 0;
+    this.drawProgress = 1.0;
     this.recoilAccumPitch = 0;
     this.swayX = 0;
     this.swayY = 0;
@@ -127,6 +136,8 @@ export class FPSGameClient {
     this.pendingRigQueue = [];
     this.rosterMeta = new Map();
     this.activeEffects = [];
+    this.shellPool = new ShellEjectionPool(this.scene, 36);
+    this.vfx = new BallisticVfxManager(this.scene, 64);
 
     this.latestBomb = null;
     this.latestStorm = null;
@@ -231,14 +242,14 @@ export class FPSGameClient {
           const wasAds = this.adsActive;
           this.sniperZoomStage = (this.sniperZoomStage + 1) % 3;
           this.adsActive = this.sniperZoomStage > 0;
-          soundEngine.playMetallicClick(1050, 0.04, 0.18);
+          soundEngine.playAdsTransition(this.adsActive, true);
           if (!wasAds && this.adsActive) {
             this.triggerAdsSnapAssist();
           }
         } else {
           const wasAds = this.adsActive;
           this.adsActive = !this.adsActive;
-          soundEngine.playMetallicClick(780, 0.03, 0.09);
+          soundEngine.playAdsTransition(this.adsActive, false);
           if (!wasAds && this.adsActive) {
             this.triggerAdsSnapAssist();
           }
@@ -740,6 +751,9 @@ export class FPSGameClient {
     this.dropPlaneData = null;
     this.dropPlaneMesh = null;
     this.localChuteRig = null;
+    this.cameraShake = 0;
+    this.shellPool?.clear();
+    this.vfx?.clear();
     document.getElementById('br-backpack-modal')?.classList.add('hidden');
     document.getElementById('br-bigmap-modal')?.classList.add('hidden');
     this.hud.updateDropBanner?.(null);
@@ -1007,8 +1021,49 @@ export class FPSGameClient {
     this.local.pitch = Math.min(1.50, this.local.pitch + pitchKick);
     this.recoilAccumPitch = Math.min(0.068, this.recoilAccumPitch + pitchKick);
     this.local.yaw += (Math.random() - 0.5) * st.recoilYaw * recoilScale * 1.4;
-    this.vmKickZ = st.isMelee ? -0.11 : (this.adsActive ? 0.012 : 0.032);
-    this.vmKickPitch = st.isMelee ? -0.26 : (this.adsActive ? 0.014 : 0.042);
+    this.vmKickZ = st.isMelee ? -0.11 : (this.adsActive ? 0.015 : 0.036);
+    this.vmKickPitch = st.isMelee ? -0.26 : (this.adsActive ? 0.016 : 0.048);
+    this.vmKickRoll = st.isMelee ? 0 : (Math.random() - 0.5) * (this.adsActive ? 0.016 : 0.048);
+
+    // Tactile weapon recoil VFX: Volumetric Muzzle Flash, 3D Shell Ejection, Smoke Wisp & Micro Screen Shake
+    if (!st.isMelee && this.fpRig) {
+      const gunObj = this.fpRig.userData.gun;
+      gunObj?.userData?.glbController?.play('fire');
+
+      const power = st.isSniper || (st.pellets || 1) > 1 ? 1.25 : (st.category === 'secondary' ? 0.78 : 1.0);
+      this.cameraShake = Math.min(0.022, this.cameraShake + (this.adsActive ? 0.0025 : 0.0055) * power);
+
+      if (this.fpRig.userData.flashGroup) {
+        triggerMuzzleFlash(this.fpRig.userData.flashGroup, {
+          isAds: this.adsActive,
+          isSuppressed: Boolean(st.suppressed),
+          power
+        });
+
+        // Subtle rising barrel smoke wisp (more visible on hipfire / rapid fire)
+        if (!this.adsActive || Math.random() < 0.35) {
+          const muzzleW = new THREE.Vector3();
+          this.fpRig.userData.flashGroup.getWorldPosition(muzzleW);
+          const fwdW = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+          this.vfx.spawnBarrelSmoke(muzzleW, fwdW);
+        }
+      }
+
+      // Eject spinning 3D brass casing / red 12ga shotgun shell from receiver ejection port
+      if (this.fpRig.userData.ejectAnchor && st.id !== 'magnum') {
+        const ejectW = new THREE.Vector3();
+        this.fpRig.userData.ejectAnchor.getWorldPosition(ejectW);
+        const rightW = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
+        const upW = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion).normalize();
+        const fwdW = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+        const isShotgun = ['spas12', 'aa12', 'm870'].includes(st.id);
+        this.shellPool.spawn(ejectW, rightW, upW, fwdW, {
+          isShotgun,
+          floorY: this.local.y,
+          onBounce: (isSg) => soundEngine.playShellClink(isSg)
+        });
+      }
+    }
 
     // Bolt-action AWP unscopes briefly; semi-auto Barrett M82 stays scoped!
     if (st.fireMode === 'bolt' && this.sniperZoomStage > 0) {
@@ -1087,7 +1142,9 @@ export class FPSGameClient {
       this.sniperZoomStage = 0;
       soundEngine.cancelReloadSequence();
       soundEngine.playWeaponDraw(msg.weaponId);
+      this.drawProgress = 0.0;
       this.rebuildFirstPersonRig(msg.weaponId);
+      this.fpRig?.userData?.gun?.userData?.glbController?.play('draw');
       this.refreshHudWeapon();
     } else {
       const ent = this.remoteEntities.get(msg.id);
@@ -1107,6 +1164,7 @@ export class FPSGameClient {
       this.adsBlend = 0;
       this.sniperZoomStage = 0;
       soundEngine.playReloadSequence(msg.durationMs, msg.weaponId || this.local.weaponId);
+      this.fpRig?.userData?.gun?.userData?.glbController?.play('reload');
     }
   }
 
@@ -1140,10 +1198,10 @@ export class FPSGameClient {
         this.fpRig.userData.flashGroup.getWorldPosition(worldMuzzle);
         startPt = worldMuzzle;
       }
-      this.spawnTracerAndImpact(startPt, msg.hitPoint, msg.hitType);
+      this.spawnTracerAndImpact(startPt, msg.hitPoint, msg.hitType, Boolean(msg.suppressed));
       if (Array.isArray(msg.extraHits)) {
         for (const eh of msg.extraHits) {
-          this.spawnTracerAndImpact(startPt, eh.point, eh.type);
+          this.spawnTracerAndImpact(startPt, eh.point, eh.type, Boolean(msg.suppressed));
         }
       }
     }
@@ -1165,12 +1223,14 @@ export class FPSGameClient {
     const dist = Math.hypot(msg.x - this.local.x, msg.z - this.local.z);
     soundEngine.playExplosion(dist);
 
-    // Visual Blast Fireball Sphere!
-    const blastMat = new THREE.MeshBasicMaterial({ color: '#f97316', transparent: true, opacity: 0.85 });
-    const blast = new THREE.Mesh(new THREE.SphereGeometry(0.85, 14, 14), blastMat);
-    blast.position.set(msg.x, msg.y + 0.3, msg.z);
-    this.scene.add(blast);
-    this.activeEffects.push({ mesh: blast, mat: blastMat, life: 0.36, maxLife: 0.36, scaleUp: true, fastExpand: true });
+    // Cinematic multi-layer explosion: flash core, fireballs, shockwave ring, smoke plume, shrapnel & dynamic light
+    this.vfx.spawnExplosion(msg);
+
+    // Distance-attenuated camera explosion shockwave shake
+    if (dist < 28) {
+      const shakePower = Math.max(0.008, (1 - dist / 28) * 0.085);
+      this.cameraShake = Math.min(0.11, this.cameraShake + shakePower);
+    }
   }
 
   onHitConfirm(msg) {
@@ -1508,26 +1568,21 @@ export class FPSGameClient {
     }
   }
 
-  spawnTracerAndImpact(start, end, hitType) {
+  spawnTracerAndImpact(start, end, hitType, isSuppressed = false) {
     const p1 = new THREE.Vector3(start.x, start.y, start.z);
     const p2 = new THREE.Vector3(end.x, end.y, end.z);
     if (p1.distanceTo(p2) < 0.25) return;
 
-    // Start tracer cleanly past muzzle tip with subtle air-trail tint so sights stay completely clear
-    p1.lerp(p2, 0.06);
-    const geo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-    const mat = new THREE.LineBasicMaterial({ color: '#e2e8f0', transparent: true, opacity: 0.36 });
-    const line = new THREE.Line(geo, mat);
-    this.scene.add(line);
-    this.activeEffects.push({ mesh: line, mat, life: 0.055, maxLife: 0.055 });
+    this.vfx.spawnTracer(p1, p2, isSuppressed);
 
     if (hitType === 'wall' || hitType === 'player') {
-      const sparkColor = hitType === 'player' ? '#ef4444' : '#f59e0b';
-      const sparkMat = new THREE.MeshBasicMaterial({ color: sparkColor, transparent: true, opacity: 0.90 });
-      const spark = new THREE.Mesh(new THREE.SphereGeometry(hitType === 'player' ? 0.075 : 0.05, 6, 6), sparkMat);
-      spark.position.copy(p2);
-      this.scene.add(spark);
-      this.activeEffects.push({ mesh: spark, mat: sparkMat, life: 0.14, maxLife: 0.14, scaleUp: true });
+      const surface = this.vfx.spawnBulletImpact(p2, p1, hitType, this.mapData);
+      if (hitType === 'wall') {
+        const distToMe = Math.hypot(p2.x - this.local.x, p2.z - this.local.z);
+        if (distToMe < 36) {
+          soundEngine.playBulletImpact(surface, distToMe);
+        }
+      }
     }
   }
 
@@ -1582,6 +1637,8 @@ export class FPSGameClient {
     this.processPendingRigs(2);
     this.updateLocalPlayer(dt, now, wStats);
     this.updateRemotePlayers(dt, now * 0.001);
+    this.shellPool.update(dt);
+    this.vfx.update(dt);
 
     for (let i = this.activeEffects.length - 1; i >= 0; i--) {
       const eff = this.activeEffects[i];
@@ -1902,9 +1959,16 @@ export class FPSGameClient {
       this.updateAdsAimAssist(dt);
     }
 
+    this.cameraShake *= Math.exp(-16 * dt);
+    if (this.cameraShake < 0.0002) this.cameraShake = 0;
+    const shakeX = this.cameraShake > 0 ? (Math.random() - 0.5) * this.cameraShake : 0;
+    const shakeY = this.cameraShake > 0 ? (Math.random() - 0.5) * this.cameraShake : 0;
+    const shakeZ = this.cameraShake > 0 ? (Math.random() - 0.5) * this.cameraShake * 0.7 : 0;
+
     this.camera.position.set(this.local.x, this.local.y + this.local.eyeHeight + bobY, this.local.z);
-    this.camera.rotation.y = this.local.yaw;
-    this.camera.rotation.x = this.local.pitch;
+    this.camera.rotation.y = this.local.yaw + shakeY;
+    this.camera.rotation.x = Math.max(-1.52, Math.min(1.52, this.local.pitch + shakeX));
+    this.camera.rotation.z = shakeZ;
 
     const scopeFovs = wStats.scopeFovs || [24, 10];
     const wantsAds = this.adsActive && !wStats.isMelee;
@@ -1930,10 +1994,18 @@ export class FPSGameClient {
       const isAcogScoped = wantsAds && wStats.opticId === 'acog' && this.adsBlend > 0.62;
       this.fpRig.visible = this.sniperZoomStage === 0 && !isAcogScoped;
 
+      updateMuzzleFlash(this.fpRig.userData.flashGroup, dt);
+      gunData?.glbController?.update(dt);
+
       this.vmKickZ += (0 - this.vmKickZ) * expSmooth(18, dt);
       this.vmKickPitch += (0 - this.vmKickPitch) * expSmooth(16, dt);
+      this.vmKickRoll += (0 - this.vmKickRoll) * expSmooth(16, dt);
       this.swayX += (0 - this.swayX) * expSmooth(12, dt);
       this.swayY += (0 - this.swayY) * expSmooth(12, dt);
+      this.drawProgress = Math.min(1.0, this.drawProgress + dt * 4.4);
+      const drawEase = 1 - Math.pow(1 - this.drawProgress, 3);
+      const drawDropY = (1 - drawEase) * -0.22;
+      const drawPitch = (1 - drawEase) * -0.45;
 
       const sightPos = gunData?.aimSightLocalPos;
       const hipX = 0.22;
@@ -1950,33 +2022,78 @@ export class FPSGameClient {
       const targetZ = hipZ + (adsZ - hipZ) * b;
 
       this.fpRig.position.x = targetX + (this.swayX + bobX) * swayScale;
-      this.fpRig.position.y = targetY + (this.swayY + bobY * 0.55) * swayScale;
+      this.fpRig.position.y = targetY + drawDropY + (this.swayY + bobY * 0.55) * swayScale;
       this.fpRig.position.z = targetZ + this.vmKickZ;
 
-      if (gunData?.boltMesh && gunData.boltBaseZ !== undefined) {
-        gunData.boltMesh.position.z = gunData.boltBaseZ + Math.max(0, this.vmKickZ * 0.75);
-      }
+      let boltOffset = Math.max(0, this.vmKickZ * 0.95);
+      const lArm = this.fpRig.userData.lArm;
+      const lArmBase = this.fpRig.userData.lArmBasePos;
 
       if (this.local.reloadingEnd > now) {
         const total = Math.max(200, this.local.reloadingEnd - this.local.reloadingStart);
-        const ratio = Math.min(1, (now - this.local.reloadingStart) / total);
-        this.hud.updateReloadProgress(ratio);
-        this.fpRig.rotation.z = Math.sin(ratio * Math.PI) * 0.42;
-        this.fpRig.rotation.x = -Math.sin(ratio * Math.PI) * 0.22;
-        this.fpRig.rotation.y = 0;
+        const r = Math.min(1, (now - this.local.reloadingStart) / total);
+        this.hud.updateReloadProgress(r);
+
+        // 4-Stage Tactical Reload: Tilt -> Drop Mag -> Slam Mag In -> Pull & Snap Charging Handle
+        const magSlamKick = (r > 0.68 && r < 0.77) ? Math.sin(((r - 0.68) / 0.09) * Math.PI) * 0.032 : 0;
+        const chargeKick = (r > 0.80 && r < 0.95) ? Math.sin(((r - 0.80) / 0.15) * Math.PI) * 0.025 : 0;
+        this.fpRig.position.y += magSlamKick;
+        this.fpRig.position.z += chargeKick;
+        this.fpRig.rotation.z = Math.sin(r * Math.PI) * 0.44;
+        this.fpRig.rotation.x = -Math.sin(r * Math.PI) * 0.20 + magSlamKick * 2.2;
+        this.fpRig.rotation.y = Math.sin(r * Math.PI) * 0.12;
 
         if (gunData?.magMesh && gunData?.magBasePos) {
-          const dropOffset = ratio < 0.5 ? Math.sin(ratio * Math.PI) * 0.22 : Math.cos((ratio - 0.5) * Math.PI) * 0.22;
-          gunData.magMesh.position.y = gunData.magBasePos.y - dropOffset;
+          let dropY = 0;
+          let dropTilt = 0;
+          if (r >= 0.16 && r < 0.46) {
+            const p = (r - 0.16) / 0.30;
+            dropY = p * 0.28;
+            dropTilt = p * 0.32;
+          } else if (r >= 0.46 && r < 0.72) {
+            const p = 1 - (r - 0.46) / 0.26;
+            dropY = p * 0.28;
+            dropTilt = p * 0.24;
+          }
+          gunData.magMesh.position.y = gunData.magBasePos.y - dropY;
+          gunData.magMesh.rotation.x = dropTilt;
+        }
+
+        // Stage 4: Charging Handle / Bolt Rack pull back & release
+        if (r >= 0.76 && r <= 0.96) {
+          const cp = (r - 0.76) / 0.20;
+          boltOffset = Math.sin(cp * Math.PI) * 0.088;
+        }
+
+        // Left hand follows magazine drop/insert then reaches up to rack charging handle
+        if (lArm && lArmBase) {
+          if (r < 0.72) {
+            const magP = Math.sin((r / 0.72) * Math.PI);
+            lArm.position.set(lArmBase.x + magP * 0.04, lArmBase.y - magP * 0.12, lArmBase.z + magP * 0.10);
+          } else {
+            const chP = Math.sin(((r - 0.72) / 0.28) * Math.PI);
+            lArm.position.set(lArmBase.x + chP * 0.05, lArmBase.y + chP * 0.04, lArmBase.z + chP * 0.16);
+          }
         }
       } else {
         this.hud.updateReloadProgress(0);
         this.fpRig.rotation.y = 0.025 * (1 - b);
-        this.fpRig.rotation.z += ((sprint ? 0.18 : 0) * (1 - b) - this.fpRig.rotation.z) * expSmooth(12, dt);
-        this.fpRig.rotation.x = this.vmKickPitch - (sprint ? 0.18 * (1 - b) : 0);
+        this.fpRig.rotation.z += (((sprint ? 0.18 : 0) * (1 - b) + this.vmKickRoll) - this.fpRig.rotation.z) * expSmooth(12, dt);
+        this.fpRig.rotation.x = this.vmKickPitch + drawPitch - (sprint ? 0.18 * (1 - b) : 0);
         if (gunData?.magMesh && gunData?.magBasePos) {
           gunData.magMesh.position.copy(gunData.magBasePos);
+          gunData.magMesh.rotation.x = 0;
         }
+        if (lArm && lArmBase) {
+          lArm.position.lerp(lArmBase, expSmooth(14, dt));
+        }
+      }
+
+      if (gunData?.boltMesh && gunData.boltBaseZ !== undefined) {
+        gunData.boltMesh.position.z = gunData.boltBaseZ + boltOffset;
+      }
+      if (gunData?.triggerMesh) {
+        gunData.triggerMesh.rotation.x = Math.min(0.45, Math.max(0, this.vmKickZ * 9.5));
       }
     }
   }

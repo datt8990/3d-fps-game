@@ -52,7 +52,12 @@ export class NetworkClient {
     this.clientRelayOutbox = [];
     this.clientRelayTimer = null;
     this.clientRelayInFlight = false;
+    this.relayConsecutiveErrors = 0;
     this.p2pDirectReady = false;
+    this.rtcChunkBuffers = new Map();
+    this.rtcChunkSeq = 0;
+    this.lastMatchStartedKey = null;
+    this.lastResyncRequestAt = 0;
   }
 
   on(type, fn) {
@@ -225,16 +230,63 @@ export class NetworkClient {
   sendViaRtc(entry, payload) {
     if (!entry) return false;
     const isVolatile = payload?.type === 'world_state' || payload?.type === 'input';
+    const raw = JSON.stringify(payload);
+    // Large payloads (>14KB, e.g. match_started with lootCrates/rosters) MUST be chunked over ordered relDc
+    // so WebRTC SCTP DataChannel never throws MessageTooLarge or drops the channel!
+    const CHUNK_LIMIT = 14000;
+    if (raw.length > CHUNK_LIMIT) {
+      const relDc = entry.relDc?.readyState === 'open' ? entry.relDc : null;
+      if (!relDc) return false;
+      try {
+        const chunkId = `${this.clientId}_${++this.rtcChunkSeq}`;
+        const total = Math.ceil(raw.length / CHUNK_LIMIT);
+        for (let idx = 0; idx < total; idx++) {
+          const part = raw.slice(idx * CHUNK_LIMIT, (idx + 1) * CHUNK_LIMIT);
+          relDc.send(JSON.stringify({ __chunk: 1, id: chunkId, idx, total, data: part }));
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     const dc = (isVolatile && entry.fastDc?.readyState === 'open')
       ? entry.fastDc
       : (entry.relDc?.readyState === 'open' ? entry.relDc : null);
     if (!dc) return false;
     try {
-      dc.send(JSON.stringify(payload));
+      dc.send(raw);
       return true;
     } catch {
       return false;
     }
+  }
+
+  decodeRtcMessage(rawData) {
+    let msg;
+    try { msg = JSON.parse(rawData); } catch { return null; }
+    if (!msg) return null;
+    if (msg.__chunk === 1 && msg.id && Number.isInteger(msg.idx) && msg.total > 0) {
+      let buf = this.rtcChunkBuffers.get(msg.id);
+      if (!buf) {
+        buf = { parts: new Array(msg.total), received: 0, total: msg.total, createdAt: Date.now() };
+        this.rtcChunkBuffers.set(msg.id, buf);
+        if (this.rtcChunkBuffers.size > 32) {
+          const oldestKey = this.rtcChunkBuffers.keys().next().value;
+          if (oldestKey) this.rtcChunkBuffers.delete(oldestKey);
+        }
+      }
+      if (buf.parts[msg.idx] === undefined) {
+        buf.parts[msg.idx] = msg.data || '';
+        buf.received++;
+      }
+      if (buf.received >= buf.total) {
+        this.rtcChunkBuffers.delete(msg.id);
+        try { return JSON.parse(buf.parts.join('')); } catch { return null; }
+      }
+      return null;
+    }
+    return msg;
   }
 
   sendToRemoteHost(obj) {
@@ -485,8 +537,7 @@ export class NetworkClient {
       };
       dc.onmessage = (ev) => {
         if (!this.hostRoom) return;
-        let msg;
-        try { msg = JSON.parse(ev.data); } catch { return; }
+        const msg = this.decodeRtcMessage(ev.data);
         if (!msg || typeof msg.type !== 'string') return;
         if (msg.type === 'ping_check') {
           this.sendViaRtc(entry, { type: 'pong_check', clientSentAt: msg.clientSentAt });
@@ -540,9 +591,14 @@ export class NetworkClient {
 
     if (msg.type === 'p2p_hello') {
       if (this.hostRoom.combatants.has(fromId)) {
-        if (this.hostRoom.status === 'waiting' && !this.peerConns.get(fromId)?.open) {
-          this.relayClientIds.add(fromId);
-          this.enqueueHostRelay(fromId, { type: 'joined_room', room: this.hostRoom.getLobbyPayload() });
+        this.relayClientIds.add(fromId);
+        if (this.hostRoom.status === 'waiting') {
+          if (!this.peerConns.get(fromId)?.open) {
+            this.enqueueHostRelay(fromId, { type: 'joined_room', room: this.hostRoom.getLobbyPayload() });
+          }
+        } else if (this.hostRoom.status === 'playing') {
+          // Guest already in room while match started — immediately resync full match_started state!
+          this.hostRoom.resyncPlayerToMatch(fromId);
         }
         return;
       }
@@ -610,29 +666,58 @@ export class NetworkClient {
             this.handleIncomingHostLoopback(payload);
             return;
           }
+          const isMatchStart = payload?.type === 'match_started';
           const rtc = this.rtcPeers.get(targetId);
-          if (rtc?.ready && this.sendViaRtc(rtc, payload)) {
-            return;
+          let sentDirect = false;
+          if (rtc?.ready) {
+            sentDirect = this.sendViaRtc(rtc, payload);
           }
-          const c = this.peerConns.get(targetId);
-          if (c?.open) {
-            c.send(payload);
-          } else if (this.relayClientIds.has(targetId)) {
+          if (!sentDirect) {
+            const c = this.peerConns.get(targetId);
+            if (c?.open) {
+              try { c.send(payload); sentDirect = true; } catch {}
+            }
+          }
+          // Always fallback to HTTP relay if direct send failed, AND dual-deliver match_started for 100% reliability
+          if (!sentDirect || isMatchStart) {
+            this.relayClientIds.add(targetId);
             this.enqueueHostRelay(targetId, payload);
+            if (isMatchStart) this.flushHostRelayOnce();
           }
         },
         broadcast: (payload) => {
-          this.handleIncomingHostLoopback(payload);
-          for (const [cid, rtc] of this.rtcPeers.entries()) {
-            if (rtc?.ready) this.sendViaRtc(rtc, payload);
-          }
-          for (const [cid, c] of this.peerConns.entries()) {
-            if (c?.open && !this.rtcPeers.get(cid)?.ready) c.send(payload);
-          }
-          for (const cid of this.relayClientIds) {
-            if (!this.rtcPeers.get(cid)?.ready && !this.peerConns.get(cid)?.open) {
+          const isMatchStart = payload?.type === 'match_started';
+          const allTargets = new Set([
+            ...this.rtcPeers.keys(),
+            ...this.peerConns.keys(),
+            ...this.relayClientIds
+          ]);
+          allTargets.delete(this.clientId);
+
+          // 1. Dispatch to ALL remote guests FIRST so network packets flush before Host builds 3D arena
+          for (const cid of allTargets) {
+            const rtc = this.rtcPeers.get(cid);
+            let sentDirect = false;
+            if (rtc?.ready) {
+              sentDirect = this.sendViaRtc(rtc, payload);
+            }
+            if (!sentDirect) {
+              const c = this.peerConns.get(cid);
+              if (c?.open) {
+                try { c.send(payload); sentDirect = true; } catch {}
+              }
+            }
+            if (!sentDirect || isMatchStart) {
               this.enqueueHostRelay(cid, payload);
             }
+          }
+
+          if (isMatchStart && allTargets.size > 0) {
+            // Immediately push match_started to Cloud Relay BEFORE Host CPU starts 3D map/shader init!
+            this.flushHostRelayOnce();
+            setTimeout(() => this.handleIncomingHostLoopback(payload), 60);
+          } else {
+            this.handleIncomingHostLoopback(payload);
           }
         },
         onEmpty: () => {},
@@ -733,6 +818,7 @@ export class NetworkClient {
       case 'switch_team': this.hostRoom.switchPlayerTeam(playerId); break;
       case 'update_room': this.hostRoom.updateRoomSettings(playerId, msg); break;
       case 'start_match': this.hostRoom.startMatch(playerId); break;
+      case 'resync_match': this.hostRoom.resyncPlayerToMatch(playerId); break;
       case 'room_chat': this.hostRoom.addChatMessage(playerId, msg.text, msg.scope); break;
       case 'radio': this.hostRoom.handleRadioCommand(playerId, msg.key); break;
       case 'input': this.hostRoom.handleClientInput(playerId, msg); break;
@@ -822,9 +908,27 @@ export class NetworkClient {
         this._joinGuardTimer = null;
       }
     }
-    if (msg.type === 'match_started') this.inP2PMatch = true;
+    if (msg.type === 'match_started') {
+      // Deduplicate dual-path (WebRTC + HTTP Relay) match_started packets so 3D scene only initializes once!
+      const matchKey = `${msg.room?.code || ''}_${msg.matchStartedAt || msg.matchEndsAt || 0}`;
+      if (this.inP2PMatch && this.lastMatchStartedKey === matchKey) {
+        return;
+      }
+      this.lastMatchStartedKey = matchKey;
+      this.inP2PMatch = true;
+    }
+    if (msg.type === 'world_state' && !this.inP2PMatch && this.relayRoomCode) {
+      // Auto-recover if guest missed match_started during P2P upgrade or transient hiccup!
+      const now = Date.now();
+      if (now - this.lastResyncRequestAt > 1200) {
+        this.lastResyncRequestAt = now;
+        this.sendToRemoteHost({ type: 'resync_match' });
+      }
+      return;
+    }
     if (msg.type === 'match_ended') {
       this.inP2PMatch = false;
+      this.lastMatchStartedKey = null;
       await this.submitCloudMatchReward(msg);
     }
     this.emit(msg.type, msg);
@@ -836,6 +940,7 @@ export class NetworkClient {
     const code = this.relayRoomCode;
     const outgoing = this.p2pDirectReady ? [] : this.clientRelayOutbox.splice(0, this.clientRelayOutbox.length);
     const t0 = performance.now();
+    let retryDelayMs = null;
 
     try {
       const res = await this.apiCall(`/api/relay/${code}/client-sync`, 'POST', {
@@ -851,7 +956,24 @@ export class NetworkClient {
       }
 
       if (res?.error || res?.closed) {
+        // If Direct WebRTC P2P is already open and healthy, NEVER kick the guest due to an HTTP relay hiccup!
+        if (this.p2pDirectReady && !res?.explicitClose) {
+          return;
+        }
         const wasJoined = this.relayJoinedOnce;
+        const isHardClose = Boolean(res?.explicitClose);
+        this.relayConsecutiveErrors = (this.relayConsecutiveErrors || 0) + 1;
+
+        // Re-queue important packets & retry gracefully on transient/serverless cold-start errors (up to 8 attempts)
+        if (!isHardClose && wasJoined && this.relayConsecutiveErrors < 8) {
+          if (outgoing.length && !this.p2pDirectReady) {
+            const important = outgoing.filter((x) => x.type !== 'input');
+            this.clientRelayOutbox.unshift(...important.slice(0, 20));
+          }
+          retryDelayMs = 550;
+          return;
+        }
+
         await this.cleanupP2PSession();
         if (!wasJoined && onFailFallback) {
           onFailFallback();
@@ -861,6 +983,8 @@ export class NetworkClient {
         }
         return;
       }
+
+      this.relayConsecutiveErrors = 0;
 
       if (Array.isArray(res?.packets)) {
         for (const msg of res.packets) {
@@ -872,10 +996,11 @@ export class NetworkClient {
         const important = outgoing.filter((x) => x.type !== 'input');
         this.clientRelayOutbox.unshift(...important.slice(0, 20));
       }
+      retryDelayMs = 350;
     } finally {
       this.clientRelayInFlight = false;
       if (this.relayRoomCode === code && !this.p2pDirectReady) {
-        this.scheduleClientRelay(this.clientRelayOutbox.length ? 12 : null);
+        this.scheduleClientRelay(retryDelayMs !== null ? retryDelayMs : (this.clientRelayOutbox.length ? 12 : null));
       }
     }
   }
@@ -890,9 +1015,8 @@ export class NetworkClient {
       this.clientRtc = entry;
 
       const onMsg = (ev) => {
-        let msg;
-        try { msg = JSON.parse(ev.data); } catch { return; }
-        this.handleClientIncomingP2PMessage(msg);
+        const msg = this.decodeRtcMessage(ev.data);
+        if (msg) this.handleClientIncomingP2PMessage(msg);
       };
 
       relDc.onmessage = onMsg;
@@ -1006,6 +1130,9 @@ export class NetworkClient {
     this.inP2PMatch = false;
     this.p2pDirectReady = false;
     this.relayJoinedOnce = false;
+    this.relayConsecutiveErrors = 0;
+    this.lastMatchStartedKey = null;
+    this.rtcChunkBuffers.clear();
     if (this._joinGuardTimer) {
       clearTimeout(this._joinGuardTimer);
       this._joinGuardTimer = null;

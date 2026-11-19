@@ -717,7 +717,7 @@ function renderInGameBuyModal() {
   if (!grid) return;
   const unlocked = state.user?.unlocked?.weapons || ['ak47', 'm4a1', 'awp', 'deagle', 'knife'];
   const selectable = Object.values(WEAPONS).filter(
-    (w) => (w.category === 'primary' || w.category === 'secondary') && (unlocked.includes(w.id) || state.currentRoom?.mode === 'practice')
+    (w) => (w.category === 'primary' || w.category === 'secondary' || w.category === 'melee') && (unlocked.includes(w.id) || state.currentRoom?.mode === 'practice')
   );
 
   grid.innerHTML = selectable.map((w) => `
@@ -1197,7 +1197,18 @@ function bindNetworkEvents() {
   net.on('voice_signal', (msg) => voice.onSignal(msg));
   net.on('voice_audio', (msg) => voice.onRelayAudio(msg));
 
-  net.on('world_state', (msg) => fpsClient.onWorldState(msg));
+  let lastWsResyncAt = 0;
+  net.on('world_state', (msg) => {
+    if (!fpsClient.active && state.currentRoom) {
+      const now = Date.now();
+      if (now - lastWsResyncAt > 1500) {
+        lastWsResyncAt = now;
+        net.send({ type: 'resync_match' });
+      }
+      return;
+    }
+    fpsClient.onWorldState(msg);
+  });
   net.on('player_spawned', (msg) => fpsClient.onPlayerSpawned(msg));
   net.on('weapon_switched', (msg) => {
     fpsClient.onWeaponSwitched(msg);
@@ -1417,6 +1428,14 @@ function bindUIEvents() {
   document.getElementById('btn-practice-range')?.addEventListener('click', () => {
     soundEngine.ensureContext();
     net.send({ type: 'quick_match', mode: 'practice', mapId: 'warehouse' });
+  });
+  document.getElementById('btn-preview-fire')?.addEventListener('click', () => {
+    soundEngine.ensureContext();
+    lobbyShowcase.triggerWeaponPreviewFire();
+  });
+  document.getElementById('btn-preview-reload')?.addEventListener('click', () => {
+    soundEngine.ensureContext();
+    lobbyShowcase.triggerWeaponPreviewReload();
   });
   document.getElementById('btn-test-weapon-range')?.addEventListener('click', async () => {
     soundEngine.ensureContext();

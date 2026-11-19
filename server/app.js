@@ -179,6 +179,7 @@ app.post('/api/rooms/close', (req, res) => {
   const q = relayQueues.get(code);
   if (q) {
     q.closed = true;
+    q.explicitClose = true;
     q.updatedAt = Date.now();
   }
   res.json({ ok: true });
@@ -194,6 +195,7 @@ app.post('/api/relay/:code/host-sync', (req, res) => {
   const q = getOrCreateRelay(code, hostId || null);
   q.lastHostAt = Date.now();
   q.closed = false;
+  q.explicitClose = false;
 
   if (roomSummary?.code) {
     gameDB.upsertCloudRoom(roomSummary, user?.id);
@@ -221,7 +223,11 @@ app.post('/api/relay/:code/host-sync', (req, res) => {
       if (count >= 3 && firstIdx >= 0) inbox.splice(firstIdx, 1);
     }
     inbox.push(payload);
-    if (inbox.length > 160) inbox.shift();
+    if (inbox.length > 160) {
+      // Never drop critical match_started or joined_room packets when trimming backlog
+      const dropIdx = inbox.findIndex((p) => p?.type !== 'match_started' && p?.type !== 'joined_room');
+      inbox.splice(dropIdx >= 0 ? dropIdx : 0, 1);
+    }
   };
 
   if (Array.isArray(outgoing)) {
@@ -256,16 +262,16 @@ app.post('/api/relay/:code/client-sync', (req, res) => {
   const q = relayQueues.get(code);
   const cloudRoom = gameDB.getActiveCloudRooms().find((r) => (r.code || '').toUpperCase() === code);
 
-  if (q?.closed) {
-    return res.status(410).json({ error: 'Chủ phòng đã đóng phòng đấu.', closed: true });
+  if (q?.closed && q?.explicitClose) {
+    return res.status(410).json({ error: 'Chủ phòng đã đóng phòng đấu.', closed: true, explicitClose: true });
   }
   if (!q && !cloudRoom) {
-    return res.status(404).json({ error: 'Không tìm thấy phòng đấu hoặc phòng đã đóng.' });
+    return res.status(404).json({ error: 'Không tìm thấy phòng đấu hoặc đang đồng bộ...', retryable: true });
   }
 
   const activeQ = q || getOrCreateRelay(code, null);
-  if (activeQ.lastHostAt > 0 && Date.now() - activeQ.lastHostAt > 20000) {
-    return res.status(410).json({ error: 'Chủ phòng đã mất kết nối.', closed: true });
+  if (activeQ.lastHostAt > 0 && Date.now() - activeQ.lastHostAt > 50000) {
+    return res.status(410).json({ error: 'Chủ phòng đã mất kết nối.', closed: true, retryable: true });
   }
 
   if (!activeQ.toClients.has(clientId)) {

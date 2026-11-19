@@ -1,4 +1,6 @@
-// Realistic Ballistic Web Audio Engine: Convolver Arena Reverb, Hard-Clipped Shockwave Crack & 30 Weapon Profiles
+// Realistic Ballistic Web Audio Engine: Convolver Arena Reverb, Hard-Clipped Shockwave Crack, WAV Pack Loader & 30 Weapon Profiles
+import { getConfiguredSoundUrl, getAudioSampleBuffer } from './weaponAssetLoader.js';
+
 const GUN_PROFILES = {
   // Assault Rifles (Sharp supersonic crack + punchy mid-low bark + echoing tail)
   ak47:      { crackF: 3400, blastS: 6800, blastE: 520, blastD: 0.17, subG: 0.72, subD: 0.09, rev: 0.58, mechF: 2300, punch: 0.85 },
@@ -159,6 +161,23 @@ class SoundEngine {
     return buf;
   }
 
+  _tryPlayExternalSample(soundKey, weaponId = null, gainVal = 0.85, pitchJitter = 0.04) {
+    const url = getConfiguredSoundUrl(soundKey, weaponId);
+    if (!url || !this.ctx) return false;
+    getAudioSampleBuffer(this.ctx, url).then((buf) => {
+      if (!buf || !this.ctx) return;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.playbackRate.value = 1 + (Math.random() - 0.5) * 2 * pitchJitter;
+      const g = this.ctx.createGain();
+      g.gain.value = gainVal;
+      src.connect(g);
+      g.connect(this.compressor || this.masterGain);
+      src.start();
+    });
+    return true;
+  }
+
   playGunshot(weaponId = 'ak47', suppressed = false, distance = 0) {
     const ctx = this.ensureContext();
     if (!ctx) return;
@@ -168,6 +187,11 @@ class SoundEngine {
 
     if (weaponId === 'knife' || weaponId === 'karambit') {
       this.playKnifeSlash(atten, weaponId === 'karambit');
+      return;
+    }
+
+    const sampleKey = suppressed ? 'fire_suppressed' : 'fire';
+    if (this._tryPlayExternalSample(sampleKey, weaponId, 0.92 * atten, 0.035)) {
       return;
     }
 
@@ -386,6 +410,8 @@ class SoundEngine {
   }
 
   playWeaponDraw(weaponId = 'ak47') {
+    const ctx = this.ensureContext();
+    if (ctx && this._tryPlayExternalSample('draw', weaponId, 0.55, 0.04)) return;
     if (weaponId === 'knife' || weaponId === 'karambit') {
       this._playFoleySlide(1600, 4400, 0.14, 0.28, 4.5);
       this._playMechTick(3600, 0.03, 0.18);
@@ -677,31 +703,199 @@ class SoundEngine {
     osc.stop(now + 0.10);
   }
 
+  playBulletImpact(surface = 'concrete', distance = 0) {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const atten = distance <= 2 ? 1.0 : Math.max(0.05, 1 / (1 + distance * 0.085));
+    if (atten <= 0.06) return;
+
+    const sampleKey = surface === 'metal' ? 'metal_impact' : 'impact';
+    if (this._tryPlayExternalSample(sampleKey, null, 0.55 * atten, 0.08)) return;
+
+    const now = ctx.currentTime;
+    if (surface === 'metal') {
+      // High-energy metallic ricochet ping + clang
+      const ping = ctx.createOscillator();
+      ping.type = 'triangle';
+      const baseF = 2400 + Math.random() * 900;
+      ping.frequency.setValueAtTime(baseF, now);
+      ping.frequency.exponentialRampToValueAtTime(baseF * 0.52, now + 0.12);
+      const pg = ctx.createGain();
+      pg.gain.setValueAtTime(0.22 * atten, now);
+      pg.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+      ping.connect(pg);
+      pg.connect(this.masterGain);
+      ping.start(now);
+      ping.stop(now + 0.14);
+
+      const sparkN = ctx.createBufferSource();
+      sparkN.buffer = this.whiteBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 4200;
+      bp.Q.value = 3.2;
+      const sg = ctx.createGain();
+      sg.gain.setValueAtTime(0.28 * atten, now);
+      sg.gain.exponentialRampToValueAtTime(0.001, now + 0.065);
+      sparkN.connect(bp);
+      bp.connect(sg);
+      sg.connect(this.masterGain);
+      sparkN.start(now);
+      sparkN.stop(now + 0.075);
+    } else if (surface === 'wood') {
+      // Dry wooden splinter thud
+      const n = ctx.createBufferSource();
+      n.buffer = this.brownBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 620 + Math.random() * 180;
+      bp.Q.value = 1.6;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.32 * atten, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+      n.connect(bp);
+      bp.connect(g);
+      g.connect(this.masterGain);
+      n.start(now);
+      n.stop(now + 0.09);
+    } else {
+      // Concrete / stone crack + dust chip scatter
+      const crack = ctx.createBufferSource();
+      crack.buffer = this.whiteBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(1900 + Math.random() * 450, now);
+      bp.frequency.exponentialRampToValueAtTime(420, now + 0.08);
+      bp.Q.value = 1.1;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.28 * atten, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+      crack.connect(bp);
+      bp.connect(g);
+      g.connect(this.masterGain);
+      crack.start(now);
+      crack.stop(now + 0.10);
+    }
+  }
+
+  playShellClink(isShotgun = false) {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    if (isShotgun) {
+      // Hollow plastic hull bounce
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(680 + Math.random() * 140, now);
+      osc.frequency.exponentialRampToValueAtTime(290, now + 0.035);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.065, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+      osc.connect(g);
+      g.connect(this.masterGain);
+      osc.start(now);
+      osc.stop(now + 0.045);
+      return;
+    }
+    // Crisp high-pitched brass casing clink on concrete
+    const f1 = 4400 + Math.random() * 900;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(f1, now);
+    osc.frequency.exponentialRampToValueAtTime(f1 * 0.88, now + 0.045);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.055, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+    osc.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.055);
+  }
+
+  playAdsTransition(entering = true, isSniper = false) {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    if (this._tryPlayExternalSample('aim', null, 0.35, 0.04)) return;
+    const now = ctx.currentTime;
+
+    // Subtle tactical cloth/gear rustle
+    const n = ctx.createBufferSource();
+    n.buffer = this.whiteBuffer;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(entering ? 750 : 1200, now);
+    bp.frequency.exponentialRampToValueAtTime(entering ? 1450 : 620, now + 0.07);
+    bp.Q.value = 2.0;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.09, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
+    n.connect(bp);
+    bp.connect(ng);
+    ng.connect(this.masterGain);
+    n.start(now);
+    n.stop(now + 0.08);
+
+    // Crisp optic/rail click
+    this.playMetallicClick(isSniper ? (entering ? 1180 : 880) : (entering ? 920 : 680), 0.032, isSniper ? 0.14 : 0.08);
+  }
+
   playExplosion(distance = 0) {
     const ctx = this.ensureContext();
     if (!ctx) return;
     const atten = distance <= 2 ? 1.0 : Math.max(0.12, 1 / (1 + distance * 0.04));
+    if (this._tryPlayExternalSample('explosion', null, 1.0 * atten, 0.04)) return;
     const now = ctx.currentTime;
+
+    // 1. Supersonic detonation transient crack
+    const crack = ctx.createBufferSource();
+    crack.buffer = this.whiteBuffer;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'bandpass';
+    hp.frequency.setValueAtTime(2200, now);
+    hp.frequency.exponentialRampToValueAtTime(280, now + 0.18);
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(1.1 * atten, now);
+    cg.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    crack.connect(hp);
+    hp.connect(cg);
+    cg.connect(this.shaper);
+    crack.start(now);
+    crack.stop(now + 0.24);
+
+    // 2. Sub-bass concussive shockwave thump
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(115, now);
+    sub.frequency.exponentialRampToValueAtTime(28, now + 0.42);
+    const sg = ctx.createGain();
+    sg.gain.setValueAtTime(0.95 * atten, now);
+    sg.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+    sub.connect(sg);
+    sg.connect(this.shaper);
+    sub.start(now);
+    sub.stop(now + 0.50);
+
+    // 3. Rolling fire blast & debris rumble
     const noise = ctx.createBufferSource();
     noise.buffer = this.brownBuffer;
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(1250, now);
-    filter.frequency.exponentialRampToValueAtTime(48, now + 0.95);
+    filter.frequency.setValueAtTime(1350, now);
+    filter.frequency.exponentialRampToValueAtTime(48, now + 1.05);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(1.15 * atten, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + 0.98);
+    g.gain.setValueAtTime(1.18 * atten, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 1.10);
     noise.connect(filter);
     filter.connect(g);
     g.connect(this.shaper);
     if (this.reverbGain) {
       const send = ctx.createGain();
-      send.gain.value = 0.85 * atten;
+      send.gain.value = 0.88 * atten;
       g.connect(send);
       send.connect(this.reverbGain);
     }
     noise.start(now);
-    noise.stop(now + 1.0);
+    noise.stop(now + 1.12);
   }
 
   playUiTone(freq = 640, dur = 0.07) {

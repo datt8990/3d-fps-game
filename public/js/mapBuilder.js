@@ -103,14 +103,10 @@ function applyProportionalBoxUVs(geo, w, h, d, tileSize = 4.0) {
   uv.needsUpdate = true;
 }
 
-// Build a 3D stacked sandbag wall inside the exact (w, h, d) block volume
+// Build an optimized single-draw-call 3D stacked sandbag wall inside the exact (w, h, d) block volume
 function createSandbagWallGroup(b, castShadows) {
   const group = new THREE.Group();
   group.position.set(b.x, b.y, b.z);
-
-  const core = new THREE.Mesh(new THREE.BoxGeometry(b.w * 0.86, b.h * 0.92, b.d * 0.82), propMats.sandbagB);
-  core.position.y = b.h * 0.46;
-  group.add(core);
 
   const isWideX = b.w >= b.d;
   const length = isWideX ? b.w : b.d;
@@ -120,7 +116,11 @@ function createSandbagWallGroup(b, castShadows) {
   const bagLen = Math.min(0.85, Math.max(0.52, length / Math.max(2, Math.round(length / 0.72))));
   const cols = Math.max(2, Math.floor(length / bagLen));
   const actualBagLen = length / cols;
-  const bagMats = [propMats.sandbagA, propMats.sandbagB, propMats.sandbagC];
+
+  const geos = [];
+  const coreGeo = new THREE.BoxGeometry(b.w * 0.86, b.h * 0.92, b.d * 0.82);
+  coreGeo.translate(0, b.h * 0.46, 0);
+  geos.push(coreGeo);
 
   for (let r = 0; r < rows; r++) {
     const yCenter = (r + 0.5) * bagH;
@@ -129,21 +129,28 @@ function createSandbagWallGroup(b, castShadows) {
       const offsetAlong = -length * 0.5 + (c + 0.5) * actualBagLen;
       const bw = isWideX ? actualBagLen * 0.94 : thickness * 0.96;
       const bd = isWideX ? thickness * 0.96 : actualBagLen * 0.94;
-      const bag = new THREE.Mesh(
-        new THREE.BoxGeometry(bw, bagH * 0.88, bd),
-        bagMats[(r + c) % bagMats.length]
-      );
-      bag.position.set(
-        isWideX ? offsetAlong : 0,
-        yCenter,
-        isWideX ? 0 : offsetAlong
-      );
-      bag.rotation.y = ((r + c) % 2 === 0 ? 1 : -1) * 0.03 * (stagger ? 1 : 0.5);
-      if (castShadows) {
-        bag.castShadow = true;
-        bag.receiveShadow = true;
-      }
-      group.add(bag);
+      const bg = new THREE.BoxGeometry(bw, bagH * 0.88, bd);
+      const rotY = ((r + c) % 2 === 0 ? 1 : -1) * 0.03 * (stagger ? 1 : 0.5);
+      if (rotY) bg.rotateY(rotY);
+      bg.translate(isWideX ? offsetAlong : 0, yCenter, isWideX ? 0 : offsetAlong);
+      geos.push(bg);
+    }
+  }
+
+  if (BufferGeometryUtils?.mergeGeometries) {
+    const merged = BufferGeometryUtils.mergeGeometries(geos, false);
+    for (const g of geos) g.dispose();
+    const wallMesh = new THREE.Mesh(merged, propMats.sandbagA);
+    if (castShadows) {
+      wallMesh.castShadow = true;
+      wallMesh.receiveShadow = true;
+    }
+    group.add(wallMesh);
+  } else {
+    for (const g of geos) {
+      const m = new THREE.Mesh(g, propMats.sandbagA);
+      if (castShadows) { m.castShadow = true; m.receiveShadow = true; }
+      group.add(m);
     }
   }
   return group;
@@ -518,9 +525,73 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     'warehouse_wall',
     'military_wall',
     'city_wall',
+    'jungle_stone',
+    'jungle_wall',
     'concrete'
   ]);
   const castShadows = quality !== 'low';
+
+  // Instanced Multi-Tier Trees & Natural Rocks for Arena Maps (e.g. MAP 04 - Jungle)
+  if (!isOpenWorld) {
+    if (mapData.trees?.length && THREE.InstancedMesh) {
+      const dummy = new THREE.Object3D();
+      const trunkGeo = new THREE.CylinderGeometry(0.20, 0.34, 4.2, 8);
+      trunkGeo.translate(0, 2.1, 0);
+      const trunkMat = new THREE.MeshStandardMaterial({ color: '#4a3219', roughness: 0.92 });
+      const trunksMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, mapData.trees.length);
+
+      const canopyLowGeo = new THREE.ConeGeometry(2.35, 3.6, 9);
+      canopyLowGeo.translate(0, 4.4, 0);
+      const canopyLowMat = new THREE.MeshStandardMaterial({ color: '#14532d', roughness: 0.85, metalness: 0.04 });
+      const canopyLowMesh = new THREE.InstancedMesh(canopyLowGeo, canopyLowMat, mapData.trees.length);
+
+      const canopyTopGeo = new THREE.ConeGeometry(1.65, 3.2, 9);
+      canopyTopGeo.translate(0, 6.2, 0);
+      const canopyTopMat = new THREE.MeshStandardMaterial({ color: '#166534', roughness: 0.82, metalness: 0.05 });
+      const canopyTopMesh = new THREE.InstancedMesh(canopyTopGeo, canopyTopMat, mapData.trees.length);
+
+      mapData.trees.forEach((tr, i) => {
+        dummy.position.set(tr.x, tr.y || 0, tr.z);
+        dummy.scale.setScalar(tr.scale || 1);
+        dummy.rotation.y = (i * 1.9) % (Math.PI * 2);
+        dummy.updateMatrix();
+        trunksMesh.setMatrixAt(i, dummy.matrix);
+        canopyLowMesh.setMatrixAt(i, dummy.matrix);
+        canopyTopMesh.setMatrixAt(i, dummy.matrix);
+      });
+      trunksMesh.instanceMatrix.needsUpdate = true;
+      canopyLowMesh.instanceMatrix.needsUpdate = true;
+      canopyTopMesh.instanceMatrix.needsUpdate = true;
+      if (castShadows) {
+        trunksMesh.castShadow = true;
+        canopyLowMesh.castShadow = true;
+        canopyTopMesh.castShadow = true;
+      }
+      worldGroup.add(trunksMesh, canopyLowMesh, canopyTopMesh);
+    }
+
+    if (mapData.rocks?.length && THREE.InstancedMesh) {
+      const dummy = new THREE.Object3D();
+      const rockGeo = THREE.DodecahedronGeometry
+        ? new THREE.DodecahedronGeometry(1.0, 0)
+        : new THREE.BoxGeometry(1.6, 1.2, 1.6);
+      const rockMat = new THREE.MeshStandardMaterial({ color: '#526052', roughness: 0.92, metalness: 0.06 });
+      const rocksMesh = new THREE.InstancedMesh(rockGeo, rockMat, mapData.rocks.length);
+      mapData.rocks.forEach((rk, i) => {
+        dummy.position.set(rk.x, (rk.y || 0) + (rk.ry || 1) * 0.35, rk.z);
+        dummy.scale.set(rk.s || 1.4, rk.ry || 1.1, (rk.s || 1.4) * 0.9);
+        dummy.rotation.set(i * 0.35, i * 1.15, i * 0.2);
+        dummy.updateMatrix();
+        rocksMesh.setMatrixAt(i, dummy.matrix);
+      });
+      rocksMesh.instanceMatrix.needsUpdate = true;
+      if (castShadows) {
+        rocksMesh.castShadow = true;
+        rocksMesh.receiveShadow = true;
+      }
+      worldGroup.add(rocksMesh);
+    }
+  }
 
   // Spatial sector bucketing on 1.5km open world map
   const sectorGroupsMap = new Map();
@@ -592,7 +663,11 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       }
     }
   } else {
-    // Standard competitive arena (warehouse, military_base, urban_city): individual props
+    // Optimized Competitive Arena (warehouse, military_base, urban_city, jungle):
+    // Batch plain architectural walls/steps per material into 1 draw call while keeping detailed hero props!
+    const arenaBatches = new Map();
+    const copingGeos = [];
+
     for (const b of mapData.blocks) {
       if (b.noVisual) continue;
 
@@ -606,10 +681,35 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
         continue;
       }
 
+      const needsCustomDeco =
+        (b.mat && b.mat.startsWith('container_')) ||
+        b.mat === 'crate_wood' ||
+        b.mat === 'crate_metal' ||
+        b.mat === 'metal_deck' ||
+        b.mat === 'building_brick' ||
+        b.mat === 'building_glass';
+
       const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
       if (tiledMaterials.has(b.mat)) {
         applyProportionalBoxUVs(geo, b.w, b.h, b.d, 5.0);
       }
+
+      if (!needsCustomDeco && BufferGeometryUtils?.mergeGeometries) {
+        geo.translate(b.x, b.y + b.h * 0.5, b.z);
+        const batchKey = `${b.mat || 'concrete'}|${b.isBoundary ? '1' : '0'}`;
+        if (!arenaBatches.has(batchKey)) {
+          arenaBatches.set(batchKey, { matName: b.mat || 'concrete', isBoundary: Boolean(b.isBoundary), geos: [] });
+        }
+        arenaBatches.get(batchKey).geos.push(geo);
+
+        if (b.isBoundary) {
+          const cg = new THREE.BoxGeometry(b.w + 0.1, 0.35, b.d + 0.25);
+          cg.translate(b.x, b.y + b.h, b.z);
+          copingGeos.push(cg);
+        }
+        continue;
+      }
+
       const mat = getMapMaterial(b.mat);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(b.x, b.y + b.h * 0.5, b.z);
@@ -635,6 +735,27 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       }
 
       worldGroup.add(mesh);
+    }
+
+    // Flush batched arena meshes (massive draw call reduction for Warehouse, Military Base, Urban & Jungle!)
+    for (const batch of arenaBatches.values()) {
+      const merged = batch.geos.length === 1 ? batch.geos[0] : BufferGeometryUtils.mergeGeometries(batch.geos, false);
+      if (batch.geos.length > 1) {
+        for (const g of batch.geos) g.dispose();
+      }
+      const m = new THREE.Mesh(merged, getMapMaterial(batch.matName));
+      if (castShadows && !batch.isBoundary) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+      }
+      worldGroup.add(m);
+    }
+    if (copingGeos.length > 0 && BufferGeometryUtils?.mergeGeometries) {
+      const mergedCoping = copingGeos.length === 1 ? copingGeos[0] : BufferGeometryUtils.mergeGeometries(copingGeos, false);
+      if (copingGeos.length > 1) {
+        for (const g of copingGeos) g.dispose();
+      }
+      worldGroup.add(new THREE.Mesh(mergedCoping, propMats.darkSteel));
     }
   }
 
@@ -701,6 +822,32 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     globePivot.add(outerRing, innerRing, coreSphere);
     worldGroup.add(globePivot);
     animatedProps.push({ type: 'spin_multi', mesh: globePivot, speed: 1.4 });
+  } else if (mapData.id === 'jungle') {
+    // Ancient Jungle Temple Stone Canopy Beams & Rotating Tactical Drone Relay atop Central Temple (x=0, y=6.2, z=0)
+    const beamMat = getMapMaterial('jungle_stone');
+    const b1 = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.55, 1.3), beamMat);
+    b1.position.set(0, 6.25, -4.2);
+    const b2 = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.55, 1.3), beamMat);
+    b2.position.set(0, 6.25, 4.2);
+    const b3 = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.55, 9.6), beamMat);
+    b3.position.set(-4.2, 6.25, 0);
+    const b4 = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.55, 9.6), beamMat);
+    b4.position.set(4.2, 6.25, 0);
+    worldGroup.add(b1, b2, b3, b4);
+
+    const relicPivot = new THREE.Group();
+    relicPivot.position.set(0, 3.6, 0);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.75, 0.055, 8, 22),
+      new THREE.MeshStandardMaterial({ color: '#4ade80', emissive: '#16a34a', emissiveIntensity: 0.8 })
+    );
+    const crystal = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.36, 0),
+      new THREE.MeshStandardMaterial({ color: '#86efac', emissive: '#22c55e', emissiveIntensity: 0.75, metalness: 0.4, roughness: 0.2 })
+    );
+    relicPivot.add(ring, crystal);
+    worldGroup.add(relicPivot);
+    animatedProps.push({ type: 'spin_multi', mesh: relicPivot, speed: 1.1 });
   }
 
   // 6. Spawn Zone Floor Rings (with polygonOffset + depthWrite:false to eliminate Z-fighting)

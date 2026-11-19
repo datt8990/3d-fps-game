@@ -955,10 +955,159 @@ function buildBrIslandMap() {
   };
 }
 
+// ============================================================================
+// MAP 4: RỪNG NHIỆT ĐỚI (Jungle Ruins & Abandoned Outpost - 5v5 Tactical Arena)
+// ============================================================================
+function buildJungleMap() {
+  const halfW = 36;
+  const halfD = 38;
+  const blocks = [
+    ...makeBoundaryWalls(halfW, halfD, 8.5, 'jungle_wall'),
+
+    // North (Alpha) & South (Bravo) Outpost Perimeter Walls with wide flanking routes
+    { x: -16, y: 0, z: -26, w: 12, h: 3.4, d: 1.0, mat: 'jungle_stone' },
+    { x: 0, y: 0, z: -26, w: 8.0, h: 2.6, d: 1.0, mat: 'jungle_stone' },
+    { x: 16, y: 0, z: -26, w: 12, h: 3.4, d: 1.0, mat: 'jungle_stone' },
+
+    { x: -16, y: 0, z: 26, w: 12, h: 3.4, d: 1.0, mat: 'jungle_stone' },
+    { x: 0, y: 0, z: 26, w: 8.0, h: 2.6, d: 1.0, mat: 'jungle_stone' },
+    { x: 16, y: 0, z: 26, w: 12, h: 3.4, d: 1.0, mat: 'jungle_stone' },
+
+    // Central Ancient Mossy Stone Temple Platform (Elevated Mid Control)
+    { x: 0, y: 0, z: 0, w: 10.0, h: 2.2, d: 10.0, mat: 'jungle_stone' },
+    ...makeStairs(0, -7.2, 3.6, 4.4, 2.2, 'south', 'jungle_stone', 6, 0),
+    ...makeStairs(0, 7.2, 3.6, 4.4, 2.2, 'north', 'jungle_stone', 6, 0),
+    // Temple Corner Pillars & Chest-High Stone Parapets
+    { x: -4.2, y: 2.2, z: -4.2, w: 1.4, h: 3.8, d: 1.4, mat: 'jungle_stone' },
+    { x: 4.2, y: 2.2, z: -4.2, w: 1.4, h: 3.8, d: 1.4, mat: 'jungle_stone' },
+    { x: -4.2, y: 2.2, z: 4.2, w: 1.4, h: 3.8, d: 1.4, mat: 'jungle_stone' },
+    { x: 4.2, y: 2.2, z: 4.2, w: 1.4, h: 3.8, d: 1.4, mat: 'jungle_stone' },
+    { x: -4.4, y: 2.2, z: 0, w: 0.7, h: 1.15, d: 5.0, mat: 'sandbag' },
+    { x: 4.4, y: 2.2, z: 0, w: 0.7, h: 1.15, d: 5.0, mat: 'sandbag' },
+
+    // West Wing (Bomb Site A — Camo Supply Outpost)
+    { x: -22, y: 0, z: -6, w: 3.0, h: 2.8, d: 8.0, mat: 'container_green' },
+    { x: -22, y: 0, z: 8, w: 3.0, h: 2.8, d: 7.5, mat: 'container_green' },
+    { x: -14, y: 0, z: -13, w: 5.5, h: 1.25, d: 0.9, mat: 'sandbag' },
+    { x: -14, y: 0, z: 13, w: 5.5, h: 1.25, d: 0.9, mat: 'sandbag' },
+    { x: -28.5, y: 0, z: 1, w: 2.6, h: 1.8, d: 2.6, mat: 'crate_wood' },
+    { x: -15.5, y: 0, z: 0, w: 2.2, h: 1.5, d: 2.2, mat: 'crate_metal' },
+
+    // East Wing (Bomb Site B — Abandoned Research Bunker & Watchtower)
+    { x: 22, y: 0, z: 0, w: 8.0, h: 2.4, d: 6.5, mat: 'bunker_concrete' },
+    ...makeStairs(22, -5.6, 3.0, 4.6, 2.4, 'south', 'concrete', 6, 0),
+    ...makeStairs(22, 5.6, 3.0, 4.6, 2.4, 'north', 'concrete', 6, 0),
+    { x: 18.2, y: 2.4, z: 0, w: 0.65, h: 1.15, d: 5.2, mat: 'sandbag' },
+    { x: 14, y: 0, z: -14, w: 2.4, h: 2.2, d: 2.4, mat: 'crate_wood' },
+    { x: 14, y: 0, z: 14, w: 2.4, h: 2.2, d: 2.4, mat: 'crate_wood' },
+    { x: 29.5, y: 0, z: -12, w: 3.0, h: 2.8, d: 6.8, mat: 'container_green' },
+    { x: 29.5, y: 0, z: 12, w: 3.0, h: 2.8, d: 6.8, mat: 'container_yellow' },
+
+    // Mid Sandbag & Crate Cover Trenches
+    { x: -9.5, y: 0, z: -18, w: 4.5, h: 1.2, d: 0.9, mat: 'sandbag' },
+    { x: 9.5, y: 0, z: -18, w: 4.5, h: 1.2, d: 0.9, mat: 'sandbag' },
+    { x: -9.5, y: 0, z: 18, w: 4.5, h: 1.2, d: 0.9, mat: 'sandbag' },
+    { x: 9.5, y: 0, z: 18, w: 4.5, h: 1.2, d: 0.9, mat: 'sandbag' },
+    { x: -10.5, y: 0, z: 0, w: 1.8, h: 1.6, d: 1.8, mat: 'crate_wood' },
+    { x: 10.5, y: 0, z: 0, w: 1.8, h: 1.6, d: 1.8, mat: 'crate_wood' }
+  ];
+
+  // Instanced Tropical Jungle Trees & Natural Mossy Boulders (Zero blocking of lanes/spawns)
+  const trees = [
+    { x: -32, y: 0, z: -32, scale: 1.35 }, { x: -24, y: 0, z: -33, scale: 1.15 },
+    { x: 24, y: 0, z: -33, scale: 1.25 }, { x: 32, y: 0, z: -32, scale: 1.40 },
+    { x: -32, y: 0, z: 32, scale: 1.35 }, { x: -24, y: 0, z: 33, scale: 1.20 },
+    { x: 24, y: 0, z: 33, scale: 1.25 }, { x: 32, y: 0, z: 32, scale: 1.38 },
+    { x: -32, y: 0, z: -16, scale: 1.25 }, { x: -32, y: 0, z: 16, scale: 1.25 },
+    { x: 33, y: 0, z: -22, scale: 1.20 }, { x: 33, y: 0, z: 22, scale: 1.20 },
+    { x: -18, y: 0, z: -20, scale: 1.10 }, { x: 18, y: 0, z: -20, scale: 1.12 },
+    { x: -18, y: 0, z: 20, scale: 1.10 }, { x: 18, y: 0, z: 20, scale: 1.12 },
+    { x: -8, y: 0, z: -33, scale: 1.05 }, { x: 8, y: 0, z: -33, scale: 1.05 },
+    { x: -8, y: 0, z: 33, scale: 1.05 }, { x: 8, y: 0, z: 33, scale: 1.05 },
+    { x: -33, y: 0, z: 0, scale: 1.30 }, { x: 33, y: 0, z: 0, scale: 1.30 }
+  ];
+
+  const rocks = [
+    { x: -29, y: 0, z: -22, s: 1.7, ry: 1.2 }, { x: 29, y: 0, z: -22, s: 1.6, ry: 1.1 },
+    { x: -29, y: 0, z: 22, s: 1.7, ry: 1.2 }, { x: 29, y: 0, z: 22, s: 1.6, ry: 1.1 },
+    { x: -12, y: 0, z: -7, s: 1.1, ry: 0.9 }, { x: 12, y: 0, z: -7, s: 1.1, ry: 0.9 },
+    { x: -12, y: 0, z: 7, s: 1.1, ry: 0.9 }, { x: 12, y: 0, z: 7, s: 1.1, ry: 0.9 },
+    { x: -25, y: 0, z: -17, s: 1.4, ry: 1.0 }, { x: 25, y: 0, z: 17, s: 1.4, ry: 1.0 }
+  ];
+
+  // Add solid tree trunk colliders so players cannot clip through jungle tree trunks
+  for (const tr of trees) {
+    blocks.push({ x: tr.x, y: 0, z: tr.z, w: 0.72, h: 4.5, d: 0.72, mat: 'crate_wood', noVisual: true });
+  }
+
+  const rawWaypoints = [
+    { x: -22, z: -31 }, { x: 0, z: -31 }, { x: 22, z: -31 },
+    { x: -28, z: -18 }, { x: -8, z: -22 }, { x: 8, z: -22 }, { x: 24, z: -18 },
+    { x: -26, z: -6 }, { x: -14, z: -6 }, { x: 0, z: -12 }, { x: 14, z: -6 }, { x: 22, z: -11 },
+    { x: -26, z: 6 }, { x: -14, z: 6 }, { x: 0, z: 12 }, { x: 14, z: 6 }, { x: 22, z: 11 },
+    { x: -28, z: 18 }, { x: -8, z: 22 }, { x: 8, z: 22 }, { x: 24, z: 18 },
+    { x: -22, z: 31 }, { x: 0, z: 31 }, { x: 22, z: 31 }
+  ];
+
+  buildBlockGrid(blocks, 42, 12);
+
+  return {
+    id: 'jungle',
+    name: 'Rừng Nhiệt Đới',
+    subtitle: 'Căn Cứ Rừng Rậm • Di Tích Cổ • 3 Đường Giao Tranh',
+    theme: 'jungle',
+    floorMat: 'jungle_floor',
+    skyColor: '#4c8577',
+    fogColor: '#3f6e62',
+    fogNear: 24,
+    fogFar: 118,
+    ambientIntensity: 0.72,
+    sunColor: '#fef3c7',
+    sunIntensity: 1.55,
+    sunPos: [38, 62, 26],
+    bounds: { halfW, halfD },
+    blocks,
+    trees,
+    rocks,
+    bombSites: [
+      { id: 'A', x: -22, y: 0, z: 1, radius: 5.0, label: 'Trại Tiếp Tế A' },
+      { id: 'B', x: 22, y: 2.4, z: 0, radius: 4.5, label: 'Đài Quan Sát B' }
+    ],
+    spawns: {
+      alpha: [
+        { x: -12, y: 0, z: -32, yaw: Math.PI },
+        { x: -6, y: 0, z: -33, yaw: Math.PI },
+        { x: 0, y: 0, z: -33, yaw: Math.PI },
+        { x: 6, y: 0, z: -33, yaw: Math.PI },
+        { x: 12, y: 0, z: -32, yaw: Math.PI }
+      ],
+      bravo: [
+        { x: -12, y: 0, z: 32, yaw: 0 },
+        { x: -6, y: 0, z: 33, yaw: 0 },
+        { x: 0, y: 0, z: 33, yaw: 0 },
+        { x: 6, y: 0, z: 33, yaw: 0 },
+        { x: 12, y: 0, z: 32, yaw: 0 }
+      ],
+      ffa: [
+        { x: -28, y: 0, z: -28, yaw: -2.4 },
+        { x: 28, y: 0, z: -28, yaw: 2.4 },
+        { x: -28, y: 0, z: 28, yaw: -0.7 },
+        { x: 28, y: 0, z: 28, yaw: 0.7 },
+        { x: -26, y: 0, z: 0, yaw: -Math.PI / 2 },
+        { x: 26, y: 0, z: 0, yaw: Math.PI / 2 },
+        { x: 0, y: 0, z: -19, yaw: Math.PI },
+        { x: 0, y: 0, z: 19, yaw: 0 }
+      ]
+    },
+    waypoints: buildVerifiedWaypoints(rawWaypoints, blocks, 24)
+  };
+}
+
 export const MAPS = {
   warehouse: buildWarehouseMap(),
   military_base: buildMilitaryBaseMap(),
   urban_city: buildUrbanCityMap(),
+  jungle: buildJungleMap(),
   br_island: buildBrIslandMap()
 };
 

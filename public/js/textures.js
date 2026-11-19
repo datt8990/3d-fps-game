@@ -336,6 +336,23 @@ function makeFloorTextures(type = 'concrete_warehouse') {
     ctx.moveTo(52, 0); ctx.lineTo(52, 512);
     ctx.moveTo(460, 0); ctx.lineTo(460, 512);
     ctx.stroke();
+  } else if (type === 'jungle_floor') {
+    // Rich tropical jungle earth + mossy grass patches + compacted dirt trails
+    ctx.fillStyle = '#3f5a36';
+    ctx.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 120; i++) {
+      const rx = Math.random() * 512;
+      const ry = Math.random() * 512;
+      const rr = 8 + Math.random() * 26;
+      ctx.fillStyle = i % 3 === 0 ? 'rgba(92, 72, 46, 0.34)' : (i % 3 === 1 ? 'rgba(34, 84, 42, 0.38)' : 'rgba(74, 108, 48, 0.30)');
+      ctx.beginPath(); ctx.arc(rx, ry, rr, 0, Math.PI * 2); ctx.fill();
+      bctx.fillStyle = i % 2 === 0 ? '#686868' : '#969696';
+      bctx.beginPath(); bctx.arc(rx, ry, rr * 0.7, 0, Math.PI * 2); bctx.fill();
+    }
+    for (let i = 0; i < 160; i++) {
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(133, 94, 52, 0.42)' : 'rgba(163, 190, 90, 0.25)';
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 5, 3);
+    }
   } else {
     // Polished industrial warehouse concrete slabs with expansion joints & yellow safety lines
     ctx.fillStyle = '#4b5563';
@@ -466,6 +483,11 @@ export function getSkyDomeTexture(theme = 'industrial') {
     grad.addColorStop(0.72, '#475569');
     grad.addColorStop(0.92, '#f97316');
     grad.addColorStop(1.0, '#3a4b6e');
+  } else if (theme === 'jungle') {
+    grad.addColorStop(0.0, '#0f3d3e');
+    grad.addColorStop(0.42, '#2d7a78');
+    grad.addColorStop(0.76, '#9ed2be');
+    grad.addColorStop(1.0, '#5a8f69');
   } else {
     grad.addColorStop(0.0, '#1e3a8a');
     grad.addColorStop(0.45, '#476b9e');
@@ -577,9 +599,20 @@ export function getMapMaterial(matKey = 'concrete') {
       mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.035, roughness: 0.70, metalness: 0.24 });
       break;
     }
+    case 'jungle_stone': {
+      const t = makeWallConcreteTextures('#5b6352', 'rgba(74, 124, 58, 0.55)');
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.055, roughness: 0.90, metalness: 0.05 });
+      break;
+    }
+    case 'jungle_wall': {
+      const t = makeWallConcreteTextures('#3b4a35', 'rgba(132, 204, 22, 0.32)');
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.045, roughness: 0.86, metalness: 0.08 });
+      break;
+    }
     case 'concrete_warehouse':
     case 'sand_tactical':
-    case 'asphalt_city': {
+    case 'asphalt_city':
+    case 'jungle_floor': {
       const t = makeFloorTextures(matKey);
       mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.035, roughness: 0.82, metalness: 0.08 });
       break;

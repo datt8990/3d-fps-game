@@ -144,6 +144,15 @@ createRoom({
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
+// Periodic WebSocket keepalive pings prevent NAT/proxy idle disconnects during room waiting & match loading
+setInterval(() => {
+  for (const client of wss.clients) {
+    if (client.readyState === 1) {
+      try { client.ping(); } catch {}
+    }
+  }
+}, 15000);
+
 function safeSend(ws, obj) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
 }
@@ -348,6 +357,11 @@ wss.on('connection', (ws) => {
 
       case 'start_match': {
         rooms.get(client.roomId)?.startMatch(client.id);
+        break;
+      }
+
+      case 'resync_match': {
+        rooms.get(client.roomId)?.resyncPlayerToMatch(client.id);
         break;
       }
 
