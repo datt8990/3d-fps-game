@@ -100,6 +100,7 @@ export class FPSGameClient {
     };
 
     this.keys = {};
+    this.autoRun = false;
     this.mouseDownLeft = false;
     this.adsActive = false;
     this.adsBlend = 0;
@@ -339,6 +340,24 @@ export class FPSGameClient {
 
       this.keys[e.code] = true;
 
+      // PUBG Auto-Run Toggle [=] or [NumEqual]
+      if (e.code === 'Equal' || e.code === 'NumpadEqual' || e.key === '=' || e.key === '+') {
+        e.preventDefault();
+        if (!this.local.dead && !this.uiModalOpen && this.local.dropPhase === 'ground') {
+          this.autoRun = !this.autoRun;
+          soundEngine.playUiTone(this.autoRun ? 760 : 440, 0.08);
+          this.hud.setAutoRunActive?.(this.autoRun);
+        }
+        return;
+      }
+
+      if (e.code === 'KeyS' || e.code === 'ArrowDown') {
+        if (this.autoRun) {
+          this.autoRun = false;
+          this.hud.setAutoRunActive?.(false);
+        }
+      }
+
       if (this.mode === 'survival' && !this.local.dead && !this.uiModalOpen) {
         if (this.local.dropPhase === 'plane' && (e.code === 'KeyF' || e.code === 'Space')) {
           e.preventDefault();
@@ -501,7 +520,7 @@ export class FPSGameClient {
 
     this.mapId = payload.mapId || 'warehouse';
     this.mapData = MAPS[this.mapId] || MAPS.warehouse;
-    this.camera.far = this.mapData.terrain ? 3200 : 320;
+    this.camera.far = this.mapData.terrain ? 1100 : 320;
     this.camera.updateProjectionMatrix();
     this.mode = payload.mode || 'tdm';
     this.modeConfig = payload.modeConfig;
@@ -1106,6 +1125,9 @@ export class FPSGameClient {
     }
     this.lootData.delete(msg.crateId);
     if (msg.playerId === this.localId) {
+      if (msg.weaponsState) this.local.weaponsState = msg.weaponsState;
+      if (msg.primary !== undefined) this.local.primaryId = msg.primary;
+      if (msg.secondary !== undefined) this.local.secondaryId = msg.secondary;
       this.local.hp = msg.hp;
       this.local.armor = msg.armor;
       if (msg.maxArmor !== undefined) this.local.maxArmor = msg.maxArmor;
@@ -1416,7 +1438,7 @@ export class FPSGameClient {
     }
 
     if (this.mapObjects?.sectorGroups?.length) {
-      const cullDist = this.local.dropPhase === 'ground' ? 1250 : 2900;
+      const cullDist = this.local.dropPhase === 'ground' ? 650 : 1200;
       for (const sec of this.mapObjects.sectorGroups) {
         const c = sec.userData.sectorCenter;
         if (c) sec.visible = Math.hypot(c.x - this.local.x, c.z - this.local.z) <= cullDist;
@@ -1486,6 +1508,10 @@ export class FPSGameClient {
 
   updateLocalPlayer(dt, now, wStats) {
     if (this.local.dead) {
+      if (this.autoRun) {
+        this.autoRun = false;
+        this.hud.setAutoRunActive?.(false);
+      }
       const left = this.local.respawnUntil > now ? (this.local.respawnUntil - now) / 1000 : 0;
       this.hud.setRespawnState(true, left);
       this.camera.position.lerp(
@@ -1495,10 +1521,19 @@ export class FPSGameClient {
       return;
     }
 
-    const forward = (this.keys['KeyW'] || this.keys['ArrowUp'] ? 1 : 0) - (this.keys['KeyS'] || this.keys['ArrowDown'] ? 1 : 0);
-    const right = (this.keys['KeyD'] || this.keys['ArrowRight'] ? 1 : 0) - (this.keys['KeyA'] || this.keys['ArrowLeft'] ? 1 : 0);
+    const keyForward = (this.keys['KeyW'] || this.keys['ArrowUp'] ? 1 : 0) - (this.keys['KeyS'] || this.keys['ArrowDown'] ? 1 : 0);
+    if (keyForward < 0 && this.autoRun) {
+      this.autoRun = false;
+      this.hud.setAutoRunActive?.(false);
+    }
     const crouch = Boolean(this.keys['ControlLeft'] || this.keys['ControlRight'] || this.keys['KeyC']);
-    const sprint = Boolean(this.keys['ShiftLeft'] || this.keys['ShiftRight']) && forward > 0 && !crouch && !this.adsActive;
+    if (crouch && this.autoRun) {
+      this.autoRun = false;
+      this.hud.setAutoRunActive?.(false);
+    }
+    const forward = this.autoRun ? 1 : keyForward;
+    const right = (this.keys['KeyD'] || this.keys['ArrowRight'] ? 1 : 0) - (this.keys['KeyA'] || this.keys['ArrowLeft'] ? 1 : 0);
+    const sprint = (this.autoRun || Boolean(this.keys['ShiftLeft'] || this.keys['ShiftRight'])) && forward > 0 && !crouch && !this.adsActive;
     const jump = Boolean(this.keys['Space']);
     const interact = Boolean(this.keys['KeyE'] || this.keys['KeyF']);
 

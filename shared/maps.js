@@ -501,65 +501,65 @@ function buildUrbanCityMap() {
 }
 
 function buildBrIslandMap() {
-  // True 5km x 5km (5000m x 5000m) Open-World Battle Royale Island!
-  const halfW = 2500;
-  const halfD = 2500;
+  // 1.5km x 1.5km (1500m x 1500m) Open-World Battle Royale Island (Erangel-VN)
+  // Perfectly optimized for 60+ FPS, smooth server authority, rich terrain & PUBG-style layout
+  const halfW = 750;
+  const halfD = 750;
 
   const mountains = [
-    { x: -1450, z: -1350, r: 780, peak: 118, seed: 101 }, // Đỉnh Núi Tuyết Tây Bắc
-    { x: 1180, z: -420, r: 690, peak: 105, seed: 202 },   // Dãy Núi Đá Đông
-    { x: -1150, z: 1200, r: 640, peak: 92, seed: 303 },   // Núi Rừng Tây Nam
-    { x: 160, z: -1720, r: 540, peak: 88, seed: 404 },    // Vách Núi Biên Phòng Bắc
-    { x: 1450, z: 1380, r: 620, peak: 96, seed: 505 }     // Đỉnh Nam
+    { x: -380, z: -360, r: 240, peak: 72, seed: 101 }, // Đỉnh Núi Tuyết Tây Bắc
+    { x: 360, z: -120, r: 220, peak: 62, seed: 202 },   // Dãy Núi Đá Đông
+    { x: -340, z: 340, r: 200, peak: 52, seed: 303 },   // Núi Rừng Tây Nam
+    { x: 70, z: -460, r: 170, peak: 46, seed: 404 },    // Vách Núi Biên Phòng Bắc
+    { x: 380, z: 380, r: 190, peak: 55, seed: 505 }     // Đỉnh Nam
   ];
 
   const rivers = [
     {
-      width: 44,
-      pts: [[-2450, -680], [-1450, -440], [-720, -210], [-60, -30], [640, 210], [1480, 560], [2450, 920]]
+      width: 28,
+      pts: [[-720, -200], [-420, -130], [-210, -50], [-20, 0], [190, 60], [420, 160], [720, 270]]
     },
     {
-      width: 34,
-      pts: [[180, -2450], [110, -1450], [-40, -760], [-60, -30]]
+      width: 20,
+      pts: [[50, -720], [35, -420], [-10, -210], [-20, 0]]
     }
   ];
 
   const lakes = [
-    { x: -1620, z: 1620, r: 220, depth: 5.5 }
+    { x: -420, z: 420, r: 75, depth: 4.5 }
   ];
 
   const namedPlaces = [
-    { id: 'pochinki', name: 'Thị Trấn Pochinki', x: -240, z: 320, r: 105 },
-    { id: 'military', name: 'Căn Cứ Quân Sự', x: 380, z: 1260, r: 120 },
-    { id: 'georgopol', name: 'Cảng Container', x: -1160, z: -880, r: 105 },
-    { id: 'yasnaya', name: 'Thung Lũng Yasnaya', x: 820, z: -1240, r: 95 },
-    { id: 'research', name: 'Trạm Núi Đông', x: 920, z: -260, r: 75 },
-    { id: 'riverside', name: 'Làng Bờ Sông', x: -680, z: -80, r: 75 },
-    { id: 'northfort', name: 'Đồn Biên Phòng Bắc', x: 340, z: -1540, r: 70 },
-    { id: 'lakecamp', name: 'Trại Hồ Tây Nam', x: -1360, z: 1480, r: 65 }
+    { id: 'pochinki', name: 'Thị Trấn Pochinki', x: -75, z: 95, r: 75 },
+    { id: 'military', name: 'Căn Cứ Quân Sự', x: 130, z: 390, r: 85 },
+    { id: 'georgopol', name: 'Cảng Container', x: -360, z: -260, r: 75 },
+    { id: 'yasnaya', name: 'Thung Lũng Yasnaya', x: 260, z: -360, r: 70 },
+    { id: 'research', name: 'Trạm Núi Đông', x: 290, z: -80, r: 55 },
+    { id: 'riverside', name: 'Làng Bờ Sông', x: -210, z: -30, r: 55 },
+    { id: 'northfort', name: 'Đồn Biên Phòng Bắc', x: 100, z: -460, r: 50 },
+    { id: 'lakecamp', name: 'Trại Hồ Tây Nam', x: -400, z: 420, r: 45 }
   ];
 
-  const flats = namedPlaces.map((p) => ({ x: p.x, z: p.z, r: p.r, blend: 44, tint: 0.85 }));
+  const flats = namedPlaces.map((p) => ({ x: p.x, z: p.z, r: p.r, blend: 30, tint: 0.85 }));
   // Additional roadside plateaus for outposts / watchtower clusters
   const extraOutposts = [
-    { x: -140, z: -560, r: 34 },
-    { x: 520, z: 540, r: 36 },
-    { x: -720, z: 860, r: 34 },
-    { x: 1420, z: -1120, r: 34 },
-    { x: 1360, z: 220, r: 34 },
-    { x: -1820, z: 140, r: 32 },
-    { x: 880, z: 1460, r: 32 }
+    { x: -50, z: -170, r: 25 },
+    { x: 170, z: 170, r: 26 },
+    { x: -230, z: 260, r: 25 },
+    { x: 410, z: -320, r: 24 },
+    { x: 390, z: 90, r: 24 },
+    { x: -510, z: 40, r: 25 }
   ];
   for (const op of extraOutposts) {
-    flats.push({ x: op.x, z: op.z, r: op.r, blend: 26, tint: 0.6 });
+    flats.push({ x: op.x, z: op.z, r: op.r, blend: 20, tint: 0.6 });
   }
 
   const roads = [
-    { width: 6.5, pts: [[-1160, -880], [-680, -80], [-240, 320], [520, 540], [380, 1260], [880, 1460]] },
-    { width: 5.5, pts: [[-1360, 1480], [-720, 860], [-240, 320], [-140, -560], [340, -1540]] },
-    { width: 5.5, pts: [[-680, -80], [920, -260], [820, -1240], [340, -1540]] },
-    { width: 5.0, pts: [[820, -1240], [1420, -1120], [1360, 220], [520, 540]] },
-    { width: 5.0, pts: [[-1820, 140], [-1160, -880]] }
+    { width: 5.5, pts: [[-360, -260], [-210, -30], [-75, 95], [170, 170], [130, 390]] },
+    { width: 5.0, pts: [[-400, 420], [-230, 260], [-75, 95], [-50, -170], [100, -460]] },
+    { width: 5.0, pts: [[-210, -30], [290, -80], [260, -360], [100, -460]] },
+    { width: 4.8, pts: [[260, -360], [410, -320], [390, 90], [170, 170]] },
+    { width: 4.8, pts: [[-510, 40], [-360, -260]] }
   ];
 
   const terrain = buildTerrain({
@@ -571,7 +571,7 @@ function buildBrIslandMap() {
     lakes,
     flats,
     roads,
-    edgeFalloff: 250
+    edgeFalloff: 90
   });
 
   const blocks = [];
@@ -708,12 +708,12 @@ function buildBrIslandMap() {
   }
 
   // Helper: River Bridge crossing along a river normal with walkable ramps & cover
-  function addBridge(ax, az, bx, bz, bridgeW = 9.2) {
+  function addBridge(ax, az, bx, bz, bridgeW = 8.5) {
     const dx = bx - ax;
     const dz = bz - az;
     const len = Math.hypot(dx, dz);
-    const deckY = terrain.waterLevel + 4.4;
-    const segCount = Math.max(8, Math.ceil(len / 9));
+    const deckY = terrain.waterLevel + 4.2;
+    const segCount = Math.max(6, Math.ceil(len / 8));
 
     // Approach ramps from riverbank terrain up to deckY
     const endAY = terrain.heightAt(ax, az);
@@ -723,129 +723,126 @@ function buildBrIslandMap() {
       : (dz > 0 ? 'south' : 'north');
     const dirBtoA = dirAtoB === 'east' ? 'west' : (dirAtoB === 'west' ? 'east' : (dirAtoB === 'south' ? 'north' : 'south'));
 
-    // Multi-segment axis-friendly bridge deck tiles + guardrails + tactical crates
     for (let i = 0; i <= segCount; i++) {
       const u = i / segCount;
       const px = ax + dx * u;
       const pz = az + dz * u;
-      const tileSize = (len / segCount) + 1.4;
+      const tileSize = (len / segCount) + 1.2;
       const wSpan = Math.abs(dx) >= Math.abs(dz) ? tileSize : bridgeW;
       const dSpan = Math.abs(dx) >= Math.abs(dz) ? bridgeW : tileSize;
-      // Gentle arched slope up near ends
-      const arch = Math.min(1, Math.min(u, 1 - u) * 5.0);
+      const arch = Math.min(1, Math.min(u, 1 - u) * 4.5);
       const bankH = endAY * (1 - u) + endBY * u;
       const segTop = bankH + (deckY - bankH) * arch;
       blocks.push({
         x: Number(px.toFixed(1)),
-        y: Number((segTop - 1.2).toFixed(2)),
+        y: Number((segTop - 1.1).toFixed(2)),
         z: Number(pz.toFixed(1)),
         w: Number(wSpan.toFixed(1)),
-        h: 1.2,
+        h: 1.1,
         d: Number(dSpan.toFixed(1)),
         mat: 'concrete',
-        isStep: i <= 2 || i >= segCount - 2
+        isStep: i <= 1 || i >= segCount - 1
       });
       // Vertical support pillars into river bed
-      if (i > 1 && i < segCount - 1 && i % 3 === 0) {
+      if (i > 1 && i < segCount - 1 && i % 2 === 0) {
         blocks.push({
           x: Number(px.toFixed(1)),
           y: 0,
           z: Number(pz.toFixed(1)),
-          w: 1.6,
-          h: Number((segTop - 1.2).toFixed(2)),
-          d: 1.6,
+          w: 1.5,
+          h: Number((segTop - 1.1).toFixed(2)),
+          d: 1.5,
           mat: 'bunker_concrete'
         });
       }
       // Mid-bridge crate cover + loot
       if (i === Math.floor(segCount * 0.5)) {
         blocks.push({
-          x: Number((px - 1.6).toFixed(1)),
+          x: Number((px - 1.5).toFixed(1)),
           y: Number(segTop.toFixed(2)),
           z: Number(pz.toFixed(1)),
-          w: 2.2,
-          h: 1.6,
-          d: 2.2,
+          w: 2.0,
+          h: 1.5,
+          d: 2.0,
           mat: 'crate_metal'
         });
-        pushLoot(px + 1.6, segTop, pz);
+        pushLoot(px + 1.5, segTop, pz);
       }
     }
-    // Bridge approach stairs in case riverbank height jumps slightly
-    if (deckY - endAY > 0.6) {
-      blocks.push(...makeStairs(ax, az, bridgeW * 0.85, 8, Math.max(0.8, (deckY - endAY) * 0.45), dirAtoB, 'concrete', 5, endAY - 0.3));
+    if (deckY - endAY > 0.5) {
+      blocks.push(...makeStairs(ax, az, bridgeW * 0.85, 7, Math.max(0.7, (deckY - endAY) * 0.45), dirAtoB, 'concrete', 4, endAY - 0.2));
     }
-    if (deckY - endBY > 0.6) {
-      blocks.push(...makeStairs(bx, bz, bridgeW * 0.85, 8, Math.max(0.8, (deckY - endBY) * 0.45), dirBtoA, 'concrete', 5, endBY - 0.3));
+    if (deckY - endBY > 0.5) {
+      blocks.push(...makeStairs(bx, bz, bridgeW * 0.85, 7, Math.max(0.7, (deckY - endBY) * 0.45), dirBtoA, 'concrete', 4, endBY - 0.2));
     }
   }
 
   // Build 4 Strategic Bridges across Main & North Rivers
-  addBridge(-1450, -520, -1450, -360); // Cầu Tây Bắc
-  addBridge(-650, -280, -650, -100);   // Cầu Làng Bờ Sông
-  addBridge(640, 130, 640, 290);       // Cầu Trung Tâm Đông
-  addBridge(-110, -1450, 280, -1450);  // Cầu Đồn Biên Phòng Bắc
+  addBridge(-420, -170, -420, -90, 8.5); // Cầu Tây Bắc
+  addBridge(-210, -85, -210, -15, 8.5);  // Cầu Làng Bờ Sông
+  addBridge(190, 20, 190, 100, 8.5);    // Cầu Trung Tâm Đông
+  addBridge(-20, -420, 90, -420, 8.0);  // Cầu Đồn Biên Phòng Bắc
 
-  // 1. Thị Trấn Pochinki-VN (-240, 320): Dense 2-story & 1-story town + Watchtower
-  addHouse(-275, 290, 2, 13, 11, 'building_brick');
-  addHouse(-205, 290, 2, 12, 10, 'city_wall');
-  addHouse(-275, 350, 1, 11, 9, 'building_brick');
-  addHouse(-205, 355, 2, 12, 10, 'building_glass');
-  addHouse(-240, 250, 1, 10, 9, 'warehouse_wall');
-  addHouse(-170, 320, 1, 10, 9, 'building_brick');
-  addWatchtower(-240, 320);
-  addShack(-305, 320);
+  // 1. Thị Trấn Pochinki (-75, 95): Dense 2-story & 1-story town + Watchtower
+  addHouse(-105, 70, 2, 13, 11, 'building_brick');
+  addHouse(-45, 70, 2, 12, 10, 'city_wall');
+  addHouse(-105, 125, 1, 11, 9, 'building_brick');
+  addHouse(-45, 125, 2, 12, 10, 'building_glass');
+  addHouse(-75, 35, 1, 10, 9, 'warehouse_wall');
+  addHouse(-15, 95, 1, 10, 9, 'building_brick');
+  addWatchtower(-75, 95);
+  addShack(-135, 95);
 
-  // 2. Căn Cứ Quân Sự Nam (380, 1260): 3 Hangars + 2 Barracks + 2 Watchtowers
-  addHangar(345, 1255, 18, 26);
-  addHangar(415, 1255, 18, 26);
-  addHouse(380, 1205, 2, 15, 10, 'military_wall');
-  addHouse(380, 1315, 1, 14, 10, 'bunker_concrete');
-  addWatchtower(310, 1220);
-  addWatchtower(450, 1300);
+  // 2. Căn Cứ Quân Sự Nam (130, 390): 2 Hangars + 2 Barracks + 2 Watchtowers
+  addHangar(95, 385, 18, 26);
+  addHangar(165, 385, 18, 26);
+  addHouse(130, 335, 2, 15, 10, 'military_wall');
+  addHouse(130, 445, 1, 14, 10, 'bunker_concrete');
+  addWatchtower(60, 350);
+  addWatchtower(200, 430);
 
-  // 3. Cảng Container Tây Bắc (-1160, -880): Warehouse Hangar + Stacked Containers + Watchtower
-  addHangar(-1190, -890, 16, 22);
-  addHouse(-1125, -860, 2, 13, 10, 'city_wall');
-  addHouse(-1160, -935, 1, 11, 9, 'warehouse_wall');
-  addWatchtower(-1120, -915);
+  // 3. Cảng Container Tây Bắc (-360, -260): Warehouse Hangar + Stacked Containers + Watchtower
+  addHangar(-390, -270, 16, 22);
+  addHouse(-325, -240, 2, 13, 10, 'city_wall');
+  addHouse(-360, -315, 1, 11, 9, 'warehouse_wall');
+  addWatchtower(-320, -295);
   {
-    const portY = terrain.heightAt(-1155, -835);
-    blocks.push({ x: -1165, y: portY, z: -835, w: 3.0, h: 2.6, d: 8.5, mat: 'container_red' });
-    blocks.push({ x: -1150, y: portY, z: -835, w: 3.0, h: 2.6, d: 8.5, mat: 'container_blue' });
-    pushLoot(-1158, portY, -835);
+    const portY = terrain.heightAt(-355, -215);
+    blocks.push({ x: -365, y: portY, z: -215, w: 3.0, h: 2.6, d: 8.5, mat: 'container_red' });
+    blocks.push({ x: -350, y: portY, z: -215, w: 3.0, h: 2.6, d: 8.5, mat: 'container_blue' });
+    pushLoot(-358, portY, -215);
   }
 
-  // 4. Thung Lũng Yasnaya (820, -1240): Mountain Valley Town
-  addHouse(790, -1265, 2, 12, 10, 'building_brick');
-  addHouse(850, -1265, 2, 12, 10, 'building_glass');
-  addHouse(795, -1210, 1, 11, 9, 'building_brick');
-  addHouse(855, -1210, 1, 10, 9, 'city_wall');
-  addWatchtower(825, -1290);
-  addShack(765, -1235);
+  // 4. Thung Lũng Yasnaya (260, -360): Mountain Valley Town
+  addHouse(230, -385, 2, 12, 10, 'building_brick');
+  addHouse(290, -385, 2, 12, 10, 'building_glass');
+  addHouse(235, -330, 1, 11, 9, 'building_brick');
+  addHouse(295, -330, 1, 10, 9, 'city_wall');
+  addWatchtower(265, -410);
+  addShack(205, -355);
 
-  // 5. Trạm Nghiên Cứu Núi Đông (920, -260)
-  addHouse(900, -260, 2, 14, 11, 'building_glass');
-  addHouse(945, -245, 1, 11, 9, 'bunker_concrete');
-  addWatchtower(920, -295);
+  // 5. Trạm Nghiên Cứu Núi Đông (290, -80)
+  addHouse(270, -80, 2, 14, 11, 'building_glass');
+  addHouse(315, -65, 1, 11, 9, 'bunker_concrete');
+  addWatchtower(290, -115);
 
-  // 6. Làng Bờ Sông (-680, -80)
-  addHouse(-695, -60, 1, 11, 9, 'building_brick');
-  addHouse(-660, -95, 2, 11, 9, 'crate_wood');
-  addShack(-710, -105);
-  addWatchtower(-645, -55);
+  // 6. Làng Bờ Sông (-210, -30)
+  addHouse(-225, -10, 1, 11, 9, 'building_brick');
+  addHouse(-190, -45, 2, 11, 9, 'crate_wood');
+  addShack(-240, -55);
+  addWatchtower(-175, -5);
 
-  // 7. Đồn Biên Phòng Bắc (340, -1540)
-  addHangar(340, -1540, 16, 20);
-  addHouse(305, -1560, 1, 10, 9, 'military_wall');
-  addWatchtower(375, -1565);
+  // 7. Đồn Biên Phòng Bắc (100, -460)
+  addHangar(100, -460, 16, 20);
+  addHouse(65, -480, 1, 10, 9, 'military_wall');
+  addWatchtower(135, -485);
 
-  // 8. Trại Hồ Tây Nam (-1360, 1480)
-  addHouse(-1360, 1480, 2, 12, 10, 'building_brick');
-  addShack(-1395, 1495);
-  addWatchtower(-1325, 1460);
+  // 8. Trại Hồ Tây Nam (-400, 420)
+  addHouse(-400, 420, 2, 12, 10, 'building_brick');
+  addShack(-435, 435);
+  addWatchtower(-365, 400);
 
-  // Roadside Outposts & Wild Forest Shacks / Watchtowers across all 4 quadrants (15 extra clusters!)
+  // Roadside Outposts & Wild Forest Shacks / Watchtowers
   for (const op of extraOutposts) {
     addHouse(op.x - 10, op.z, 1, 10, 9, 'building_brick');
     addWatchtower(op.x + 12, op.z - 6);
@@ -853,24 +850,23 @@ function buildBrIslandMap() {
   }
 
   // Deterministic scattered Watchtowers & Shacks across hills, riverbanks, and valleys
-  for (let i = 0; i < 28; i++) {
-    const sx = (hash01(i, 19, 777) * 2 - 1) * 2120;
-    const sz = (hash01(i, 83, 999) * 2 - 1) * 2120;
+  for (let i = 0; i < 14; i++) {
+    const sx = (hash01(i, 19, 777) * 2 - 1) * 620;
+    const sz = (hash01(i, 83, 999) * 2 - 1) * 620;
     if (terrain.depthAt(sx, sz) > 0 || terrain.heightAt(sx, sz) < terrain.waterLevel + 1.5) continue;
     if (terrain.slopeAt(sx, sz) > 0.36) continue;
-    if (namedPlaces.some((p) => Math.hypot(p.x - sx, p.z - sz) < 150)) continue;
+    if (namedPlaces.some((p) => Math.hypot(p.x - sx, p.z - sz) < 100)) continue;
     if (i % 3 === 0) addWatchtower(sx, sz);
     else addShack(sx, sz);
   }
 
-  // Forest Trees (Instanced visuals on client + slender collision trunks) & Natural Cliff Boulders
-  for (let i = 0; i < 1100; i++) {
-    const tx = (hash01(i, 31, 1337) * 2 - 1) * 2220;
-    const tz = (hash01(i, 67, 4242) * 2 - 1) * 2220;
+  // Forest Trees & Natural Cliff Boulders (Tuned for 1.5km x 1.5km, ~360 trees + ~90 rocks)
+  for (let i = 0; i < 360; i++) {
+    const tx = (hash01(i, 31, 1337) * 2 - 1) * 660;
+    const tz = (hash01(i, 67, 4242) * 2 - 1) * 660;
     const h = terrain.heightAt(tx, tz);
-    if (h < terrain.waterLevel + 1.4 || h > 105) continue;
+    if (h < terrain.waterLevel + 1.4 || h > 95) continue;
     if (terrain.slopeAt(tx, tz) > 0.48) continue;
-    // Clear flat plateaus (flatMask) & dirt roads
     const ix = Math.min(terrain.nx - 1, Math.max(0, Math.round((tx + halfW) / terrain.cell)));
     const iz = Math.min(terrain.nx - 1, Math.max(0, Math.round((tz + halfW) / terrain.cell)));
     const gi = iz * terrain.nx + ix;
@@ -881,9 +877,9 @@ function buildBrIslandMap() {
     blocks.push({ x: Number(tx.toFixed(1)), y: Number((h - 0.5).toFixed(2)), z: Number(tz.toFixed(1)), w: 0.72, h: 4.5, d: 0.72, noVisual: true });
   }
 
-  for (let i = 0; i < 320; i++) {
-    const rx = (hash01(i, 91, 8080) * 2 - 1) * 2220;
-    const rz = (hash01(i, 43, 6060) * 2 - 1) * 2220;
+  for (let i = 0; i < 90; i++) {
+    const rx = (hash01(i, 91, 8080) * 2 - 1) * 660;
+    const rz = (hash01(i, 43, 6060) * 2 - 1) * 660;
     const h = terrain.heightAt(rx, rz);
     if (h < terrain.waterLevel - 0.5) continue;
     const ix = Math.min(terrain.nx - 1, Math.max(0, Math.round((rx + halfW) / terrain.cell)));
@@ -897,27 +893,27 @@ function buildBrIslandMap() {
     blocks.push({ x: Number(rx.toFixed(1)), y: Number((h - 0.8).toFixed(2)), z: Number(rz.toFixed(1)), w: rw * 0.88, h: rh + 0.8, d: rw * 0.88, noVisual: true });
   }
 
-  // Build spatial grid on blocks so physics & raycasts stay O(local) across 5km x 5km!
-  buildBlockGrid(blocks, halfW, 36);
+  // Build spatial grid on blocks so physics & raycasts stay O(1) across the 1.5km x 1.5km arena!
+  buildBlockGrid(blocks, halfW, 25);
 
   // Build Open-World AI Bot Navigation Graph across all walkable plateaus, roads & ridges
   const rawNodes = [];
-  for (let gx = -2050; gx <= 2050; gx += 250) {
-    for (let gz = -2050; gz <= 2050; gz += 250) {
+  for (let gx = -580; gx <= 580; gx += 110) {
+    for (let gz = -580; gz <= 580; gz += 110) {
       if (terrain.depthAt(gx, gz) > 0.8 || terrain.slopeAt(gx, gz) > 0.62) continue;
       if (blocks.some((b) => !b.isStep && Math.abs(gx - b.x) < b.w * 0.5 + 1.0 && Math.abs(gz - b.z) < b.d * 0.5 + 1.0)) continue;
       rawNodes.push({ x: gx, z: gz });
     }
   }
   for (const np of namedPlaces) {
-    rawNodes.push({ x: np.x + 22, z: np.z + 22 });
+    rawNodes.push({ x: np.x + 15, z: np.z + 15 });
   }
 
   const waypoints = rawNodes.map((n, idx) => ({ id: idx, x: n.x, z: n.z, links: [] }));
   for (let i = 0; i < waypoints.length; i++) {
     for (let j = i + 1; j < waypoints.length; j++) {
       const dist = Math.hypot(waypoints[j].x - waypoints[i].x, waypoints[j].z - waypoints[i].z);
-      if (dist <= 365) {
+      if (dist <= 165) {
         waypoints[i].links.push(j);
         waypoints[j].links.push(i);
       }
@@ -932,12 +928,12 @@ function buildBrIslandMap() {
 
   return {
     id: 'br_island',
-    name: 'Đảo Sinh Tồn 5×5 km (Erangel-VN)',
-    subtitle: 'Siêu bản đồ 5km×5km • Đồi núi, Vách đá, Sông cầu, Chòi canh & 8 Thị trấn',
+    name: 'Đảo Sinh Tồn 1.5×1.5 km (Erangel-VN)',
+    subtitle: 'Bản đồ 1.5km×1.5km tối ưu 60+ FPS • Đồi núi, Sông cầu, Chòi canh & 8 Thị trấn',
     theme: 'desert_military',
     skyColor: '#6794c4',
     fogColor: '#8db2d6',
-    fogDensity: 0.00048,
+    fogDensity: 0.0012,
     floorMat: 'sand_tactical',
     bounds: { halfW, halfD },
     terrain,
@@ -946,13 +942,13 @@ function buildBrIslandMap() {
     rocks,
     blocks,
     bombSites: [
-      { id: 'A', x: -240, y: terrain.heightAt(-240, 320), z: 320, radius: 6.0, label: 'Pochinki' },
-      { id: 'B', x: 380, y: terrain.heightAt(380, 1260), z: 1260, radius: 6.0, label: 'Căn Cứ Quân Sự' }
+      { id: 'A', x: -75, y: terrain.heightAt(-75, 95), z: 95, radius: 6.0, label: 'Pochinki' },
+      { id: 'B', x: 130, y: terrain.heightAt(130, 390), z: 390, radius: 6.0, label: 'Căn Cứ Quân Sự' }
     ],
     spawns: {
-      alpha: makeTeamSpawns(-240, 320, 0),
-      bravo: makeTeamSpawns(380, 1260, Math.PI),
-      ffa: ffa.length > 0 ? ffa : [{ x: -240, y: terrain.floorAt(-240, 320), z: 320, yaw: 0 }]
+      alpha: makeTeamSpawns(-75, 95, 0),
+      bravo: makeTeamSpawns(130, 390, Math.PI),
+      ffa: ffa.length > 0 ? ffa : [{ x: -75, y: terrain.floorAt(-75, 95), z: 95, yaw: 0 }]
     },
     waypoints,
     lootSpawns

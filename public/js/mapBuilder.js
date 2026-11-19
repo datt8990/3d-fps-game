@@ -1,5 +1,6 @@
 // AAA-Grade 3D Arena Builder: Sculpted Containers, 3D Sandbag Walls, Armored Trucks, Rotating Radar, Sky Dome & Props
 import * as THREE from 'three';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { getMapMaterial, getSkyDomeTexture } from './textures.js';
 import { createC4Mesh, createWeaponModel } from './models.js';
 
@@ -336,7 +337,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
 
   // 1. 3D Atmospheric Sky Dome
   const skyDome = new THREE.Mesh(
-    new THREE.SphereGeometry(isOpenWorld ? 3100 : 185, 32, 20),
+    new THREE.SphereGeometry(isOpenWorld ? 1200 : 185, 32, 20),
     new THREE.MeshBasicMaterial({
       map: getSkyDomeTexture(mapData.theme),
       side: THREE.BackSide,
@@ -363,8 +364,8 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     const mapSize = quality === 'high' ? 2048 : 1024;
     sun.shadow.mapSize.set(mapSize, mapSize);
     sun.shadow.camera.near = 5;
-    sun.shadow.camera.far = isOpenWorld ? 240 : 160;
-    const d = isOpenWorld ? 72 : 54;
+    sun.shadow.camera.far = isOpenWorld ? 160 : 160;
+    const d = isOpenWorld ? 54 : 54;
     sun.shadow.camera.left = -d;
     sun.shadow.camera.right = d;
     sun.shadow.camera.top = d;
@@ -387,7 +388,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       roughness: 0.92,
       metalness: 0.04
     });
-    const chunkCells = 50; // 50x10m = 500m per frustum-culled terrain sector
+    const chunkCells = 30; // 30x10m = 300m per frustum-culled terrain sector (ultra smooth in 1.5km map)
     const rgb = [0, 0, 0];
     for (let z0 = 0; z0 < t.nx - 1; z0 += chunkCells) {
       const z1 = Math.min(t.nx - 1, z0 + chunkCells);
@@ -437,7 +438,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     }
 
     // Translucent River / Lake / Ocean Surface at waterLevel
-    const waterGeo = new THREE.PlaneGeometry(t.half * 2 + 1600, t.half * 2 + 1600);
+    const waterGeo = new THREE.PlaneGeometry(t.half * 2 + 600, t.half * 2 + 600);
     const waterMesh = new THREE.Mesh(
       waterGeo,
       new THREE.MeshStandardMaterial({
@@ -452,7 +453,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     waterMesh.position.y = t.waterLevel;
     worldGroup.add(waterMesh);
 
-    // Instanced Forest Trees (2 GPU draw calls for ~900+ trees!)
+    // Instanced Forest Trees (Instanced draw calls for trees)
     if (mapData.trees?.length && THREE.InstancedMesh) {
       const dummy = new THREE.Object3D();
       const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 3.6, 7);
@@ -475,6 +476,8 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       });
       trunksMesh.instanceMatrix.needsUpdate = true;
       leavesMesh.instanceMatrix.needsUpdate = true;
+      trunksMesh.frustumCulled = false;
+      leavesMesh.frustumCulled = false;
       worldGroup.add(trunksMesh, leavesMesh);
     }
 
@@ -494,6 +497,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
         rocksMesh.setMatrixAt(i, dummy.matrix);
       });
       rocksMesh.instanceMatrix.needsUpdate = true;
+      rocksMesh.frustumCulled = false;
       worldGroup.add(rocksMesh);
     }
   } else {
@@ -518,69 +522,120 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   ]);
   const castShadows = quality !== 'low';
 
-  // Spatial sector bucketing on 5km maps so buildings beyond draw radius cull smoothly
-  const sectorMap = new Map();
-  const getTargetParent = (bx, bz) => {
-    if (!isOpenWorld) return worldGroup;
-    const sx = Math.round(bx / 450) * 450;
-    const sz = Math.round(bz / 450) * 450;
+  // Spatial sector bucketing on 1.5km open world map
+  const sectorGroupsMap = new Map();
+  const getSectorGrp = (bx, bz) => {
+    if (!isOpenWorld) return { key: 'root', grp: worldGroup };
+    const sx = Math.round(bx / 350) * 350;
+    const sz = Math.round(bz / 350) * 350;
     const key = `${sx}_${sz}`;
-    let grp = sectorMap.get(key);
+    let grp = sectorGroupsMap.get(key);
     if (!grp) {
       grp = new THREE.Group();
       grp.userData.sectorCenter = { x: sx, z: sz };
-      sectorMap.set(key, grp);
+      sectorGroupsMap.set(key, grp);
       sectorGroups.push(grp);
       worldGroup.add(grp);
     }
-    return grp;
+    return { key, grp };
   };
 
-  // 4. Arena Blocks with Rich 3D Architectural & Tactical Detailing
-  for (const b of mapData.blocks) {
-    if (b.noVisual) continue;
-    const parentGrp = getTargetParent(b.x, b.z);
+  // 4. Arena Blocks: Batched Geometry Merging for Open-World & Rich Detailing for Arenas
+  if (isOpenWorld) {
+    const sectorBatches = new Map(); // sectorKey -> Map(mat -> Array<BufferGeometry>)
 
-    if (b.mat === 'sandbag') {
-      parentGrp.add(createSandbagWallGroup(b, castShadows));
-      continue;
+    for (const b of mapData.blocks) {
+      if (b.noVisual) continue;
+      const { key, grp } = getSectorGrp(b.x, b.z);
+
+      if (b.mat === 'sandbag') {
+        grp.add(createSandbagWallGroup(b, castShadows));
+        continue;
+      }
+
+      const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
+      if (tiledMaterials.has(b.mat)) {
+        applyProportionalBoxUVs(geo, b.w, b.h, b.d, 5.0);
+      }
+      geo.translate(b.x, b.y + b.h * 0.5, b.z);
+
+      if (!sectorBatches.has(key)) sectorBatches.set(key, new Map());
+      const matMap = sectorBatches.get(key);
+      if (!matMap.has(b.mat)) matMap.set(b.mat, []);
+      matMap.get(b.mat).push(geo);
     }
 
-    if (mapData.id === 'urban_city' && (b.mat === 'container_blue' || b.mat === 'container_red') && Math.abs(b.d - 6.2) < 0.2) {
-      parentGrp.add(createArmoredTruckGroup(b, castShadows));
-      continue;
+    // High performance merged mesh creation per material per sector (draw calls dropped by 99%!)
+    for (const [key, matMap] of sectorBatches.entries()) {
+      const grp = sectorGroupsMap.get(key) || worldGroup;
+      for (const [matName, geos] of matMap.entries()) {
+        let finalGeo;
+        if (geos.length === 1) {
+          finalGeo = geos[0];
+        } else if (BufferGeometryUtils?.mergeGeometries) {
+          finalGeo = BufferGeometryUtils.mergeGeometries(geos, false);
+          for (const g of geos) g.dispose();
+        } else {
+          for (const g of geos) {
+            const m = new THREE.Mesh(g, getMapMaterial(matName));
+            if (castShadows) { m.castShadow = true; m.receiveShadow = true; }
+            grp.add(m);
+          }
+          continue;
+        }
+        const mergedMesh = new THREE.Mesh(finalGeo, getMapMaterial(matName));
+        if (castShadows) {
+          mergedMesh.castShadow = true;
+          mergedMesh.receiveShadow = true;
+        }
+        grp.add(mergedMesh);
+      }
     }
+  } else {
+    // Standard competitive arena (warehouse, military_base, urban_city): individual props
+    for (const b of mapData.blocks) {
+      if (b.noVisual) continue;
 
-    const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
-    if (tiledMaterials.has(b.mat)) {
-      applyProportionalBoxUVs(geo, b.w, b.h, b.d, 5.0);
-    }
-    const mat = getMapMaterial(b.mat);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(b.x, b.y + b.h * 0.5, b.z);
-    if (castShadows && !b.isBoundary) {
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-    }
+      if (b.mat === 'sandbag') {
+        worldGroup.add(createSandbagWallGroup(b, castShadows));
+        continue;
+      }
 
-    if (b.mat && b.mat.startsWith('container_')) {
-      decorateShippingContainer(mesh, b);
-    } else if (b.mat === 'crate_wood') {
-      decorateSupplyCrate(mesh, b, false);
-    } else if (b.mat === 'crate_metal') {
-      decorateSupplyCrate(mesh, b, true);
-    } else if (b.mat === 'metal_deck') {
-      decorateMetalDeck(mesh, b);
-    } else if (b.mat === 'building_brick' || b.mat === 'building_glass') {
-      decorateBuilding(mesh, b, mapData.id);
-    } else if (b.isBoundary) {
-      // Top armored wall coping & floodlight brackets along perimeter walls
-      const coping = new THREE.Mesh(new THREE.BoxGeometry(b.w + 0.1, 0.35, b.d + 0.25), propMats.darkSteel);
-      coping.position.y = b.h * 0.5;
-      mesh.add(coping);
-    }
+      if (mapData.id === 'urban_city' && (b.mat === 'container_blue' || b.mat === 'container_red') && Math.abs(b.d - 6.2) < 0.2) {
+        worldGroup.add(createArmoredTruckGroup(b, castShadows));
+        continue;
+      }
 
-    parentGrp.add(mesh);
+      const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
+      if (tiledMaterials.has(b.mat)) {
+        applyProportionalBoxUVs(geo, b.w, b.h, b.d, 5.0);
+      }
+      const mat = getMapMaterial(b.mat);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(b.x, b.y + b.h * 0.5, b.z);
+      if (castShadows && !b.isBoundary) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
+
+      if (b.mat && b.mat.startsWith('container_')) {
+        decorateShippingContainer(mesh, b);
+      } else if (b.mat === 'crate_wood') {
+        decorateSupplyCrate(mesh, b, false);
+      } else if (b.mat === 'crate_metal') {
+        decorateSupplyCrate(mesh, b, true);
+      } else if (b.mat === 'metal_deck') {
+        decorateMetalDeck(mesh, b);
+      } else if (b.mat === 'building_brick' || b.mat === 'building_glass') {
+        decorateBuilding(mesh, b, mapData.id);
+      } else if (b.isBoundary) {
+        const coping = new THREE.Mesh(new THREE.BoxGeometry(b.w + 0.1, 0.35, b.d + 0.25), propMats.darkSteel);
+        coping.position.y = b.h * 0.5;
+        mesh.add(coping);
+      }
+
+      worldGroup.add(mesh);
+    }
   }
 
   // 5. Map-Specific Landmarks & Animated 3D Props

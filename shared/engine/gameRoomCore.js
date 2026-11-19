@@ -780,28 +780,23 @@ export class GameRoomCore {
       : { x: (Math.random() - 0.5) * hw * 0.4, z: (Math.random() - 0.5) * hd * 0.4 };
 
     this.storm = {
-      x: safeCenter.x + (Math.random() - 0.5) * (isBig ? 180 : 12),
-      z: safeCenter.z + (Math.random() - 0.5) * (isBig ? 180 : 12),
+      x: safeCenter.x + (Math.random() - 0.5) * (isBig ? 60 : 12),
+      z: safeCenter.z + (Math.random() - 0.5) * (isBig ? 60 : 12),
       radius: maxR,
-      minRadius: isBig ? 22 : 6.0,
-      shrinkSpeed: (maxR - (isBig ? 22 : 6.0)) / (isBig ? 540 : 215)
+      minRadius: isBig ? 18 : 6.0,
+      shrinkSpeed: (maxR - (isBig ? 18 : 6.0)) / (isBig ? 360 : 215)
     };
 
     // High-altitude tactical C-130 cargo plane flight across the island
-    const corridors = isBig
-      ? [
-          { sx: -2100, sz: -1800, ex: 2100, ez: 1700 },
-          { sx: 2100, sz: -1700, ex: -2000, ez: 1750 },
-          { sx: -1650, sz: 2050, ex: 1650, ez: -2050 },
-          { sx: 300, sz: -2150, ex: -250, ez: 2150 }
-        ]
-      : [
-          { sx: -hw * 0.84, sz: -hd * 0.72, ex: hw * 0.84, ez: hd * 0.72 },
-          { sx: hw * 0.84, sz: -hd * 0.72, ex: -hw * 0.84, ez: hd * 0.72 }
-        ];
+    const corridors = [
+      { sx: -hw * 0.90, sz: -hd * 0.75, ex: hw * 0.90, ez: hd * 0.75 },
+      { sx: hw * 0.90, sz: -hd * 0.75, ex: -hw * 0.90, ez: hd * 0.75 },
+      { sx: -hw * 0.75, sz: hd * 0.90, ex: hw * 0.75, ez: -hd * 0.90 },
+      { sx: 80, sz: -hd * 0.90, ex: -60, ez: hd * 0.90 }
+    ];
     const path = corridors[Math.floor(Math.random() * corridors.length)];
-    const planeY = isBig ? 260 : 82;
-    const durationMs = isBig ? 36000 : 13500;
+    const planeY = isBig ? 150 : 82;
+    const durationMs = isBig ? 18000 : 13500;
     const startAt = now + 800;
     const endAt = startAt + durationMs;
     this.dropPlane = {
@@ -909,6 +904,8 @@ export class GameRoomCore {
       };
       player.slot = 3;
       player.weaponId = meleeId;
+      player.primary = null;
+      player.secondary = null;
       player.ammo = 0;
       player.reserveAmmo = 0;
       player.grenades = 0;
@@ -1081,13 +1078,27 @@ export class GameRoomCore {
 
     if (item.kind === 'weapon' && item.weaponId && WEAPONS[item.weaponId]) {
       const wCfg = WEAPONS[item.weaponId];
-      const targetSlot = wCfg.category === 'secondary' ? 2 : 1;
+      // PUBG Style 2-Weapon System:
+      // If item.targetSlot is explicitly requested (1 or 2), use that.
+      // Otherwise:
+      // - If Slot 1 is empty -> Slot 1
+      // - Else if Slot 2 is empty -> Slot 2
+      // - Else both full -> swap with current active slot (if slot 2 then 2, else 1)
+      let targetSlot = Number(item.targetSlot);
+      if (targetSlot !== 1 && targetSlot !== 2) {
+        const s1Empty = !player.weaponsState?.[1]?.id;
+        const s2Empty = !player.weaponsState?.[2]?.id;
+        if (s1Empty) targetSlot = 1;
+        else if (s2Empty) targetSlot = 2;
+        else targetSlot = player.slot === 2 ? 2 : 1;
+      }
+
       const existing = player.weaponsState?.[targetSlot];
       const slotEmpty = !existing || !existing.id;
       if (!slotEmpty && !allowSwap) return { ok: false, overflow };
 
       if (!slotEmpty && existing.id) {
-        const oldAmmo = player.slot === targetSlot ? player.ammo : existing.ammo;
+        const oldAmmo = player.slot === targetSlot ? player.ammo : (existing.ammo || 0);
         overflow.push({ kind: 'weapon', weaponId: existing.id, ammo: oldAmmo, reserve: 0, bonusAmmo: 0 });
       }
 
@@ -1100,7 +1111,7 @@ export class GameRoomCore {
         magSize: stats.magSize
       };
       if (targetSlot === 1) player.primary = item.weaponId;
-      else player.secondary = item.weaponId;
+      else if (targetSlot === 2) player.secondary = item.weaponId;
 
       if (item.bonusAmmo > 0) {
         const aType = getWeaponAmmoType(item.weaponId);
@@ -1113,7 +1124,13 @@ export class GameRoomCore {
 
       this.syncPlayerBrAmmo(player);
 
-      if (player.slot === 3 || player.slot === targetSlot || (targetSlot === 1 && player.slot === 2)) {
+      // Auto switch to newly equipped gun if:
+      // 1. Player was holding knife/melee (slot 3)
+      // 2. OR player was holding targetSlot (swapping weapon)
+      // 3. OR this is player's very first gun in Slot 1
+      const isOnlyGun = !player.weaponsState[1]?.id || !player.weaponsState[2]?.id;
+      const shouldSwitch = player.slot === 3 || player.slot === targetSlot || (targetSlot === 1 && !player.weaponsState[2]?.id);
+      if (shouldSwitch) {
         if (player.weaponsState[player.slot] && player.slot !== targetSlot) {
           player.weaponsState[player.slot].ammo = player.ammo;
         }
@@ -1246,7 +1263,7 @@ export class GameRoomCore {
     if (crate.kind === 'deathbox') {
       const idx = (crate.items || []).findIndex((it) => it.itemId === payload.itemId);
       if (idx < 0) return;
-      const subItem = crate.items[idx];
+      const subItem = payload.targetSlot ? { ...crate.items[idx], targetSlot: payload.targetSlot } : crate.items[idx];
       const res = this.addBrItemToPlayer(p, subItem, now, true);
       if (!res.ok) {
         if (res.error) this.sendTo(p.id, { type: 'system_toast', text: res.error });
@@ -1262,12 +1279,28 @@ export class GameRoomCore {
       }
       if (crate.items.length === 0) {
         crate.active = false;
-        this.broadcast({ type: 'loot_picked', crateId: crate.id, playerId: p.id, kind: 'deathbox', label: crate.label, hp: p.hp, armor: p.armor, maxArmor: p.maxArmor, ammo: p.ammo, reserveAmmo: p.reserveAmmo, grenades: p.grenades });
+        this.broadcast({
+          type: 'loot_picked',
+          crateId: crate.id,
+          playerId: p.id,
+          kind: 'deathbox',
+          label: crate.label,
+          hp: p.hp,
+          armor: p.armor,
+          maxArmor: p.maxArmor,
+          ammo: p.ammo,
+          reserveAmmo: p.reserveAmmo,
+          grenades: p.grenades,
+          primary: p.primary,
+          secondary: p.secondary,
+          weaponsState: p.weaponsState
+        });
       } else {
         this.broadcast({ type: 'loot_updated', crate });
       }
     } else {
-      const res = this.addBrItemToPlayer(p, crate, now, true);
+      const itemToLoot = payload.targetSlot ? { ...crate, targetSlot: payload.targetSlot } : crate;
+      const res = this.addBrItemToPlayer(p, itemToLoot, now, true);
       if (!res.ok) {
         if (res.error) this.sendTo(p.id, { type: 'system_toast', text: res.error });
         return;
@@ -1277,7 +1310,23 @@ export class GameRoomCore {
       }
       if (res.consumedAll) {
         crate.active = false;
-        this.broadcast({ type: 'loot_picked', crateId: crate.id, playerId: p.id, kind: crate.kind, weaponId: crate.weaponId || null, label: crate.label, hp: p.hp, armor: p.armor, maxArmor: p.maxArmor, ammo: p.ammo, reserveAmmo: p.reserveAmmo, grenades: p.grenades });
+        this.broadcast({
+          type: 'loot_picked',
+          crateId: crate.id,
+          playerId: p.id,
+          kind: crate.kind,
+          weaponId: crate.weaponId || null,
+          label: crate.label,
+          hp: p.hp,
+          armor: p.armor,
+          maxArmor: p.maxArmor,
+          ammo: p.ammo,
+          reserveAmmo: p.reserveAmmo,
+          grenades: p.grenades,
+          primary: p.primary,
+          secondary: p.secondary,
+          weaponsState: p.weaponsState
+        });
       } else {
         if (res.takenQty > 0 && crate.qty !== undefined) {
           crate.qty -= res.takenQty;
@@ -1311,8 +1360,8 @@ export class GameRoomCore {
       const curAmmo = p.slot === slotNum ? p.ammo : ws.ammo;
       newCrate = this.createLootCrate({ kind: 'weapon', weaponId: ws.id, ammo: curAmmo, bonusAmmo: 0 }, dropX, dropY, dropZ);
       p.weaponsState[slotNum] = { id: null, ammo: 0, reserve: 0, magSize: 0 };
-      if (slotNum === 1) p.primary = 'ak47';
-      else p.secondary = 'deagle';
+      if (slotNum === 1) p.primary = null;
+      else p.secondary = null;
 
       if (p.slot === slotNum) {
         const altSlot = slotNum === 1 ? (p.weaponsState[2]?.id ? 2 : 3) : (p.weaponsState[1]?.id ? 1 : 3);
@@ -2467,7 +2516,13 @@ export class GameRoomCore {
           // Ground crates: Humans & Bots auto-pick non-conflicting essentials, or swap on [E] interact
           const wantsInteract = Boolean(p.input?.interact && now - (p.lastLootSwapAt || 0) > 650);
           if (crate.kind === 'weapon') {
-            const targetSlot = WEAPONS[crate.weaponId]?.category === 'secondary' ? 2 : 1;
+            const s1Empty = !p.weaponsState?.[1]?.id;
+            const s2Empty = !p.weaponsState?.[2]?.id;
+            let targetSlot;
+            if (s1Empty) targetSlot = 1;
+            else if (s2Empty) targetSlot = 2;
+            else targetSlot = p.slot === 2 ? 2 : 1;
+
             const slotEmpty = !p.weaponsState?.[targetSlot]?.id;
             if (!slotEmpty && (!wantsInteract || p.isBot)) continue;
             if (!slotEmpty && wantsInteract) p.lastLootSwapAt = now;
@@ -2503,7 +2558,10 @@ export class GameRoomCore {
               maxArmor: p.maxArmor,
               ammo: p.ammo,
               reserveAmmo: p.reserveAmmo,
-              grenades: p.grenades
+              grenades: p.grenades,
+              primary: p.primary,
+              secondary: p.secondary,
+              weaponsState: p.weaponsState
             });
           } else {
             if (res.takenQty > 0 && crate.qty !== undefined) {

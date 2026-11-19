@@ -532,6 +532,15 @@ export class MatchHUD {
     }
   }
 
+  setAutoRunActive(active) {
+    if (!this.autoRunBadgeEl) {
+      this.autoRunBadgeEl = document.getElementById('autorun-badge');
+    }
+    if (this.autoRunBadgeEl) {
+      this.autoRunBadgeEl.classList.toggle('hidden', !active);
+    }
+  }
+
   updateLootHint(crate, weaponsState) {
     if (!this.interactHintEl) return;
     if (!crate) {
@@ -543,12 +552,14 @@ export class MatchHUD {
       const count = crate.items?.length || 0;
       hint = `⚰ HÒM XÁC ${crate.ownerName || ''} (${count} món) — Nhấn [E] hoặc [Tab] để nhặt toàn bộ đồ!`;
     } else if (crate.kind === 'weapon' && crate.weaponId) {
-      const slotNum = WEAPONS[crate.weaponId]?.category === 'secondary' ? 2 : 1;
-      const occupied = Boolean(weaponsState?.[slotNum]?.id);
+      const s1Empty = !weaponsState?.[1]?.id;
+      const s2Empty = !weaponsState?.[2]?.id;
+      const targetSlot = s1Empty ? 1 : (s2Empty ? 2 : (this._cache?.slot === 2 ? 2 : 1));
+      const occupied = Boolean(weaponsState?.[targetSlot]?.id);
       const label = crate.label || WEAPONS[crate.weaponId]?.name || crate.weaponId;
       hint = occupied
-        ? `Nhấn [E] ĐỔI súng hoặc [Tab] Balo để lấy ${label}`
-        : `Tiến sát để NHẶT ${label} • [Tab] Mở Balo`;
+        ? `Nhấn [E] ĐỔI súng [${targetSlot}] hoặc [Tab] Balo để lấy ${label}`
+        : `Tiến sát để NHẶT ${label} vào [${targetSlot}] • [Tab] Mở Balo`;
     } else if (crate.label) {
       hint = `📦 ${crate.label} — Nhấn [E] nhặt hoặc [Tab] mở Balo`;
     }
@@ -580,7 +591,7 @@ export class MatchHUD {
       <span class="gear-pill ${g.bagTier ? 't' + g.bagTier : ''}">🎒 Balo Lv.${g.bagTier || 0} (${wt}/${cap})</span>
       <span class="gear-pill med"><kbd>7</kbd> Băng ×${quickBand}</span>
       <span class="gear-pill med"><kbd>8</kbd> Y Tế ×${quickFirstAid}</span>
-      <span class="gear-pill hint"><kbd>Tab</kbd>/<kbd>I</kbd> Balo • <kbd>M</kbd> Bản Đồ</span>
+      <span class="gear-pill hint"><kbd>=</kbd> Auto Run • <kbd>Tab</kbd>/<kbd>I</kbd> Balo • <kbd>M</kbd> Bản Đồ</span>
     `;
   }
 
@@ -835,7 +846,7 @@ export class MatchHUD {
     const cx = w / 2;
     const cy = h / 2;
     const halfSpan = Math.max(mapData.bounds?.halfW || 40, mapData.bounds?.halfD || 40);
-    const scale = mapData.terrain ? (localPlayer.dropPhase === 'plane' ? 0.045 : 0.28) : (halfSpan > 55 ? 1.15 : 2.25);
+    const scale = mapData.terrain ? (localPlayer.dropPhase === 'plane' ? 0.08 : 0.35) : (halfSpan > 55 ? 1.15 : 2.25);
 
     ctx.clearRect(0, 0, w, h);
     ctx.save();
