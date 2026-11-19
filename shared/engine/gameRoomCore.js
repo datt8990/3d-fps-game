@@ -299,22 +299,13 @@ export class GameRoomCore {
         player.y = groundY + (this.map.bounds.halfW > 500 ? 115 : 44);
         player.onGround = false;
       }
-      this.sendTo(player.id, {
-        type: 'match_started',
-        room: this.getLobbyPayload(),
-        mapId: this.mapId,
-        mode: this.mode,
-        modeConfig: this.modeConfig,
-        matchEndsAt: this.matchEndsAt,
-        roundEndsAt: this.roundEndsAt,
-        roundNumber: this.roundNumber,
-        storm: this.storm,
-        dropPlane: this.dropPlane,
-        lootCrates: this.lootCrates
-      });
+      this.sendTo(player.id, this.getMatchStartedPayload());
       this.sendWeaponsSync(player);
       this.sendInventorySync(player);
       this.broadcastPlayerSpawned(player);
+      if (!this.tickInterval) {
+        this.startMatchLoop();
+      }
     }
 
     this.addSystemChat(`${player.name} đã tham gia phòng đấu (#${this.code}).`);
@@ -376,22 +367,13 @@ export class GameRoomCore {
           player.onGround = false;
         }
       }
-      this.sendTo(player.id, {
-        type: 'match_started',
-        room: this.getLobbyPayload(),
-        mapId: this.mapId,
-        mode: this.mode,
-        modeConfig: this.modeConfig,
-        matchEndsAt: this.matchEndsAt,
-        roundEndsAt: this.roundEndsAt,
-        roundNumber: this.roundNumber,
-        storm: this.storm,
-        dropPlane: this.dropPlane,
-        lootCrates: this.lootCrates
-      });
+      this.sendTo(player.id, this.getMatchStartedPayload());
       this.sendWeaponsSync(player);
       this.sendInventorySync(player);
       this.broadcastPlayerSpawned(player);
+      if (!this.tickInterval) {
+        this.startMatchLoop();
+      }
     }
 
     this.addSystemChat(`${player.name} đã tham gia thay thế ${chosenBot.name}!`);
@@ -594,6 +576,7 @@ export class GameRoomCore {
     }
 
     this.onListChangedFn();
+    this.startMatchLoop();
   }
 
   getMatchStartedPayload() {
@@ -603,6 +586,7 @@ export class GameRoomCore {
       mapId: this.mapId,
       mode: this.mode,
       modeConfig: this.modeConfig,
+      serverNow: Date.now(),
       matchStartedAt: this.matchStartedAt,
       matchEndsAt: this.matchEndsAt,
       roundEndsAt: this.roundEndsAt,
@@ -1638,7 +1622,14 @@ export class GameRoomCore {
   }
 
   startReload(player, now = Date.now()) {
-    if (player.dead || player.reloadingUntil) return;
+    if (player.dead) return;
+    if (player.reloadingUntil) {
+      if (now >= player.reloadingUntil) {
+        this.finishReload(player);
+      } else {
+        return;
+      }
+    }
     const stats = this.getPlayerWeaponStats(player);
     if (stats.isMelee || player.ammo >= stats.magSize || player.reserveAmmo <= 0) return;
 
@@ -2805,14 +2796,13 @@ export class GameRoomCore {
       players.push(snap);
     }
 
-    const timeLeftSec = Math.max(
-      0,
-      Math.ceil(((this.mode === 'bomb' ? this.roundEndsAt : this.matchEndsAt) - now) / 1000)
-    );
+    const endsAt = this.mode === 'bomb' ? this.roundEndsAt : this.matchEndsAt;
+    const timeLeftSec = Math.max(0, Math.ceil((endsAt - now) / 1000));
 
     const payload = {
       type: 'world_state',
       t: now,
+      endsAt,
       alphaScore: this.alphaScore,
       bravoScore: this.bravoScore,
       roundNumber: this.roundNumber,

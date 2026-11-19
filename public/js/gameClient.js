@@ -581,6 +581,15 @@ export class FPSGameClient {
     this.camera.updateProjectionMatrix();
     this.mode = payload.mode || 'tdm';
     this.modeConfig = payload.modeConfig;
+    this.matchStartedAt = payload.matchStartedAt || Date.now();
+    this.matchEndsAt = payload.matchEndsAt || (Date.now() + (payload.modeConfig?.matchDurationSec || 300) * 1000);
+    this.roundEndsAt = payload.roundEndsAt || this.matchEndsAt;
+    this.roundNumber = payload.roundNumber || 1;
+    this.serverTimeLeftSec = Math.max(0, Math.ceil((this.matchEndsAt - Date.now()) / 1000));
+    this.lastTimeLeftUpdateAt = performance.now();
+    this._lastRenderedTimeLeftSec = -1;
+    this.lastSnapshotScores = { alpha: 0, bravo: 0 };
+    this.lastAliveCount = payload.room?.players?.length || 1;
     this.latestBomb = null;
     this.latestStorm = payload.storm || null;
     this.dropPlaneData = payload.dropPlane ? { ...payload.dropPlane } : null;
@@ -588,6 +597,16 @@ export class FPSGameClient {
     this.lastWorldStateAt = 0;
 
     this.hud.setRoomCode(payload.room?.code || '');
+    this.hud.updateTopScoreAndTimer({
+      mode: this.mode,
+      modeConfig: this.modeConfig,
+      alphaScore: 0,
+      bravoScore: 0,
+      roundNumber: this.roundNumber,
+      timeLeftSec: this.serverTimeLeftSec,
+      myKills: 0,
+      aliveCount: this.lastAliveCount
+    });
 
     this.rosterMeta.clear();
     for (const p of payload.room?.players || []) {
@@ -748,6 +767,10 @@ export class FPSGameClient {
     this.mapPingMarker = null;
     this.radioOpen = false;
     this.currentAimTarget = null;
+    this.serverTimeLeftSec = undefined;
+    this._lastRenderedTimeLeftSec = -1;
+    this.lastSnapshotScores = null;
+    this.lastAliveCount = 0;
     this.dropPlaneData = null;
     this.dropPlaneMesh = null;
     this.localChuteRig = null;
@@ -1033,7 +1056,7 @@ export class FPSGameClient {
       const power = st.isSniper || (st.pellets || 1) > 1 ? 1.25 : (st.category === 'secondary' ? 0.78 : 1.0);
       this.cameraShake = Math.min(0.022, this.cameraShake + (this.adsActive ? 0.0025 : 0.0055) * power);
 
-      if (this.fpRig.userData.flashGroup) {
+      if (this.fpRig?.userData?.flashGroup) {
         triggerMuzzleFlash(this.fpRig.userData.flashGroup, {
           isAds: this.adsActive,
           isSuppressed: Boolean(st.suppressed),
@@ -1050,7 +1073,7 @@ export class FPSGameClient {
       }
 
       // Eject spinning 3D brass casing / red 12ga shotgun shell from receiver ejection port
-      if (this.fpRig.userData.ejectAnchor && st.id !== 'magnum') {
+      if (this.fpRig?.userData?.ejectAnchor && st.id !== 'magnum') {
         const ejectW = new THREE.Vector3();
         this.fpRig.userData.ejectAnchor.getWorldPosition(ejectW);
         const rightW = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
@@ -1171,6 +1194,10 @@ export class FPSGameClient {
   onAmmoSync(msg) {
     this.local.ammo = msg.ammo;
     this.local.reserveAmmo = msg.reserveAmmo;
+    if (this.local.weaponsState?.[msg.slot || this.local.slot]) {
+      this.local.weaponsState[msg.slot || this.local.slot].ammo = msg.ammo;
+      this.local.weaponsState[msg.slot || this.local.slot].reserve = msg.reserveAmmo;
+    }
     this.local.reloadingEnd = 0;
     this.hud.updateReloadProgress(0);
     this.refreshHudWeapon();
@@ -1181,6 +1208,10 @@ export class FPSGameClient {
     if (isMe) {
       this.local.ammo = msg.ammo;
       this.local.reserveAmmo = msg.reserveAmmo;
+      if (this.local.weaponsState?.[this.local.slot]) {
+        this.local.weaponsState[this.local.slot].ammo = msg.ammo;
+        this.local.weaponsState[this.local.slot].reserve = msg.reserveAmmo;
+      }
       this.refreshHudWeapon();
     } else {
       const dist = Math.hypot((msg.origin?.x || 0) - this.local.x, (msg.origin?.z || 0) - this.local.z);
@@ -1193,7 +1224,7 @@ export class FPSGameClient {
     const isMelee = msg.weaponId === 'knife' || msg.weaponId === 'karambit';
     if (!isMelee && msg.origin && msg.hitPoint) {
       let startPt = msg.origin;
-      if (isMe && this.fpRig) {
+      if (isMe && this.fpRig && this.fpRig.userData?.flashGroup) {
         const worldMuzzle = new THREE.Vector3();
         this.fpRig.userData.flashGroup.getWorldPosition(worldMuzzle);
         startPt = worldMuzzle;
@@ -1347,31 +1378,35 @@ export class FPSGameClient {
 
   instantiateEntityRig(ent) {
     if (!this.active || !this.remoteEntities.has(ent.id) || ent.rig) return;
-    const ps = ent.target || ent.current;
-    const rig = createOperatorRig({
-      operator: ent.meta.operator,
-      outfit: ent.meta.outfit,
-      team: ent.meta.team,
-      weaponId: ps.w || 'ak47',
-      skinId: ent.meta.skins?.[ps.w] || 'default',
-      attachments: ent.meta.attachments?.[ps.w] || {},
-      name: ent.meta.name,
-      isAlly: ent.isAlly
-    });
-    let chuteCanopy = null;
-    if (this.mode === 'survival') {
-      chuteCanopy = createParachuteMesh();
-      chuteCanopy.visible = false;
-      rig.group.add(chuteCanopy);
+    try {
+      const ps = ent.target || ent.current;
+      const rig = createOperatorRig({
+        operator: ent.meta?.operator || 'vanguard',
+        outfit: ent.meta?.outfit || 'urban',
+        team: ent.meta?.team || 'bravo',
+        weaponId: ps.w || 'ak47',
+        skinId: ent.meta?.skins?.[ps.w] || 'default',
+        attachments: ent.meta?.attachments?.[ps.w] || {},
+        name: ent.meta?.name || 'Chiến Binh',
+        isAlly: ent.isAlly
+      });
+      let chuteCanopy = null;
+      if (this.mode === 'survival') {
+        chuteCanopy = createParachuteMesh();
+        chuteCanopy.visible = false;
+        rig.group.add(chuteCanopy);
+      }
+      rig.group.position.set(ent.current.x, ent.current.y, ent.current.z);
+      rig.group.rotation.y = ent.current.yaw || 0;
+      this.scene.add(rig.group);
+      ent.rig = rig;
+      ent.chuteCanopy = chuteCanopy;
+    } catch (err) {
+      console.warn('[instantiateEntityRig] Rig build skipped:', err);
     }
-    rig.group.position.set(ent.current.x, ent.current.y, ent.current.z);
-    rig.group.rotation.y = ent.current.yaw || 0;
-    this.scene.add(rig.group);
-    ent.rig = rig;
-    ent.chuteCanopy = chuteCanopy;
   }
 
-  processPendingRigs(maxPerFrame = 2) {
+  processPendingRigs(maxPerFrame = 6) {
     if (!this.pendingRigQueue || this.pendingRigQueue.length === 0) return;
     if (this.pendingRigQueue.length > 1) {
       const lx = this.local.x, lz = this.local.z;
@@ -1519,6 +1554,13 @@ export class FPSGameClient {
       }
     }
 
+    if (msg.timeLeftSec !== undefined) {
+      this.serverTimeLeftSec = msg.timeLeftSec;
+      this.lastTimeLeftUpdateAt = performance.now();
+    }
+    this.lastSnapshotScores = { alpha: msg.alphaScore ?? 0, bravo: msg.bravoScore ?? 0 };
+    this.lastAliveCount = aliveCount;
+
     this.hud.updateTopScoreAndTimer({
       mode: this.mode,
       modeConfig: this.modeConfig,
@@ -1629,16 +1671,40 @@ export class FPSGameClient {
       this.hud.updateFpsAndPing(this.currentFps, this.net.pingMs, this.fpsCap);
     }
 
+    // Smooth match clock countdown between snapshots
+    const nowTime = Date.now();
+    const effectiveLeftSec = this.serverTimeLeftSec !== undefined
+      ? Math.max(0, this.serverTimeLeftSec - Math.floor((now - (this.lastTimeLeftUpdateAt || now)) / 1000))
+      : Math.max(0, Math.ceil(((this.matchEndsAt || (nowTime + 300000)) - nowTime) / 1000));
+
+    if (effectiveLeftSec !== this._lastRenderedTimeLeftSec) {
+      this._lastRenderedTimeLeftSec = effectiveLeftSec;
+      this.hud.updateTopScoreAndTimer({
+        mode: this.mode,
+        modeConfig: this.modeConfig,
+        alphaScore: this.lastSnapshotScores?.alpha ?? 0,
+        bravoScore: this.lastSnapshotScores?.bravo ?? 0,
+        roundNumber: this.roundNumber || 1,
+        timeLeftSec: effectiveLeftSec,
+        myKills: this.local.kills,
+        aliveCount: this.lastAliveCount ?? 1
+      });
+    }
+
     const wStats = this.getLocalWeaponStats();
     if (this.mouseDownLeft && wStats.fireMode === 'auto' && this.pointerLocked && !this.uiModalOpen) {
       this.tryFireWeapon(false);
     }
 
-    this.processPendingRigs(2);
-    this.updateLocalPlayer(dt, now, wStats);
-    this.updateRemotePlayers(dt, now * 0.001);
-    this.shellPool.update(dt);
-    this.vfx.update(dt);
+    try {
+      this.processPendingRigs(6);
+      this.updateLocalPlayer(dt, now, wStats);
+      this.updateRemotePlayers(dt, now * 0.001);
+      this.shellPool?.update(dt);
+      this.vfx?.update(dt);
+    } catch (tickErr) {
+      console.warn('[renderLoop tick error]', tickErr);
+    }
 
     for (let i = this.activeEffects.length - 1; i >= 0; i--) {
       const eff = this.activeEffects[i];
@@ -1994,7 +2060,7 @@ export class FPSGameClient {
       const isAcogScoped = wantsAds && wStats.opticId === 'acog' && this.adsBlend > 0.62;
       this.fpRig.visible = this.sniperZoomStage === 0 && !isAcogScoped;
 
-      updateMuzzleFlash(this.fpRig.userData.flashGroup, dt);
+      if (this.fpRig.userData?.flashGroup) updateMuzzleFlash(this.fpRig.userData.flashGroup, dt);
       gunData?.glbController?.update(dt);
 
       this.vmKickZ += (0 - this.vmKickZ) * expSmooth(18, dt);
@@ -2076,6 +2142,25 @@ export class FPSGameClient {
           }
         }
       } else {
+        // Fallback reload completion if reload duration elapsed and ammo_sync packet was delayed
+        if (this.local.reloadingEnd > 0 && now >= this.local.reloadingEnd) {
+          const st = this.getLocalWeaponStats();
+          const needed = st.magSize - this.local.ammo;
+          if (needed > 0 && this.local.reserveAmmo > 0) {
+            const add = Math.min(needed, this.local.reserveAmmo);
+            this.local.ammo += add;
+            if (this.mode !== 'practice') {
+              this.local.reserveAmmo -= add;
+            }
+            if (this.local.weaponsState?.[this.local.slot]) {
+              this.local.weaponsState[this.local.slot].ammo = this.local.ammo;
+              this.local.weaponsState[this.local.slot].reserve = this.local.reserveAmmo;
+            }
+            this.refreshHudWeapon();
+          }
+          this.local.reloadingEnd = 0;
+        }
+
         this.hud.updateReloadProgress(0);
         this.fpRig.rotation.y = 0.025 * (1 - b);
         this.fpRig.rotation.z += (((sprint ? 0.18 : 0) * (1 - b) + this.vmKickRoll) - this.fpRig.rotation.z) * expSmooth(12, dt);

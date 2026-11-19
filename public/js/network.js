@@ -692,6 +692,13 @@ export class NetworkClient {
             ...this.peerConns.keys(),
             ...this.relayClientIds
           ]);
+          if (this.hostRoom?.combatants) {
+            for (const [cid, p] of this.hostRoom.combatants.entries()) {
+              if (!p.isBot && cid !== this.clientId) {
+                allTargets.add(cid);
+              }
+            }
+          }
           allTargets.delete(this.clientId);
 
           // 1. Dispatch to ALL remote guests FIRST so network packets flush before Host builds 3D arena
@@ -964,11 +971,12 @@ export class NetworkClient {
         const isHardClose = Boolean(res?.explicitClose);
         this.relayConsecutiveErrors = (this.relayConsecutiveErrors || 0) + 1;
 
-        // Re-queue important packets & retry gracefully on transient/serverless cold-start errors (up to 8 attempts)
-        if (!isHardClose && wasJoined && this.relayConsecutiveErrors < 8) {
+        // Re-queue important packets & retry gracefully on transient/serverless cold-start errors (up to 20 attempts during active match)
+        const maxErrors = this.inP2PMatch ? 20 : 10;
+        if (!isHardClose && (wasJoined || this.inP2PMatch) && this.relayConsecutiveErrors < maxErrors) {
           if (outgoing.length && !this.p2pDirectReady) {
             const important = outgoing.filter((x) => x.type !== 'input');
-            this.clientRelayOutbox.unshift(...important.slice(0, 20));
+            this.clientRelayOutbox.unshift(...important.slice(0, 30));
           }
           retryDelayMs = 550;
           return;
