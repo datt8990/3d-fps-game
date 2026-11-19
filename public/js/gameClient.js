@@ -124,6 +124,7 @@ export class FPSGameClient {
     this.footstepTimer = 0;
 
     this.remoteEntities = new Map();
+    this.pendingRigQueue = [];
     this.rosterMeta = new Map();
     this.activeEffects = [];
 
@@ -198,6 +199,12 @@ export class FPSGameClient {
 
     document.addEventListener('pointerlockchange', () => {
       this.pointerLocked = document.pointerLockElement === this.canvas;
+      if (this.pointerLocked) {
+        if (document.activeElement && document.activeElement !== document.body && document.activeElement !== this.canvas) {
+          document.activeElement.blur?.();
+        }
+        window.focus();
+      }
       const lockHint = document.getElementById('hud-lock-prompt');
       if (lockHint && this.active) {
         lockHint.classList.toggle('hidden', this.pointerLocked || this.uiModalOpen);
@@ -253,8 +260,8 @@ export class FPSGameClient {
         0.15,
         Math.min(1.0, Math.tan((this.camera.fov * Math.PI) / 360) / Math.tan((this.baseFov * Math.PI) / 360))
       );
-      if (this.adsActive && this.currentAimTarget && this.currentAimTarget.angleDev < 0.16) {
-        zoomScale *= 0.70; // Aim-assist target friction keeps crosshair securely on target
+      if (this.adsActive && this.currentAimTarget && this.currentAimTarget.angleDev < 0.30) {
+        zoomScale *= 0.48; // Aim-assist target friction keeps crosshair securely stuck on target
       }
       const dx = e.movementX || 0;
       const dy = e.movementY || 0;
@@ -333,7 +340,8 @@ export class FPSGameClient {
       }
 
       if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
-        return;
+        if (this.uiModalOpen) return;
+        document.activeElement.blur?.();
       }
 
       // Radio Quick Callout Menu [Z] + [1..6]
@@ -346,13 +354,20 @@ export class FPSGameClient {
         const keyNum = e.code.replace('Digit', '');
         this.net.send({ type: 'radio', key: keyNum });
         this.radioOpen = false;
-    this.currentAimTarget = null;
+        this.currentAimTarget = null;
         this.hud.toggleRadioMenu(false);
         soundEngine.playUiTone(880, 0.06);
         return;
       }
 
-      this.keys[e.code] = true;
+      // Record key and normalize WASD (supports QWERTY, Vietnamese Telex/IME with ư/đ, Arrow keys)
+      const code = e.code;
+      const key = (e.key || '').toLowerCase();
+      this.keys[code] = true;
+      if (code === 'KeyW' || key === 'w' || key === 'ư' || e.keyCode === 87) this.keys['KeyW'] = true;
+      if (code === 'KeyS' || key === 's' || e.keyCode === 83) this.keys['KeyS'] = true;
+      if (code === 'KeyA' || key === 'a' || e.keyCode === 65) this.keys['KeyA'] = true;
+      if (code === 'KeyD' || key === 'd' || key === 'đ' || e.keyCode === 68) this.keys['KeyD'] = true;
 
       // PUBG Auto-Run Toggle [=] or [NumEqual]
       if (e.code === 'Equal' || e.code === 'NumpadEqual' || e.key === '=' || e.key === '+') {
@@ -406,10 +421,21 @@ export class FPSGameClient {
     });
 
     window.addEventListener('keyup', (e) => {
-      this.keys[e.code] = false;
+      const code = e.code;
+      const key = (e.key || '').toLowerCase();
+      this.keys[code] = false;
+      if (code === 'KeyW' || key === 'w' || key === 'ư' || e.keyCode === 87) this.keys['KeyW'] = false;
+      if (code === 'KeyS' || key === 's' || e.keyCode === 83) this.keys['KeyS'] = false;
+      if (code === 'KeyA' || key === 'a' || e.keyCode === 65) this.keys['KeyA'] = false;
+      if (code === 'KeyD' || key === 'd' || key === 'đ' || e.keyCode === 68) this.keys['KeyD'] = false;
       if (e.code === 'Tab') {
         this.hud.toggleScoreboard(false);
       }
+    });
+
+    window.addEventListener('blur', () => {
+      this.keys = {};
+      this.mouseDownLeft = false;
     });
   }
 
@@ -530,7 +556,13 @@ export class FPSGameClient {
     this.stopMatchSession();
     this.active = true;
     this.localId = localClientId;
+    this.keys = {};
     this.canvas.style.display = 'block';
+
+    if (document.activeElement && document.activeElement !== document.body && document.activeElement !== this.canvas) {
+      document.activeElement.blur?.();
+    }
+    window.focus();
 
     this.mapId = payload.mapId || 'warehouse';
     this.mapData = MAPS[this.mapId] || MAPS.warehouse;
@@ -680,6 +712,14 @@ export class FPSGameClient {
     this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
     this.refreshHudWeapon();
 
+    if (this.renderer?.compile) {
+      try {
+        this.renderer.compile(this.scene, this.camera);
+      } catch (err) {
+        console.warn('[gameClient] renderer.compile warning:', err);
+      }
+    }
+
     setTimeout(() => {
       if (this.active && !this.uiModalOpen) this.requestLock();
     }, 120);
@@ -715,9 +755,10 @@ export class FPSGameClient {
       this.mapObjects = null;
     }
     for (const ent of this.remoteEntities.values()) {
-      this.scene.remove(ent.rig.group);
+      if (ent.rig?.group) this.scene.remove(ent.rig.group);
     }
     this.remoteEntities.clear();
+    this.pendingRigQueue = [];
     this.lootMeshes.clear();
     this.lootData.clear();
 
@@ -826,7 +867,7 @@ export class FPSGameClient {
     });
   }
 
-  findBestAimAssistTarget(maxAngle = 0.38, maxDist = 110) {
+  findBestAimAssistTarget(maxAngle = 0.65, maxDist = 120) {
     if (!this.remoteEntities || this.remoteEntities.size === 0) return null;
     const eyeX = this.local.x;
     const eyeY = this.local.y + this.local.eyeHeight;
@@ -834,7 +875,7 @@ export class FPSGameClient {
     const eyePos = { x: eyeX, y: eyeY, z: eyeZ };
 
     let bestTarget = null;
-    let minDev = maxAngle;
+    let minScore = Infinity;
 
     for (const ent of this.remoteEntities.values()) {
       if (ent.isAlly) continue;
@@ -843,14 +884,14 @@ export class FPSGameClient {
 
       const tgtX = ent.current.x;
       const isCrouched = Boolean(ent.target?.crouch);
-      const tgtY = ent.current.y + (isCrouched ? 0.95 : 1.25);
+      const tgtY = ent.current.y + (isCrouched ? 0.95 : 1.28);
       const tgtZ = ent.current.z;
 
       const dx = tgtX - eyeX;
       const dy = tgtY - eyeY;
       const dz = tgtZ - eyeZ;
       const dist = Math.hypot(dx, dy, dz);
-      if (dist < 1.0 || dist > maxDist) continue;
+      if (dist < 0.8 || dist > maxDist) continue;
 
       const targetYaw = Math.atan2(-dx, -dz);
       const targetPitch = Math.atan2(dy, Math.hypot(dx, dz));
@@ -859,20 +900,27 @@ export class FPSGameClient {
       const pitchDiff = targetPitch - this.local.pitch;
       const angleDev = Math.hypot(yawDiff, pitchDiff);
 
-      if (angleDev < minDev) {
-        if (this.mapData && !hasLineOfSight(eyePos, { x: tgtX, y: tgtY, z: tgtZ }, this.mapData)) {
-          continue;
+      if (angleDev < maxAngle) {
+        // Line-of-sight check: test upper chest or head (targets behind window/cover remain lockable)
+        if (this.mapData) {
+          const chestVisible = hasLineOfSight(eyePos, { x: tgtX, y: tgtY, z: tgtZ }, this.mapData);
+          const headVisible = !chestVisible && hasLineOfSight(eyePos, { x: tgtX, y: tgtY + 0.35, z: tgtZ }, this.mapData);
+          if (!chestVisible && !headVisible) continue;
         }
-        minDev = angleDev;
-        bestTarget = {
-          entity: ent,
-          dist,
-          angleDev,
-          targetYaw,
-          targetPitch,
-          yawDiff,
-          pitchDiff
-        };
+
+        const score = angleDev * (1.0 + Math.min(dist, 80) * 0.005);
+        if (score < minScore) {
+          minScore = score;
+          bestTarget = {
+            entity: ent,
+            dist,
+            angleDev,
+            targetYaw,
+            targetPitch,
+            yawDiff,
+            pitchDiff
+          };
+        }
       }
     }
     return bestTarget;
@@ -880,10 +928,10 @@ export class FPSGameClient {
 
   triggerAdsSnapAssist() {
     if (!this.active || this.local.dead || this.local.dropPhase !== 'ground') return;
-    const best = this.findBestAimAssistTarget(0.38, 110);
+    // Nhạy bén vượt trội: góc quét rộng 0.68 rad (~39 độ), ghim trực tiếp 94% vào thân trên kẻ địch
+    const best = this.findBestAimAssistTarget(0.68, 120);
     if (best) {
-      // Ghim tâm 68% vào người địch gần tâm nhất khi bật ngắm
-      const snapWeight = 0.68;
+      const snapWeight = 0.94;
       this.local.yaw += best.yawDiff * snapWeight;
       this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch + best.pitchDiff * snapWeight));
       this.currentAimTarget = best;
@@ -895,11 +943,12 @@ export class FPSGameClient {
       this.currentAimTarget = null;
       return;
     }
-    const best = this.findBestAimAssistTarget(0.24, 110);
+    // Góc tracking rộng 0.52 rad (~30 độ), lực từ tính (magnetism) bám dính cực nhạy theo mục tiêu
+    const best = this.findBestAimAssistTarget(0.52, 120);
     this.currentAimTarget = best;
     if (best) {
-      // Rotational magnetism: hỗ trợ bám tâm mượt mà khi địch di chuyển
-      const pullRate = Math.min(1.0, dt * 7.2) * 0.42;
+      // Rotational magnetism: hỗ trợ bám chặt mục tiêu khi địch di chuyển hoặc khi quét tâm
+      const pullRate = Math.min(1.0, dt * 16.0) * 0.75;
       this.local.yaw += best.yawDiff * pullRate;
       this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch + best.pitchDiff * pullRate));
     }
@@ -1042,7 +1091,7 @@ export class FPSGameClient {
       this.refreshHudWeapon();
     } else {
       const ent = this.remoteEntities.get(msg.id);
-      if (ent) {
+      if (ent?.rig) {
         const meta = this.rosterMeta.get(msg.id);
         swapRigWeapon(ent.rig, msg.weaponId, meta?.skins?.[msg.weaponId] || 'default', meta?.attachments?.[msg.weaponId] || {});
       }
@@ -1080,7 +1129,7 @@ export class FPSGameClient {
       soundEngine.playGunshot(msg.weaponId, msg.suppressed, dist);
       if (!msg.suppressed) this.hud.markEnemyFired(msg.shooterId);
       const ent = this.remoteEntities.get(msg.shooterId);
-      if (ent) ent.rig.recoilKick = 0.22;
+      if (ent?.rig) ent.rig.recoilKick = 0.22;
     }
 
     const isMelee = msg.weaponId === 'knife' || msg.weaponId === 'karambit';
@@ -1236,6 +1285,51 @@ export class FPSGameClient {
     this.refreshBackpackUI();
   }
 
+  instantiateEntityRig(ent) {
+    if (!this.active || !this.remoteEntities.has(ent.id) || ent.rig) return;
+    const ps = ent.target || ent.current;
+    const rig = createOperatorRig({
+      operator: ent.meta.operator,
+      outfit: ent.meta.outfit,
+      team: ent.meta.team,
+      weaponId: ps.w || 'ak47',
+      skinId: ent.meta.skins?.[ps.w] || 'default',
+      attachments: ent.meta.attachments?.[ps.w] || {},
+      name: ent.meta.name,
+      isAlly: ent.isAlly
+    });
+    let chuteCanopy = null;
+    if (this.mode === 'survival') {
+      chuteCanopy = createParachuteMesh();
+      chuteCanopy.visible = false;
+      rig.group.add(chuteCanopy);
+    }
+    rig.group.position.set(ent.current.x, ent.current.y, ent.current.z);
+    rig.group.rotation.y = ent.current.yaw || 0;
+    this.scene.add(rig.group);
+    ent.rig = rig;
+    ent.chuteCanopy = chuteCanopy;
+  }
+
+  processPendingRigs(maxPerFrame = 2) {
+    if (!this.pendingRigQueue || this.pendingRigQueue.length === 0) return;
+    if (this.pendingRigQueue.length > 1) {
+      const lx = this.local.x, lz = this.local.z;
+      this.pendingRigQueue.sort((a, b) => {
+        const da = (a.current.x - lx) ** 2 + (a.current.z - lz) ** 2;
+        const db = (b.current.x - lx) ** 2 + (b.current.z - lz) ** 2;
+        return da - db;
+      });
+    }
+    let count = 0;
+    while (this.pendingRigQueue.length > 0 && count < maxPerFrame) {
+      const ent = this.pendingRigQueue.shift();
+      if (!this.remoteEntities.has(ent.id)) continue;
+      this.instantiateEntityRig(ent);
+      count++;
+    }
+  }
+
   onWorldState(msg) {
     if (!this.active) return;
     if (msg.t && this.lastWorldStateAt && msg.t < this.lastWorldStateAt) return;
@@ -1329,38 +1423,21 @@ export class FPSGameClient {
           attachments: {}
         };
         const isAlly = Boolean(this.modeConfig?.teamBased && meta.team === this.localMeta?.team);
-        const rig = createOperatorRig({
-          operator: meta.operator,
-          outfit: meta.outfit,
-          team: meta.team,
-          weaponId: ps.w || 'ak47',
-          skinId: meta.skins?.[ps.w] || 'default',
-          attachments: meta.attachments?.[ps.w] || {},
-          name: meta.name,
-          isAlly
-        });
-        let chuteCanopy = null;
-        if (this.mode === 'survival') {
-          chuteCanopy = createParachuteMesh();
-          chuteCanopy.visible = false;
-          rig.group.add(chuteCanopy);
-        }
-        rig.group.position.set(ps.x, ps.y, ps.z);
-        this.scene.add(rig.group);
         ent = {
           id: ps.id,
           meta,
           isAlly,
-          rig,
-          chuteCanopy,
+          rig: null,
+          chuteCanopy: null,
           current: { x: ps.x, y: ps.y, z: ps.z, yaw: ps.yaw, pitch: ps.pitch },
           pred: { x: ps.x, y: ps.y, z: ps.z },
           predAge: 0,
           target: { ...ps }
         };
         this.remoteEntities.set(ps.id, ent);
+        this.pendingRigQueue.push(ent);
       } else {
-        if (ps.w && ps.w !== ent.rig.currentWeaponId) {
+        if (ent.rig && ps.w && ps.w !== ent.rig.currentWeaponId) {
           swapRigWeapon(ent.rig, ps.w, ent.meta.skins?.[ps.w] || 'default', ent.meta.attachments?.[ps.w] || {});
         }
         const wasDead = Boolean(ent.target?.dead);
@@ -1377,7 +1454,7 @@ export class FPSGameClient {
 
     for (const [id, ent] of this.remoteEntities.entries()) {
       if (!seenIds.has(id)) {
-        this.scene.remove(ent.rig.group);
+        if (ent.rig?.group) this.scene.remove(ent.rig.group);
         this.remoteEntities.delete(id);
       }
     }
@@ -1502,6 +1579,7 @@ export class FPSGameClient {
       this.tryFireWeapon(false);
     }
 
+    this.processPendingRigs(2);
     this.updateLocalPlayer(dt, now, wStats);
     this.updateRemotePlayers(dt, now * 0.001);
 
@@ -1616,7 +1694,12 @@ export class FPSGameClient {
       return;
     }
 
-    const keyForward = (this.keys['KeyW'] || this.keys['ArrowUp'] ? 1 : 0) - (this.keys['KeyS'] || this.keys['ArrowDown'] ? 1 : 0);
+    const isFwd = Boolean(this.keys['KeyW'] || this.keys['ArrowUp'] || this.keys['w'] || this.keys['ư']);
+    const isBack = Boolean(this.keys['KeyS'] || this.keys['ArrowDown'] || this.keys['s']);
+    const isRight = Boolean(this.keys['KeyD'] || this.keys['ArrowRight'] || this.keys['d'] || this.keys['đ']);
+    const isLeft = Boolean(this.keys['KeyA'] || this.keys['ArrowLeft'] || this.keys['a']);
+
+    const keyForward = (isFwd ? 1 : 0) - (isBack ? 1 : 0);
     if (keyForward < 0 && this.autoRun) {
       this.autoRun = false;
       this.hud.setAutoRunActive?.(false);
@@ -1627,7 +1710,7 @@ export class FPSGameClient {
       this.hud.setAutoRunActive?.(false);
     }
     const forward = this.autoRun ? 1 : keyForward;
-    const right = (this.keys['KeyD'] || this.keys['ArrowRight'] ? 1 : 0) - (this.keys['KeyA'] || this.keys['ArrowLeft'] ? 1 : 0);
+    const right = (isRight ? 1 : 0) - (isLeft ? 1 : 0);
     const sprint = (this.autoRun || Boolean(this.keys['ShiftLeft'] || this.keys['ShiftRight'])) && forward > 0 && !crouch && !this.adsActive;
     const jump = Boolean(this.keys['Space']);
     const interact = Boolean(this.keys['KeyE'] || this.keys['KeyF']);
@@ -1902,6 +1985,7 @@ export class FPSGameClient {
     const posLerp = expSmooth(16, dt);
     const angleLerp = expSmooth(18, dt);
     for (const ent of this.remoteEntities.values()) {
+      if (!ent.rig) continue;
       const tgt = ent.target;
       const cur = ent.current;
       if (tgt.dp === 1) {

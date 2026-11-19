@@ -288,19 +288,30 @@ function buildClipBank(key, targetGltf, animSourceGltf) {
   return bank;
 }
 
-export async function preloadCharacterModels() {
+export async function preloadCharacterModels(priorityKey = 'soldier') {
   if (typeof window === 'undefined') return;
   if (preloadPromise) return preloadPromise;
 
   preloadPromise = (async () => {
     const keys = Object.keys(CHARACTER_ARCHETYPES);
-    const results = await Promise.all(keys.map((k) => trackedLoadRaw(k)));
+    const priorityList = [priorityKey, 'soldier', 'xbot'].filter((k) => k && CHARACTER_ARCHETYPES[k]);
+    const remaining = keys.filter((k) => !priorityList.includes(k));
+    const loadOrder = [...new Set([...priorityList, ...remaining])];
+
     const byKey = {};
-    keys.forEach((k, idx) => { byKey[k] = results[idx]; });
-    for (const k of keys) {
-      if (byKey[k]) {
-        const srcKey = CHARACTER_ARCHETYPES[k].animSource;
-        buildClipBank(k, byKey[k], byKey[srcKey]);
+    for (const k of loadOrder) {
+      try {
+        const gltf = await trackedLoadRaw(k);
+        byKey[k] = gltf;
+        if (gltf) {
+          const srcKey = CHARACTER_ARCHETYPES[k].animSource;
+          if (byKey[srcKey]) {
+            buildClipBank(k, gltf, byKey[srcKey]);
+          }
+        }
+        await new Promise((r) => setTimeout(r, 80));
+      } catch (err) {
+        console.warn(`[CharacterLoader] Preload failed for ${k}:`, err);
       }
     }
     return byKey;
@@ -842,6 +853,8 @@ function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
   });
 }
 
+const styledMatCache = new Map();
+
 export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlowColor) {
   const isSwimwear = Boolean(outCfg?.isSwimwear);
   const isVroidFemale = ['vita', 'vivi', 'shino', 'shibu', 'sample_a'].includes(key);
@@ -874,6 +887,10 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
     }
 
     const applyMat = (srcMat) => {
+      const cacheKey = `${key}_${opCfg?.id || 'op'}_${outCfg?.id || 'out'}_${teamGlowColor}_${srcMat.name || srcMat.uuid}`;
+      if (styledMatCache.has(cacheKey)) {
+        return styledMatCache.get(cacheKey);
+      }
       const mat = upgradeToStandardMaterial(srcMat);
       mat.envMapIntensity = 1.25;
       const mName = (mat.name || '').toLowerCase();
@@ -1009,6 +1026,7 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
         }
       }
 
+      styledMatCache.set(cacheKey, mat);
       return mat;
     };
 
@@ -1091,34 +1109,39 @@ export function extractRigBones(modelRoot) {
 }
 
 export function instantiateGlbInstance(loadedBundle, opCfg, outCfg, teamGlowColor) {
-  const { gltf, clips, cfg } = loadedBundle;
-  const cloned = SkeletonUtils.clone(gltf.scene);
-  const key = Object.keys(CHARACTER_ARCHETYPES).find((k) => CHARACTER_ARCHETYPES[k] === cfg) || 'soldier';
-  if (cfg.rigType === 'vroid') {
-    applyFemaleCurveSculpt(cloned, Boolean(outCfg?.isSwimwear));
-  }
-  const scaleMult = opCfg?.helmetStyle === 'heavy' ? 1.07 : 1.0;
-  cloned.scale.setScalar(cfg.scale * scaleMult);
-  cloned.rotation.y = cfg.facingY;
-  if (cfg.yOffset) {
-    cloned.position.y = cfg.yOffset * cfg.scale * scaleMult;
-  }
+  try {
+    const { gltf, clips, cfg } = loadedBundle;
+    const cloned = SkeletonUtils.clone(gltf.scene);
+    const key = Object.keys(CHARACTER_ARCHETYPES).find((k) => CHARACTER_ARCHETYPES[k] === cfg) || 'soldier';
+    if (cfg.rigType === 'vroid') {
+      applyFemaleCurveSculpt(cloned, Boolean(outCfg?.isSwimwear));
+    }
+    const scaleMult = opCfg?.helmetStyle === 'heavy' ? 1.07 : 1.0;
+    cloned.scale.setScalar(cfg.scale * scaleMult);
+    cloned.rotation.y = cfg.facingY;
+    if (cfg.yOffset) {
+      cloned.position.y = cfg.yOffset * cfg.scale * scaleMult;
+    }
 
-  styleOperatorGlbMaterials(cloned, key, opCfg, outCfg, teamGlowColor);
-  curlHandsIntoGrip(cloned);
+    styleOperatorGlbMaterials(cloned, key, opCfg, outCfg, teamGlowColor);
+    curlHandsIntoGrip(cloned);
 
-  const mixer = new THREE.AnimationMixer(cloned);
-  const actions = {};
-  for (const [k, clip] of Object.entries(clips || {})) {
-    if (!clip) continue;
-    const act = mixer.clipAction(clip);
-    act.setLoop(THREE.LoopRepeat, Infinity);
-    actions[k] = act;
-  }
-  if (actions.idle) {
-    actions.idle.play();
-  }
+    const mixer = new THREE.AnimationMixer(cloned);
+    const actions = {};
+    for (const [k, clip] of Object.entries(clips || {})) {
+      if (!clip) continue;
+      const act = mixer.clipAction(clip);
+      act.setLoop(THREE.LoopRepeat, Infinity);
+      actions[k] = act;
+    }
+    if (actions.idle) {
+      actions.idle.play();
+    }
 
-  const { bones, restArmQuats, restHeadQuat } = extractRigBones(cloned);
-  return { modelRoot: cloned, mixer, actions, bones, restArmQuats, restHeadQuat, activeAnim: 'idle' };
+    const { bones, restArmQuats, restHeadQuat } = extractRigBones(cloned);
+    return { modelRoot: cloned, mixer, actions, bones, restArmQuats, restHeadQuat, activeAnim: 'idle' };
+  } catch (err) {
+    console.warn('[CharacterLoader] instantiateGlbInstance error:', err);
+    return null;
+  }
 }

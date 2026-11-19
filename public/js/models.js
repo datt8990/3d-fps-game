@@ -504,7 +504,9 @@ function buildReceiverPolish(width, yPort, zPort, darkMat, steelMat, brassMat) {
   return g;
 }
 
-export function createWeaponModel(weaponId = 'ak47', skinId = 'default', attachments = {}) {
+const weaponTemplateCache = new Map();
+
+function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachments = {}) {
   const group = new THREE.Group();
   const skin = WEAPON_SKINS[skinId] || WEAPON_SKINS.default;
   const skinTex = getWeaponSkinTexture(skinId);
@@ -2038,6 +2040,9 @@ export function createWeaponModel(weaponId = 'ak47', skinId = 'default', attachm
     }
   }
 
+  if (magMesh) magMesh.name = 'gun_mag';
+  if (boltMesh) boltMesh.name = 'gun_bolt';
+
   group.userData = {
     weaponId,
     optic,
@@ -2050,6 +2055,29 @@ export function createWeaponModel(weaponId = 'ak47', skinId = 'default', attachm
     aimDistanceZ
   };
   return group;
+}
+
+export function createWeaponModel(weaponId = 'ak47', skinId = 'default', attachments = {}) {
+  const attachKey = Object.entries(attachments || {}).sort().map(([k, v]) => `${k}:${v}`).join(',');
+  const cacheKey = `${weaponId}_${skinId}_${attachKey}`;
+  let template = weaponTemplateCache.get(cacheKey);
+  if (!template) {
+    template = buildWeaponModelDirect(weaponId, skinId, attachments);
+    weaponTemplateCache.set(cacheKey, template);
+  }
+  const cloned = template.clone(true);
+  const clonedMag = cloned.getObjectByName('gun_mag');
+  const clonedBolt = cloned.getObjectByName('gun_bolt');
+  cloned.userData = {
+    ...template.userData,
+    magMesh: clonedMag,
+    magBasePos: clonedMag ? clonedMag.position.clone() : null,
+    boltMesh: clonedBolt,
+    boltBaseZ: clonedBolt ? clonedBolt.position.z : 0,
+    muzzlePos: template.userData.muzzlePos ? template.userData.muzzlePos.clone() : null,
+    aimSightLocalPos: template.userData.aimSightLocalPos ? template.userData.aimSightLocalPos.clone() : null
+  };
+  return cloned;
 }
 
 function getOperatorFpArmProfile(operatorId, outfitId, outfit) {
@@ -2271,7 +2299,16 @@ export function createFirstPersonRig(weaponId, skinId, attachments, outfitId = '
   return root;
 }
 
+const nameplateCache = new Map();
+
 function makeNameplateSprite(name, team, isAlly) {
+  const cleanName = String(name || 'Chiến Binh').slice(0, 16);
+  const cacheKey = `${cleanName}_${team}_${isAlly}`;
+  const cached = nameplateCache.get(cacheKey);
+  if (cached) {
+    return cached.clone();
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 64;
@@ -2291,14 +2328,15 @@ function makeNameplateSprite(name, team, isAlly) {
   ctx.font = 'bold 20px "Segoe UI", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(String(name || 'Chiến Binh').slice(0, 16), 128, 32);
+  ctx.fillText(cleanName, 128, 32);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
   sprite.scale.set(1.45, 0.36, 1);
   sprite.position.set(0, 2.15, 0);
-  return sprite;
+  nameplateCache.set(cacheKey, sprite);
+  return sprite.clone();
 }
 
 function mountWeaponOnGroup(weaponMount, weaponId, skinId, attachments) {
@@ -2785,21 +2823,26 @@ function buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowC
 
 function hydrateGlbIntoRig(rig, loaded, archetypeKey, opCfg, outCfg, teamGlowColor) {
   if (!loaded || !loaded.gltf || rig.disposed) return;
-  clearTacticalMounts(rig);
-  if (rig.modelRoot) {
-    rig.bodyRoot.remove(rig.modelRoot);
+  try {
+    const inst = instantiateGlbInstance(loaded, opCfg, outCfg, teamGlowColor);
+    if (!inst || !inst.modelRoot) return;
+    clearTacticalMounts(rig);
+    if (rig.modelRoot) {
+      rig.bodyRoot.remove(rig.modelRoot);
+    }
+    rig.modelRoot = inst.modelRoot;
+    rig.mixer = inst.mixer;
+    rig.actions = inst.actions;
+    rig.bones = inst.bones;
+    rig.restArmQuats = inst.restArmQuats;
+    rig.restHeadQuat = inst.restHeadQuat;
+    rig.activeAnim = inst.activeAnim;
+    rig.archetypeKey = archetypeKey;
+    rig.bodyRoot.add(inst.modelRoot);
+    buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowColor);
+  } catch (err) {
+    console.warn('[models.js] hydrateGlbIntoRig error:', err);
   }
-  const inst = instantiateGlbInstance(loaded, opCfg, outCfg, teamGlowColor);
-  rig.modelRoot = inst.modelRoot;
-  rig.mixer = inst.mixer;
-  rig.actions = inst.actions;
-  rig.bones = inst.bones;
-  rig.restArmQuats = inst.restArmQuats;
-  rig.restHeadQuat = inst.restHeadQuat;
-  rig.activeAnim = inst.activeAnim;
-  rig.archetypeKey = archetypeKey;
-  rig.bodyRoot.add(inst.modelRoot);
-  buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowColor);
 }
 
 export function createOperatorRig({

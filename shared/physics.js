@@ -241,11 +241,27 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
     wishZ = (wishZ / wishLen) * moveSpeed;
   }
 
-  // Smooth ground/air acceleration
-  const accel = state.onGround ? 18.0 : 5.5;
+  // Responsive FPS ground/air acceleration (CS:GO / Valorant snappy feel, instant WASD response)
+  let accel;
+  if (state.onGround) {
+    if (wishLen > 1e-4) {
+      // Check if counter-strafing / turning back (dot product of velocity and wish dir is negative)
+      const dot = state.vx * wishX + state.vz * wishZ;
+      accel = dot < 0 ? 64.0 : 48.0;
+    } else {
+      // Stopping / braking friction
+      accel = 42.0;
+    }
+  } else {
+    accel = 8.5;
+  }
   const blend = Math.min(1, accel * clampedDt);
   state.vx = state.vx + (wishX - state.vx) * blend;
   state.vz = state.vz + (wishZ - state.vz) * blend;
+  if (wishLen <= 1e-4 && Math.hypot(state.vx, state.vz) < 0.08) {
+    state.vx = 0;
+    state.vz = 0;
+  }
 
   // Jump
   if (input.jump && state.onGround && !state.crouching) {
