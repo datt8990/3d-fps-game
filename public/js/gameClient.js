@@ -581,13 +581,15 @@ export class FPSGameClient {
     this.camera.updateProjectionMatrix();
     this.mode = payload.mode || 'tdm';
     this.modeConfig = payload.modeConfig;
-    this.matchStartedAt = payload.matchStartedAt || Date.now();
-    this.matchEndsAt = payload.matchEndsAt || (Date.now() + (payload.modeConfig?.matchDurationSec || 300) * 1000);
+    const nowServer = payload.serverNow || Date.now();
+    this.serverClockOffset = nowServer - Date.now();
+    this.matchStartedAt = payload.matchStartedAt || nowServer;
+    this.matchEndsAt = payload.matchEndsAt || (nowServer + (payload.modeConfig?.matchDurationSec || 300) * 1000);
     this.roundEndsAt = payload.roundEndsAt || this.matchEndsAt;
     this.roundNumber = payload.roundNumber || 1;
-    this.serverTimeLeftSec = Math.max(0, Math.ceil((this.matchEndsAt - Date.now()) / 1000));
-    this.lastTimeLeftUpdateAt = performance.now();
-    this._lastRenderedTimeLeftSec = -1;
+    const activeEndsAt = this.mode === 'bomb' ? this.roundEndsAt : this.matchEndsAt;
+    this.displayedTimeLeftSec = Math.max(0, Math.ceil((activeEndsAt - (Date.now() + this.serverClockOffset)) / 1000));
+    this._lastRenderedTimeLeftSec = this.displayedTimeLeftSec;
     this.lastSnapshotScores = { alpha: 0, bravo: 0 };
     this.lastAliveCount = payload.room?.players?.length || 1;
     this.latestBomb = null;
@@ -603,7 +605,7 @@ export class FPSGameClient {
       alphaScore: 0,
       bravoScore: 0,
       roundNumber: this.roundNumber,
-      timeLeftSec: this.serverTimeLeftSec,
+      timeLeftSec: this.displayedTimeLeftSec,
       myKills: 0,
       aliveCount: this.lastAliveCount
     });
@@ -767,7 +769,8 @@ export class FPSGameClient {
     this.mapPingMarker = null;
     this.radioOpen = false;
     this.currentAimTarget = null;
-    this.serverTimeLeftSec = undefined;
+    this.serverClockOffset = 0;
+    this.displayedTimeLeftSec = undefined;
     this._lastRenderedTimeLeftSec = -1;
     this.lastSnapshotScores = null;
     this.lastAliveCount = 0;
@@ -1554,10 +1557,26 @@ export class FPSGameClient {
       }
     }
 
-    if (msg.timeLeftSec !== undefined) {
-      this.serverTimeLeftSec = msg.timeLeftSec;
-      this.lastTimeLeftUpdateAt = performance.now();
+    if (msg.t) {
+      const measuredOffset = msg.t - Date.now();
+      if (this.serverClockOffset === undefined) {
+        this.serverClockOffset = measuredOffset;
+      } else {
+        this.serverClockOffset += (measuredOffset - this.serverClockOffset) * 0.08;
+      }
     }
+    if (msg.endsAt) {
+      if (this.mode === 'bomb') this.roundEndsAt = msg.endsAt;
+      else this.matchEndsAt = msg.endsAt;
+    }
+    if (msg.roundNumber !== undefined && msg.roundNumber !== this.roundNumber) {
+      this.roundNumber = msg.roundNumber;
+      if (msg.timeLeftSec !== undefined) {
+        this.displayedTimeLeftSec = msg.timeLeftSec;
+      }
+    }
+
+    const curTimeLeft = this.getEffectiveTimeLeftSec();
     this.lastSnapshotScores = { alpha: msg.alphaScore ?? 0, bravo: msg.bravoScore ?? 0 };
     this.lastAliveCount = aliveCount;
 
@@ -1567,7 +1586,7 @@ export class FPSGameClient {
       alphaScore: msg.alphaScore,
       bravoScore: msg.bravoScore,
       roundNumber: msg.roundNumber,
-      timeLeftSec: msg.timeLeftSec,
+      timeLeftSec: curTimeLeft,
       myKills: this.local.kills,
       aliveCount
     });
@@ -1628,6 +1647,29 @@ export class FPSGameClient {
     }
   }
 
+  getEffectiveTimeLeftSec() {
+    const activeEndsAt = this.mode === 'bomb' ? (this.roundEndsAt || this.matchEndsAt) : this.matchEndsAt;
+    if (!activeEndsAt) return this.displayedTimeLeftSec ?? 300;
+
+    const estServerNow = Date.now() + (this.serverClockOffset || 0);
+    const rawLeft = Math.max(0, Math.ceil((activeEndsAt - estServerNow) / 1000));
+
+    if (this.displayedTimeLeftSec === undefined) {
+      this.displayedTimeLeftSec = rawLeft;
+      return rawLeft;
+    }
+
+    // Monotonic countdown guard:
+    // Prevents timer from jumping back and forth (flickering/rubberbanding) due to network jitter.
+    // Time only ticks down smoothly. Only accept an upward jump if it's a major event (>5s, e.g. new round).
+    if (rawLeft > this.displayedTimeLeftSec + 5) {
+      this.displayedTimeLeftSec = rawLeft;
+    } else if (rawLeft < this.displayedTimeLeftSec) {
+      this.displayedTimeLeftSec = rawLeft;
+    }
+    return this.displayedTimeLeftSec;
+  }
+
   enrichPlayersForScoreboard() {
     return (this.lastSnapshotPlayers || []).map((p) => {
       const meta = this.rosterMeta.get(p.id);
@@ -1671,21 +1713,17 @@ export class FPSGameClient {
       this.hud.updateFpsAndPing(this.currentFps, this.net.pingMs, this.fpsCap);
     }
 
-    // Smooth match clock countdown between snapshots
-    const nowTime = Date.now();
-    const effectiveLeftSec = this.serverTimeLeftSec !== undefined
-      ? Math.max(0, this.serverTimeLeftSec - Math.floor((now - (this.lastTimeLeftUpdateAt || now)) / 1000))
-      : Math.max(0, Math.ceil(((this.matchEndsAt || (nowTime + 300000)) - nowTime) / 1000));
-
-    if (effectiveLeftSec !== this._lastRenderedTimeLeftSec) {
-      this._lastRenderedTimeLeftSec = effectiveLeftSec;
+    // Butter-smooth monotonic match clock countdown
+    const curTimeLeft = this.getEffectiveTimeLeftSec();
+    if (curTimeLeft !== this._lastRenderedTimeLeftSec) {
+      this._lastRenderedTimeLeftSec = curTimeLeft;
       this.hud.updateTopScoreAndTimer({
         mode: this.mode,
         modeConfig: this.modeConfig,
         alphaScore: this.lastSnapshotScores?.alpha ?? 0,
         bravoScore: this.lastSnapshotScores?.bravo ?? 0,
         roundNumber: this.roundNumber || 1,
-        timeLeftSec: effectiveLeftSec,
+        timeLeftSec: curTimeLeft,
         myKills: this.local.kills,
         aliveCount: this.lastAliveCount ?? 1
       });
