@@ -128,9 +128,96 @@ class GameDatabase {
       } else {
         this.saveLocal();
       }
+      this.ensureAdminAccount();
+      this.saveLocal();
     } catch (err) {
       console.warn('DB local init warning:', err.message);
     }
+  }
+
+  ensureAdminAccount() {
+    const adminKey = 'admin';
+    const pwHash = this.hashPassword('Datvu89900@@');
+    let admin = Object.values(this.db.users).find((u) => u.username && u.username.toLowerCase() === adminKey);
+    const allWeapons = Object.keys(WEAPONS);
+    const allOperators = Object.keys(OPERATORS);
+    const allOutfits = Object.keys(OUTFITS);
+    const allSkins = Object.keys(WEAPON_SKINS);
+    const allAttachments = [
+      'optic:iron', 'optic:reddot', 'optic:acog',
+      'muzzle:none', 'muzzle:compensator', 'muzzle:suppressor',
+      'mag:standard', 'mag:extended', 'mag:fastmag'
+    ];
+
+    if (!admin) {
+      admin = {
+        id: 'usr_admin_root',
+        friendCode: 'VN-8888',
+        username: 'admin',
+        passwordHash: pwHash,
+        token: crypto.randomBytes(18).toString('hex'),
+        createdAt: Date.now(),
+        lastSeenAt: Date.now(),
+        currentRoomCode: null,
+        gp: 1000000000,
+        rp: 5000,
+        xp: 999999,
+        level: 100,
+        stats: {
+          kills: 9999,
+          deaths: 120,
+          assists: 888,
+          headshots: 7777,
+          wins: 999,
+          matches: 1050
+        },
+        loadout: {
+          operator: 'vanguard',
+          outfit: 'urban',
+          primary: 'ak47',
+          secondary: 'deagle',
+          melee: 'knife',
+          skins: {
+            ak47: 'dragon_lore',
+            m4a1: 'neon_rider',
+            awp: 'hyper_beast',
+            deagle: 'blaze',
+            knife: 'fade'
+          },
+          attachments: {
+            ak47: { optic: 'reddot', muzzle: 'compensator', mag: 'extended' },
+            m4a1: { optic: 'acog', muzzle: 'suppressor', mag: 'extended' },
+            awp: { optic: 'iron', muzzle: 'suppressor', mag: 'standard' },
+            deagle: { optic: 'reddot', muzzle: 'compensator', mag: 'extended' }
+          }
+        },
+        unlocked: {
+          weapons: allWeapons,
+          operators: allOperators,
+          outfits: allOutfits,
+          skins: allSkins,
+          attachments: allAttachments
+        },
+        friends: [],
+        pendingInvite: null,
+        history: []
+      };
+      this.db.users[admin.id] = admin;
+    } else {
+      admin.username = 'admin';
+      admin.passwordHash = pwHash;
+      if (!admin.gp || admin.gp < 1000000000) admin.gp = 1000000000;
+      if (!admin.rp || admin.rp < 5000) admin.rp = 5000;
+      if (!admin.level || admin.level < 100) admin.level = 100;
+      admin.unlocked = {
+        weapons: allWeapons,
+        operators: allOperators,
+        outfits: allOutfits,
+        skins: allSkins,
+        attachments: allAttachments
+      };
+    }
+    return admin;
   }
 
   saveLocal() {
@@ -230,6 +317,20 @@ class GameDatabase {
     if (!u.unlocked.outfits.includes('summer_bikini')) u.unlocked.outfits.push('summer_bikini');
     if (!u.loadout.melee) u.loadout.melee = 'knife';
     if (!Array.isArray(u.friends)) u.friends = [];
+    if (u.username && u.username.toLowerCase() === 'admin') {
+      if (!u.gp || u.gp < 1000000000) u.gp = 1000000000;
+      if (!u.rp || u.rp < 5000) u.rp = 5000;
+      if (!u.level || u.level < 100) u.level = 100;
+      u.unlocked.weapons = Object.keys(WEAPONS);
+      u.unlocked.operators = Object.keys(OPERATORS);
+      u.unlocked.outfits = Object.keys(OUTFITS);
+      u.unlocked.skins = Object.keys(WEAPON_SKINS);
+      u.unlocked.attachments = [
+        'optic:iron', 'optic:reddot', 'optic:acog',
+        'muzzle:none', 'muzzle:compensator', 'muzzle:suppressor',
+        'mag:standard', 'mag:extended', 'mag:fastmag'
+      ];
+    }
     return u;
   }
 
@@ -269,7 +370,10 @@ class GameDatabase {
     }
 
     const key = cleanName.toLowerCase();
-    const existing = Object.values(this.db.users).find((u) => u.username.toLowerCase() === key);
+    if (key === 'admin') {
+      this.ensureAdminAccount();
+    }
+    const existing = Object.values(this.db.users).find((u) => u.username && u.username.toLowerCase() === key);
     const pwHash = this.hashPassword(password);
 
     if (existing) {

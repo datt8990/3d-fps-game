@@ -7,7 +7,7 @@ import {
   getEffectiveWeaponStats
 } from '/shared/constants.js';
 import { MAPS } from '/shared/maps.js';
-import { stepPlayerPhysics, stepAirbornePhysics, depenetratePlayerXZ } from '/shared/physics.js';
+import { stepPlayerPhysics, stepAirbornePhysics, depenetratePlayerXZ, hasLineOfSight } from '/shared/physics.js';
 import { buildThreeMap, createLootCrateMesh, createDropPlaneMesh, createParachuteMesh } from './mapBuilder.js';
 import {
   createFirstPersonRig,
@@ -111,6 +111,7 @@ export class FPSGameClient {
     this.bigMapOpen = false;
     this.mapPingMarker = null;
     this.radioOpen = false;
+    this.currentAimTarget = null;
 
     this.fpRig = null;
     this.fpSignature = '';
@@ -220,12 +221,20 @@ export class FPSGameClient {
         if (w?.isMelee) {
           this.tryFireWeapon(true);
         } else if (w?.isSniper) {
+          const wasAds = this.adsActive;
           this.sniperZoomStage = (this.sniperZoomStage + 1) % 3;
           this.adsActive = this.sniperZoomStage > 0;
           soundEngine.playMetallicClick(1050, 0.04, 0.18);
+          if (!wasAds && this.adsActive) {
+            this.triggerAdsSnapAssist();
+          }
         } else {
+          const wasAds = this.adsActive;
           this.adsActive = !this.adsActive;
           soundEngine.playMetallicClick(780, 0.03, 0.09);
+          if (!wasAds && this.adsActive) {
+            this.triggerAdsSnapAssist();
+          }
         }
       }
     });
@@ -240,10 +249,13 @@ export class FPSGameClient {
 
     window.addEventListener('mousemove', (e) => {
       if (!this.active || !this.pointerLocked || this.uiModalOpen || this.local.dead) return;
-      const zoomScale = Math.max(
+      let zoomScale = Math.max(
         0.15,
         Math.min(1.0, Math.tan((this.camera.fov * Math.PI) / 360) / Math.tan((this.baseFov * Math.PI) / 360))
       );
+      if (this.adsActive && this.currentAimTarget && this.currentAimTarget.angleDev < 0.16) {
+        zoomScale *= 0.70; // Aim-assist target friction keeps crosshair securely on target
+      }
       const dx = e.movementX || 0;
       const dy = e.movementY || 0;
       const pitchDelta = dy * this.sensitivity * zoomScale;
@@ -289,6 +301,7 @@ export class FPSGameClient {
         }
         if (this.radioOpen) {
           this.radioOpen = false;
+    this.currentAimTarget = null;
           this.hud.toggleRadioMenu(false);
           return;
         }
@@ -333,6 +346,7 @@ export class FPSGameClient {
         const keyNum = e.code.replace('Digit', '');
         this.net.send({ type: 'radio', key: keyNum });
         this.radioOpen = false;
+    this.currentAimTarget = null;
         this.hud.toggleRadioMenu(false);
         soundEngine.playUiTone(880, 0.06);
         return;
@@ -682,6 +696,7 @@ export class FPSGameClient {
     this.bigMapOpen = false;
     this.mapPingMarker = null;
     this.radioOpen = false;
+    this.currentAimTarget = null;
     this.dropPlaneData = null;
     this.dropPlaneMesh = null;
     this.localChuteRig = null;
@@ -811,6 +826,85 @@ export class FPSGameClient {
     });
   }
 
+  findBestAimAssistTarget(maxAngle = 0.38, maxDist = 110) {
+    if (!this.remoteEntities || this.remoteEntities.size === 0) return null;
+    const eyeX = this.local.x;
+    const eyeY = this.local.y + this.local.eyeHeight;
+    const eyeZ = this.local.z;
+    const eyePos = { x: eyeX, y: eyeY, z: eyeZ };
+
+    let bestTarget = null;
+    let minDev = maxAngle;
+
+    for (const ent of this.remoteEntities.values()) {
+      if (ent.isAlly) continue;
+      if (ent.target?.dead) continue;
+      if (ent.target?.dp === 1) continue;
+
+      const tgtX = ent.current.x;
+      const isCrouched = Boolean(ent.target?.crouch);
+      const tgtY = ent.current.y + (isCrouched ? 0.95 : 1.25);
+      const tgtZ = ent.current.z;
+
+      const dx = tgtX - eyeX;
+      const dy = tgtY - eyeY;
+      const dz = tgtZ - eyeZ;
+      const dist = Math.hypot(dx, dy, dz);
+      if (dist < 1.0 || dist > maxDist) continue;
+
+      const targetYaw = Math.atan2(-dx, -dz);
+      const targetPitch = Math.atan2(dy, Math.hypot(dx, dz));
+
+      const yawDiff = shortestAngleDiff(this.local.yaw, targetYaw);
+      const pitchDiff = targetPitch - this.local.pitch;
+      const angleDev = Math.hypot(yawDiff, pitchDiff);
+
+      if (angleDev < minDev) {
+        if (this.mapData && !hasLineOfSight(eyePos, { x: tgtX, y: tgtY, z: tgtZ }, this.mapData)) {
+          continue;
+        }
+        minDev = angleDev;
+        bestTarget = {
+          entity: ent,
+          dist,
+          angleDev,
+          targetYaw,
+          targetPitch,
+          yawDiff,
+          pitchDiff
+        };
+      }
+    }
+    return bestTarget;
+  }
+
+  triggerAdsSnapAssist() {
+    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground') return;
+    const best = this.findBestAimAssistTarget(0.38, 110);
+    if (best) {
+      // Ghim tâm 68% vào người địch gần tâm nhất khi bật ngắm
+      const snapWeight = 0.68;
+      this.local.yaw += best.yawDiff * snapWeight;
+      this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch + best.pitchDiff * snapWeight));
+      this.currentAimTarget = best;
+    }
+  }
+
+  updateAdsAimAssist(dt) {
+    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || !this.adsActive) {
+      this.currentAimTarget = null;
+      return;
+    }
+    const best = this.findBestAimAssistTarget(0.24, 110);
+    this.currentAimTarget = best;
+    if (best) {
+      // Rotational magnetism: hỗ trợ bám tâm mượt mà khi địch di chuyển
+      const pullRate = Math.min(1.0, dt * 7.2) * 0.42;
+      this.local.yaw += best.yawDiff * pullRate;
+      this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch + best.pitchDiff * pullRate));
+    }
+  }
+
   tryFireWeapon(heavyMelee = false) {
     if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen) return;
     const now = performance.now();
@@ -876,6 +970,7 @@ export class FPSGameClient {
         if (this.active && !this.local.dead && this.local.weaponId === st.id && performance.now() >= this.local.reloadingEnd) {
           this.sniperZoomStage = prevStage;
           this.adsActive = true;
+          this.triggerAdsSnapAssist();
         }
       }, 950);
     }
@@ -1718,6 +1813,10 @@ export class FPSGameClient {
       const recov = this.recoilAccumPitch * Math.min(1, 12 * dt);
       this.local.pitch = Math.max(-1.50, this.local.pitch - recov);
       this.recoilAccumPitch = Math.max(0, this.recoilAccumPitch - recov);
+    }
+
+    if (this.adsActive && !wStats.isMelee && this.local.dropPhase === 'ground') {
+      this.updateAdsAimAssist(dt);
     }
 
     this.camera.position.set(this.local.x, this.local.y + this.local.eyeHeight + bobY, this.local.z);
