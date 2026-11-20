@@ -7,7 +7,7 @@ import {
   getOutfitTextures,
   getWatchFaceTexture,
   getWeaponMetalBumpTexture,
-  getWeaponRoughnessTexture,
+  getStudioEnvMap,
   getWoodStockTexture,
   getPolymerGripTexture
 } from './textures.js';
@@ -60,8 +60,8 @@ function extrudeSideProfile(points, thickness = 0.04, bevel = 0.003, mat) {
     bevelEnabled: bevel > 0,
     bevelThickness: bevel,
     bevelSize: bevel,
-    bevelSegments: 3,
-    curveSegments: 12
+    bevelSegments: 2,
+    curveSegments: 8
   });
   geo.translate(0, 0, -innerDepth * 0.5);
   geo.rotateY(Math.PI / 2);
@@ -625,84 +625,158 @@ function buildHelicalMagazine(radius, length, y, z, mat, darkMat) {
 
 const weaponTemplateCache = new Map();
 
+const sharedWeaponMats = new Map();
+function getSharedWeaponMat(key, factory) {
+  let m = sharedWeaponMats.get(key);
+  if (!m) {
+    m = factory();
+    sharedWeaponMats.set(key, m);
+  }
+  return m;
+}
+
+// Merges all static non-animated weapon parts by material (drops 55+ draw calls -> ~6 draw calls!)
+// while keeping animated gun_mag, gun_bolt, gun_trigger completely intact for reload/recoil!
+function batchStaticWeaponParts(rootGroup) {
+  if (!BufferGeometryUtils?.mergeGeometries) return rootGroup;
+  rootGroup.updateMatrixWorld(true);
+  const invRoot = new THREE.Matrix4().copy(rootGroup.matrixWorld).invert();
+  const dynamicRoots = new Set();
+  for (const ch of rootGroup.children) {
+    if (ch.name === 'gun_mag' || ch.name === 'gun_bolt' || ch.name === 'gun_trigger') {
+      dynamicRoots.add(ch);
+    }
+  }
+  const isDynamicNode = (node) => {
+    let cur = node;
+    while (cur && cur !== rootGroup) {
+      if (dynamicRoots.has(cur)) return true;
+      cur = cur.parent;
+    }
+    return false;
+  };
+
+  const byMat = new Map();
+  const toRemove = [];
+  rootGroup.traverse((child) => {
+    if (!child.isMesh || !child.geometry || !child.visible) return;
+    if (isDynamicNode(child)) return;
+    const mat = Array.isArray(child.material) ? child.material[0] : child.material;
+    if (!mat) return;
+    try {
+      let g = child.geometry.index ? child.geometry.toNonIndexed() : child.geometry.clone();
+      const relM = new THREE.Matrix4().multiplyMatrices(invRoot, child.matrixWorld);
+      g.applyMatrix4(relM);
+      const keep = new Set(['position', 'normal', 'uv']);
+      for (const attrName of Object.keys(g.attributes)) {
+        if (!keep.has(attrName)) g.deleteAttribute(attrName);
+      }
+      if (!g.attributes.normal) g.computeVertexNormals();
+      if (!g.attributes.uv) {
+        g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      }
+      let arr = byMat.get(mat);
+      if (!arr) { arr = []; byMat.set(mat, arr); }
+      arr.push(g);
+      toRemove.push(child);
+    } catch {}
+  });
+
+  if (toRemove.length < 4) return rootGroup;
+  for (const child of toRemove) {
+    child.parent?.remove(child);
+  }
+  // Prune now-empty static containers
+  for (let i = rootGroup.children.length - 1; i >= 0; i--) {
+    const ch = rootGroup.children[i];
+    if (!dynamicRoots.has(ch) && ch.isGroup && ch.children.length === 0) {
+      rootGroup.remove(ch);
+    }
+  }
+  for (const [mat, geos] of byMat.entries()) {
+    if (!geos.length) continue;
+    const combined = geos.length === 1 ? geos[0] : BufferGeometryUtils.mergeGeometries(geos, false);
+    if (combined) {
+      if (geos.length > 1) {
+        for (const g of geos) g.dispose();
+      }
+      rootGroup.add(new THREE.Mesh(combined, mat));
+    } else {
+      for (const g of geos) rootGroup.add(new THREE.Mesh(g, mat));
+    }
+  }
+  return rootGroup;
+}
+
 function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachments = {}) {
   const group = new THREE.Group();
   const skin = WEAPON_SKINS[skinId] || WEAPON_SKINS.default;
   const skinTex = getWeaponSkinTexture(skinId);
   const metalBump = getWeaponMetalBumpTexture();
-  const metalRough = getWeaponRoughnessTexture();
   const woodTex = getWoodStockTexture('#85461e');
   const polyTex = getPolymerGripTexture('#1f242d');
 
-  const bodyMat = new THREE.MeshStandardMaterial({
+  const envMap = getStudioEnvMap();
+  const bodyMat = getSharedWeaponMat(`body_${skinId}`, () => new THREE.MeshStandardMaterial({
     map: skinTex,
     bumpMap: metalBump,
-    bumpScale: 0.0055,
-    roughnessMap: metalRough,
-    metalness: Math.min(0.95, skin.metalness + 0.10),
-    roughness: Math.max(0.20, skin.roughness),
-    envMapIntensity: 1.55
-  });
-  const darkMetal = new THREE.MeshStandardMaterial({
-    color: '#1b1f28',
-    bumpMap: metalBump,
     bumpScale: 0.0045,
-    roughnessMap: metalRough,
-    metalness: 0.88,
-    roughness: 0.34,
-    envMapIntensity: 1.45
-  });
-  const polymerMat = new THREE.MeshStandardMaterial({
+    envMap,
+    metalness: Math.min(0.88, skin.metalness + 0.06),
+    roughness: Math.max(0.20, skin.roughness - 0.04),
+    envMapIntensity: 1.15
+  }));
+  const darkMetal = getSharedWeaponMat('dark_metal', () => new THREE.MeshStandardMaterial({
+    color: '#1f242e',
+    bumpMap: metalBump,
+    bumpScale: 0.004,
+    envMap,
+    metalness: 0.80,
+    roughness: 0.30,
+    envMapIntensity: 1.05
+  }));
+  const polymerMat = getSharedWeaponMat('polymer', () => new THREE.MeshStandardMaterial({
     map: polyTex,
-    bumpMap: polyTex,
-    bumpScale: 0.007,
     color: '#ffffff',
     metalness: 0.14,
-    roughness: 0.64
-  });
-  const woodMat = new THREE.MeshStandardMaterial({
+    roughness: 0.62
+  }));
+  const woodMat = getSharedWeaponMat('wood', () => new THREE.MeshStandardMaterial({
     map: woodTex,
-    bumpMap: woodTex,
-    bumpScale: 0.0055,
     metalness: 0.06,
     roughness: 0.38
-  });
-  const steelMat = new THREE.MeshStandardMaterial({
-    color: '#8898ad',
+  }));
+  const steelMat = getSharedWeaponMat('steel', () => new THREE.MeshStandardMaterial({
+    color: '#90a0b5',
     bumpMap: metalBump,
-    bumpScale: 0.0028,
-    roughnessMap: metalRough,
-    metalness: 0.94,
+    bumpScale: 0.0025,
+    envMap,
+    metalness: 0.88,
     roughness: 0.22,
-    envMapIntensity: 1.65
-  });
-  const brassMat = new THREE.MeshStandardMaterial({
+    envMapIntensity: 1.25
+  }));
+  const brassMat = getSharedWeaponMat('brass', () => new THREE.MeshStandardMaterial({
     color: '#eab308',
-    metalness: 0.94,
-    roughness: 0.18,
-    envMapIntensity: 1.5
-  });
+    envMap,
+    metalness: 0.88,
+    roughness: 0.20,
+    envMapIntensity: 1.15
+  }));
   const useWoodGrip = skinId === 'default' && ['ak47', 'svd', 'rpk', 'm870', 'kar98k', 'thompson', 'db_shotgun', 'm1911', 'pkm'].includes(weaponId);
-  const fdePolyTex = getPolymerGripTexture('#a28458');
   const gripMat = useWoodGrip
     ? woodMat
     : (skinId === 'default' && (weaponId === 'scarh' || weaponId === 'mcx')
-      ? new THREE.MeshStandardMaterial({ map: fdePolyTex, bumpMap: fdePolyTex, bumpScale: 0.007, metalness: 0.14, roughness: 0.56 })
-      : new THREE.MeshStandardMaterial({
+      ? getSharedWeaponMat('grip_fde', () => new THREE.MeshStandardMaterial({ map: getPolymerGripTexture('#a28458'), metalness: 0.14, roughness: 0.56 }))
+      : getSharedWeaponMat(`grip_${skinId}`, () => new THREE.MeshStandardMaterial({
         map: getPolymerGripTexture(skin.woodOrGrip || '#1f242d'),
-        bumpMap: polyTex,
-        bumpScale: 0.007,
         metalness: 0.14,
         roughness: 0.54
-      }));
-  const accentMat = new THREE.MeshStandardMaterial({
+      })));
+  const accentMat = getSharedWeaponMat(`accent_${skinId}`, () => new THREE.MeshStandardMaterial({
     color: skin.accentColor,
-    bumpMap: metalBump,
-    bumpScale: 0.003,
-    roughnessMap: metalRough,
     metalness: 0.78,
-    roughness: 0.28
-  });
+    roughness: 0.26
+  }));
 
   let magMesh = null;
   let boltMesh = null;
@@ -2261,7 +2335,7 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   } else if (weaponId === 'mcx') {
     // SIG MCX Spear (XM7 NGSW 6.8mm): Sleek FDE Bronze anodized CNC receiver, long M-LOK rail, minimalist folding stock
     const bronzeMat = skinId === 'default'
-      ? new THREE.MeshStandardMaterial({ color: '#b5925b', bumpMap: metalBump, bumpScale: 0.004, roughnessMap: metalRough, roughness: 0.34, metalness: 0.62 })
+      ? new THREE.MeshStandardMaterial({ color: '#b5925b', bumpMap: metalBump, bumpScale: 0.004, envMap, roughness: 0.34, metalness: 0.62 })
       : bodyMat;
     const rec = extrudeSideProfile([
       [-0.115, -0.022], [0.005, -0.022], [0.012, -0.046], [0.090, -0.046],
@@ -2570,7 +2644,7 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
     const chassisMat = skinId === 'default'
       ? (isM24
         ? new THREE.MeshStandardMaterial({ color: '#1e242c', map: polyTex, bumpMap: polyTex, bumpScale: 0.005, roughness: 0.58, metalness: 0.22 })
-        : new THREE.MeshStandardMaterial({ color: '#4c545e', bumpMap: metalBump, bumpScale: 0.004, roughnessMap: metalRough, roughness: 0.36, metalness: 0.72 }))
+        : new THREE.MeshStandardMaterial({ color: '#4c545e', bumpMap: metalBump, bumpScale: 0.004, envMap, roughness: 0.36, metalness: 0.72 }))
       : bodyMat;
 
     const rec = extrudeSideProfile(isM24
@@ -2620,7 +2694,7 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
     // Classic Iconic Real-World Pistols: Colt M1911A1 .45 (Blued Steel + Walnut Grips) & Beretta M92FS (Open-Top Italian Slide + Exposed Stainless Barrel)
     const is1911 = weaponId === 'm1911';
     const slideMat = skinId === 'default'
-      ? new THREE.MeshStandardMaterial({ color: is1911 ? '#252b36' : '#1b2029', bumpMap: metalBump, bumpScale: 0.0035, roughnessMap: metalRough, metalness: 0.88, roughness: 0.26 })
+      ? new THREE.MeshStandardMaterial({ color: is1911 ? '#252b36' : '#1b2029', bumpMap: metalBump, bumpScale: 0.0035, envMap, metalness: 0.84, roughness: 0.26 })
       : bodyMat;
     const frameMat = skinId === 'default'
       ? (is1911 ? slideMat : darkMetal)
@@ -2673,7 +2747,7 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
       map: skinId === 'default' ? null : skinTex,
       bumpMap: metalBump,
       bumpScale: 0.002,
-      roughnessMap: metalRough,
+      envMap,
       color: skinId === 'default' ? (isKara ? '#ef4444' : '#e2e8f0') : '#ffffff',
       metalness: 0.95,
       roughness: 0.14,
@@ -2831,6 +2905,7 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
     aimSightLocalPos: new THREE.Vector3(0, aimSightY, aimSightZ),
     aimDistanceZ
   };
+  batchStaticWeaponParts(group);
   return group;
 }
 

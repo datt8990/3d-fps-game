@@ -1111,27 +1111,23 @@ export function getStudioEnvMap() {
 
 export function getWeaponMetalBumpTexture() {
   if (miscTextureCache.has('weapon_metal_bump')) return miscTextureCache.get('weapon_metal_bump');
-  const c = createCanvas(512, 512);
+  const c = createCanvas(256, 256);
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#808080';
-  ctx.fillRect(0, 0, 512, 512);
-  // Crisp CNC directional milling / brushed gunsteel grain + subtle parkerized bead-blasting
-  for (let y = 0; y < 512; y += 2) {
+  ctx.fillRect(0, 0, 256, 256);
+  // Crisp CNC directional milling / brushed gunsteel grain
+  for (let y = 0; y < 256; y += 2) {
     const v = 118 + ((y * 17) % 22);
     ctx.fillStyle = `rgb(${v},${v},${v})`;
-    ctx.fillRect(0, y, 512, 1);
+    ctx.fillRect(0, y, 256, 1);
   }
-  for (let i = 0; i < 4200; i++) {
-    const x = (i * 73) % 512;
-    const y = (i * 131) % 512;
-    const v = i % 3 === 0 ? 162 : (i % 3 === 1 ? 96 : 138);
+  for (let i = 0; i < 1600; i++) {
+    const x = (i * 73) % 256;
+    const y = (i * 131) % 256;
+    const v = i % 3 === 0 ? 160 : (i % 3 === 1 ? 98 : 138);
     ctx.fillStyle = `rgb(${v},${v},${v})`;
     ctx.fillRect(x, y, 2, 1);
   }
-  // Subtle recessed CNC panel seams
-  ctx.strokeStyle = 'rgba(55,55,55,0.45)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(16, 16, 480, 480);
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;

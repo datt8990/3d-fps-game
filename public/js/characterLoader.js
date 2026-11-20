@@ -357,7 +357,7 @@ function recolorGlbTexture(srcTex, primaryHex, secondaryHex, minLum = 0.24, acce
   if (recolorTexCache.has(cacheKey)) return recolorTexCache.get(cacheKey);
 
   try {
-    const maxDim = 512;
+    const maxDim = 256;
     const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
     const w = Math.max(1, Math.round(img.width * scale));
     const h = Math.max(1, Math.round(img.height * scale));
@@ -542,20 +542,19 @@ function applyRecoloredClothingMat(mat, primaryHex, secondaryHex, minLum = 0.25,
   if (recolored) {
     mat.map = recolored;
     mat.color.set('#ffffff');
+    // Lightweight flat emissive accents (avoids expensive per-pixel emissiveMap shader variant)
     if (outfitId === 'cyber') {
-      mat.emissive.set('#ffffff');
-      mat.emissiveMap = recolored;
-      mat.emissiveIntensity = 0.34;
+      mat.emissive.set('#22114a');
+      mat.emissiveIntensity = 0.45;
     } else if (outfitId === 'royal_gold') {
-      mat.emissive.set('#ca8a04');
-      mat.emissiveIntensity = 0.14;
+      mat.emissive.set('#713f12');
+      mat.emissiveIntensity = 0.22;
     } else if (outfitId === 'crimson') {
-      mat.emissive.set('#7f1d1d');
-      mat.emissiveIntensity = 0.12;
+      mat.emissive.set('#450a0a');
+      mat.emissiveIntensity = 0.22;
     } else if (outfitId === 'stealth_ops') {
-      mat.emissive.set('#ffffff');
-      mat.emissiveMap = recolored;
-      mat.emissiveIntensity = 0.16;
+      mat.emissive.set('#052e16');
+      mat.emissiveIntensity = 0.20;
     }
   } else {
     mat.color.copy(blendWithWhite(primaryHex, fallbackTintStrength));
