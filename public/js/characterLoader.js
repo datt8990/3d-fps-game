@@ -764,62 +764,93 @@ function applyFemaleCurveSculpt(modelRoot, isSwimwear = false, archetypeKey = 'v
           modelPos.z *= 1 - 0.095 * torsoMask;
           changed = true;
         } else if (isOuterGarment && torsoMask > 0.001) {
-          // Slender tailored uniform fit + subtle waist taper while keeping garment wider than inner body
-          const waistFocus = Math.exp(-Math.pow((p.y - waistY) / 0.11, 2));
-          modelPos.x *= 1 - (0.045 + 0.030 * waistFocus) * torsoMask;
+          // Slender tailored upper uniform + waist taper while preserving natural lower hip contour
+          const upperWaistFade = Math.max(0, Math.min(1, (p.y - (hipY + 0.015)) / 0.09));
+          const waistFocus = Math.exp(-Math.pow((p.y - waistY) / 0.105, 2));
+          modelPos.x *= 1 - (0.036 * upperWaistFade + 0.032 * waistFocus) * torsoMask;
           changed = true;
         }
       } else {
-        // Bikini / Summer Swimwear: sleek slender silhouette directly on Body_00_SKIN
-        if (p.y > hipY - 0.10 && p.y < bustY + 0.12 && Math.abs(p.x) < 0.21) {
+        // Bikini / Summer Swimwear: slender upper ribcage & waist, fading cleanly before the hips for natural hourglass balance
+        if (p.y > hipY + 0.01 && p.y < bustY + 0.12 && Math.abs(p.x) < 0.21) {
           const xFade = Math.max(0, Math.min(1, (0.21 - Math.abs(p.x)) / 0.05));
+          const yBotFade = Math.max(0, Math.min(1, (p.y - (hipY + 0.01)) / 0.085));
           const yTopFade = Math.max(0, Math.min(1, (bustY + 0.12 - p.y) / 0.06));
-          modelPos.x *= 1 - 0.055 * xFade * yTopFade;
+          modelPos.x *= 1 - 0.048 * xFade * yBotFade * yTopFade;
           changed = true;
         }
       }
 
-      // 1. Vong 1 (Bust fullness - proportional rounded projection in front of chest)
-      if (p.y > bustY - 0.12 && p.y < bustY + 0.12 && Math.abs(p.x) < 0.18 && p.z < 0.02) {
-        const frontGate = Math.max(0, Math.min(1, (-p.z - 0.012) / 0.065));
+      // 1. Vong 1 (Natural anatomical teardrop fullness — smooth upper slope, fuller lower curve, subtle cleavage separation, zero horizontal ballooning)
+      if (p.y > bustY - 0.125 && p.y < bustY + 0.125 && Math.abs(p.x) < 0.175 && p.z < 0.02) {
+        const frontGate = Math.max(0, Math.min(1, (-p.z - 0.008) / 0.062));
         if (frontGate > 0.001) {
-          const dy = (p.y - bustY) / 0.072;
-          const dxL = (p.x + xBust * 0.92) / 0.060;
-          const dxR = (p.x - xBust * 0.92) / 0.060;
+          const apexY = bustY - 0.005;
+          const sigmaY = p.y >= apexY ? 0.076 : 0.062;
+          const dy = (p.y - apexY) / sigmaY;
+          const dxL = (p.x + xBust * 0.94) / 0.058;
+          const dxR = (p.x - xBust * 0.94) / 0.058;
           const lobe = Math.max(Math.exp(-(dxL * dxL + dy * dy)), Math.exp(-(dxR * dxR + dy * dy)));
-          const bridge = Math.exp(-((p.x / 0.028) ** 2 + ((p.y - bustY) / 0.050) ** 2)) * 0.35;
-          const wBust = Math.min(1.0, lobe + bridge * 0.25) * frontGate;
-          if (wBust > 0.01) {
-            const bustProj = !isSwimwear && !isOuterGarment ? 0.010 : (!isSwimwear ? 0.028 : 0.026);
+          const cleftDip = 1 - 0.24 * Math.exp(-Math.pow(p.x / 0.022, 2));
+          const wBust = Math.min(1.0, lobe * cleftDip) * frontGate;
+          if (wBust > 0.008) {
+            const bustProj = !isSwimwear && !isOuterGarment ? 0.015 : (!isSwimwear ? 0.046 : 0.044);
             modelPos.z -= wBust * bustProj;
-            modelPos.y -= wBust * 0.004;
+            modelPos.y -= wBust * 0.0075;
+            // Subtle outer breast rounding (~5-6mm max) to keep natural spherical depth without widening the silhouette
+            const outerSide = Math.max(0, Math.min(1, (Math.abs(p.x) - xBust * 0.85) / 0.055));
+            modelPos.x += Math.sign(p.x) * wBust * outerSide * (!isSwimwear && !isOuterGarment ? 0.002 : 0.0055);
             changed = true;
           }
         }
       }
 
-      // 2. Vong 2 (Subtle trim waist)
-      if (Math.abs(p.y - waistY) < 0.08 && Math.abs(p.x) < 0.16) {
-        const wWaist = Math.exp(-Math.pow((p.y - waistY) / 0.052, 2));
-        if (wWaist > 0.01) {
-          modelPos.x *= 1 - 0.020 * wWaist;
+      // 2. Vong 2 (Balanced natural waist taper + subtle lower-back lumbar S-curve)
+      if (Math.abs(p.y - waistY) < 0.095 && Math.abs(p.x) < 0.165) {
+        const wWaist = Math.exp(-Math.pow((p.y - waistY) / 0.056, 2));
+        if (wWaist > 0.008) {
+          modelPos.x *= 1 - 0.046 * wWaist;
           changed = true;
+        }
+        if (p.z > 0.015) {
+          const lumbarY = Math.exp(-Math.pow((p.y - (waistY - 0.022)) / 0.048, 2));
+          const lumbarGate = Math.max(0, Math.min(1, (p.z - 0.015) / 0.050));
+          const wLumbar = lumbarY * lumbarGate;
+          if (wLumbar > 0.008) {
+            modelPos.z -= wLumbar * (!isSwimwear && !isOuterGarment ? 0.004 : 0.010);
+            changed = true;
+          }
         }
       }
 
-      // 3. Vong 3 (Sleek hips sideways + sculpted fuller rear projection +Z; garments loft cleanly above skin)
-      if (p.y > hipY - 0.16 && p.y < hipY + 0.135 && Math.abs(p.x) < 0.22) {
-        const rearGate = Math.max(0, Math.min(1, (p.z - 0.002) / 0.050));
-        if (rearGate > 0.01) {
-          const wGluteY = Math.exp(-Math.pow((p.y - (hipY - 0.018)) / 0.095, 2));
-          const cheekL = Math.exp(-Math.pow((p.x + 0.046) / 0.068, 2));
-          const cheekR = Math.exp(-Math.pow((p.x - 0.046) / 0.068, 2));
-          const midBridge = Math.exp(-(p.x * p.x) / 0.002) * 0.42;
-          const wGlute = rearGate * wGluteY * Math.min(1.0, Math.max(cheekL, cheekR) + midBridge);
-          if (wGlute > 0.01) {
-            const gluteProj = !isSwimwear && !isOuterGarment ? 0.012 : (!isSwimwear ? 0.040 : 0.035);
+      // 3. Vong 3 (Full natural rounded glutes + subtle balanced hip/upper-thigh curve — realistic proportions, never stretched wide)
+      if (p.y > hipY - 0.195 && p.y < hipY + 0.145 && Math.abs(p.x) < 0.23) {
+        const gluteCenterY = hipY - 0.022;
+        const rearGate = Math.max(0, Math.min(1, p.z / 0.048));
+        if (rearGate > 0.008) {
+          const sigmaGY = p.y >= gluteCenterY ? 0.088 : 0.082;
+          const wGluteY = Math.exp(-Math.pow((p.y - gluteCenterY) / sigmaGY, 2));
+          const cheekL = Math.exp(-Math.pow((p.x + 0.054) / 0.068, 2));
+          const cheekR = Math.exp(-Math.pow((p.x - 0.054) / 0.068, 2));
+          const cleftDip = 1 - 0.20 * Math.exp(-Math.pow(p.x / 0.020, 2));
+          const wGlute = rearGate * wGluteY * Math.min(1.0, Math.max(cheekL, cheekR) * cleftDip);
+          if (wGlute > 0.008) {
+            const gluteProj = !isSwimwear && !isOuterGarment ? 0.016 : (!isSwimwear ? 0.064 : 0.060);
+            const liftBias = p.y >= gluteCenterY ? 0.008 : 0.003;
             modelPos.z += wGlute * gluteProj;
-            modelPos.y += wGlute * 0.008;
+            modelPos.y += wGlute * liftBias;
+            changed = true;
+          }
+        }
+
+        // Smooth proportional outer hip-to-upper-thigh curve (~1.1cm max per side) for realistic waist-to-hip harmony
+        const sideGate = Math.max(0, Math.min(1, (Math.abs(p.x) - 0.045) / 0.065));
+        if (sideGate > 0.008) {
+          const wHipCurveY = Math.exp(-Math.pow((p.y - (hipY - 0.038)) / 0.088, 2));
+          const wSide = sideGate * wHipCurveY;
+          if (wSide > 0.008) {
+            const hipSideAmt = !isSwimwear && !isOuterGarment ? 0.003 : (!isSwimwear ? 0.012 : 0.011);
+            modelPos.x += Math.sign(p.x) * wSide * hipSideAmt;
             changed = true;
           }
         }

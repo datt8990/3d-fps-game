@@ -2716,23 +2716,23 @@ function buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowC
     const badgeMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.35, metalness: 0.08 });
     const chemMat = new THREE.MeshStandardMaterial({ color: '#a5f3fc', emissive: '#67e8f9', emissiveIntensity: 0.95, roughness: 0.22 });
 
-    // Slim contoured charcoal Plate Carrier + triple rifle mag pouches
-    const vest = makePlateCarrierVest('#1e222b', '#e2e8f0', -0.134, 0.082, 0.176, true);
+    // Slim contoured charcoal Plate Carrier + triple rifle mag pouches (cleared cleanly outside sculpted bust)
+    const vest = makePlateCarrierVest('#1e222b', '#e2e8f0', -0.149, 0.082, 0.176, true);
 
     // Side comms radio pouch + whip antenna on left flank
     const radioPouch = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.072, 0.044), matteMat);
-    radioPouch.position.set(-0.098, -0.056, -0.075);
+    radioPouch.position.set(-0.098, -0.056, -0.082);
     const radioAnt = new THREE.Mesh(new THREE.CylinderGeometry(0.0025, 0.0035, 0.068, 6), matteMat);
-    radioAnt.position.set(-0.098, 0.005, -0.075);
+    radioAnt.position.set(-0.098, 0.005, -0.082);
     vest.add(radioPouch, radioAnt);
 
     // White Rectangular Chest Security ID Card Badge + lanyard clip on upper left chest (-X)
     const idClip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.014, 0.006), steelTrim);
-    idClip.position.set(-0.056, 0.076, -0.143);
+    idClip.position.set(-0.056, 0.076, -0.158);
     const idCard = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.048, 0.004), badgeMat);
-    idCard.position.set(-0.058, 0.046, -0.145);
+    idCard.position.set(-0.058, 0.046, -0.160);
     const idPhoto = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.020, 0.002), steelTrim);
-    idPhoto.position.set(-0.058, 0.052, -0.148);
+    idPhoto.position.set(-0.058, 0.052, -0.163);
     vest.add(idClip, idCard, idPhoto);
 
     // Pair of Pale Cyan Chemlights hanging off left waist
@@ -2806,7 +2806,7 @@ function buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowC
     const glowMat = new THREE.MeshStandardMaterial({ color: armorGlow, emissive: armorGlow, emissiveIntensity: 1.4, roughness: 0.2 });
 
     // Slim contoured Black Tactical Plate Carrier Vest (cleared cleanly outside sculpted bust)
-    const vest = makePlateCarrierVest(suitArmor, armorGlow, -0.136, 0.084, 0.178, true);
+    const vest = makePlateCarrierVest(suitArmor, armorGlow, -0.151, 0.084, 0.178, true);
     attachBoneTrackedGear(rig, 'spine', vest, new THREE.Vector3(0, -0.025, 0));
 
     // Sleek Slim Carbon Shoulder Pauldrons
