@@ -366,18 +366,19 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   const sun = new THREE.DirectionalLight(sunColor, 1.90);
   sun.position.set(38, 62, 30);
   worldGroup.add(sun.target);
-  if (quality !== 'low') {
+  const enableWorldShadows = isOpenWorld ? quality === 'high' : quality !== 'low';
+  if (enableWorldShadows) {
     sun.castShadow = true;
-    const mapSize = quality === 'high' ? 2048 : 1024;
+    const mapSize = quality === 'high' ? 1024 : 512;
     sun.shadow.mapSize.set(mapSize, mapSize);
     sun.shadow.camera.near = 5;
-    sun.shadow.camera.far = isOpenWorld ? 160 : 160;
-    const d = isOpenWorld ? 54 : 54;
+    sun.shadow.camera.far = isOpenWorld ? 135 : 150;
+    const d = isOpenWorld ? 38 : 48;
     sun.shadow.camera.left = -d;
     sun.shadow.camera.right = d;
     sun.shadow.camera.top = d;
     sun.shadow.camera.bottom = -d;
-    sun.shadow.bias = -0.0005;
+    sun.shadow.bias = -0.0006;
   }
   worldGroup.add(sun);
 
@@ -388,6 +389,23 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
 
   // 3. Ground Surface (Chunked Heightfield Terrain + River/Ocean Water OR Flat Arena Floor)
   const sectorGroups = [];
+  const sectorGroupsMap = new Map();
+  const getSectorGrp = (bx, bz) => {
+    if (!isOpenWorld) return { key: 'root', grp: worldGroup };
+    const sx = Math.round(bx / 350) * 350;
+    const sz = Math.round(bz / 350) * 350;
+    const key = `${sx}_${sz}`;
+    let grp = sectorGroupsMap.get(key);
+    if (!grp) {
+      grp = new THREE.Group();
+      grp.userData.sectorCenter = { x: sx, z: sz };
+      sectorGroupsMap.set(key, grp);
+      sectorGroups.push(grp);
+      worldGroup.add(grp);
+    }
+    return { key, grp };
+  };
+
   if (isOpenWorld) {
     const t = mapData.terrain;
     const terrainMat = new THREE.MeshStandardMaterial({
@@ -439,7 +457,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
         tGeo.setIndex(indices);
         tGeo.computeVertexNormals();
         const tMesh = new THREE.Mesh(tGeo, terrainMat);
-        tMesh.receiveShadow = quality !== 'low';
+        tMesh.receiveShadow = enableWorldShadows;
         worldGroup.add(tMesh);
       }
     }
@@ -460,52 +478,77 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     waterMesh.position.y = t.waterLevel;
     worldGroup.add(waterMesh);
 
-    // Instanced Forest Trees (Instanced draw calls for trees)
+    // Sector-bucketed Instanced Forest Trees (distant island sectors are 100% culled!)
     if (mapData.trees?.length && THREE.InstancedMesh) {
       const dummy = new THREE.Object3D();
-      const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 3.6, 7);
+      const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 3.6, 6);
       trunkGeo.translate(0, 1.8, 0);
       const trunkMat = new THREE.MeshStandardMaterial({ color: '#5c3c1e', roughness: 0.9 });
-      const trunksMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, mapData.trees.length);
 
-      const leafGeo = new THREE.ConeGeometry(1.85, 5.2, 8);
+      const leafGeo = new THREE.ConeGeometry(1.85, 5.2, 7);
       leafGeo.translate(0, 4.6, 0);
       const leafMat = new THREE.MeshStandardMaterial({ color: '#166534', roughness: 0.85, metalness: 0.04 });
-      const leavesMesh = new THREE.InstancedMesh(leafGeo, leafMat, mapData.trees.length);
 
-      mapData.trees.forEach((tr, i) => {
-        dummy.position.set(tr.x, tr.y, tr.z);
-        dummy.scale.setScalar(tr.scale || 1);
-        dummy.rotation.y = (i * 1.7) % (Math.PI * 2);
-        dummy.updateMatrix();
-        trunksMesh.setMatrixAt(i, dummy.matrix);
-        leavesMesh.setMatrixAt(i, dummy.matrix);
-      });
-      trunksMesh.instanceMatrix.needsUpdate = true;
-      leavesMesh.instanceMatrix.needsUpdate = true;
-      trunksMesh.frustumCulled = false;
-      leavesMesh.frustumCulled = false;
-      worldGroup.add(trunksMesh, leavesMesh);
+      const treesBySector = new Map();
+      for (let i = 0; i < mapData.trees.length; i++) {
+        const tr = mapData.trees[i];
+        const { key } = getSectorGrp(tr.x, tr.z);
+        let arr = treesBySector.get(key);
+        if (!arr) { arr = []; treesBySector.set(key, arr); }
+        arr.push(tr);
+      }
+      for (const [key, list] of treesBySector.entries()) {
+        const grp = sectorGroupsMap.get(key) || worldGroup;
+        const trunksMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, list.length);
+        const leavesMesh = new THREE.InstancedMesh(leafGeo, leafMat, list.length);
+        for (let i = 0; i < list.length; i++) {
+          const tr = list[i];
+          dummy.position.set(tr.x, tr.y, tr.z);
+          dummy.scale.setScalar(tr.scale || 1);
+          dummy.rotation.y = (i * 1.7) % (Math.PI * 2);
+          dummy.updateMatrix();
+          trunksMesh.setMatrixAt(i, dummy.matrix);
+          leavesMesh.setMatrixAt(i, dummy.matrix);
+        }
+        trunksMesh.instanceMatrix.needsUpdate = true;
+        leavesMesh.instanceMatrix.needsUpdate = true;
+        trunksMesh.computeBoundingSphere();
+        leavesMesh.computeBoundingSphere();
+        grp.add(trunksMesh, leavesMesh);
+      }
     }
 
-    // Instanced Natural Boulders / Cliff Rocks (1 GPU draw call!)
+    // Sector-bucketed Instanced Boulders / Cliff Rocks (frustum & distance culled!)
     if (mapData.rocks?.length && THREE.InstancedMesh) {
       const dummy = new THREE.Object3D();
       const rockGeo = THREE.DodecahedronGeometry
         ? new THREE.DodecahedronGeometry(1.0, 0)
         : new THREE.BoxGeometry(1.6, 1.2, 1.6);
       const rockMat = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.94, metalness: 0.06 });
-      const rocksMesh = new THREE.InstancedMesh(rockGeo, rockMat, mapData.rocks.length);
-      mapData.rocks.forEach((rk, i) => {
-        dummy.position.set(rk.x, rk.y + (rk.ry || 1) * 0.35, rk.z);
-        dummy.scale.set(rk.s || 1.5, rk.ry || 1.2, (rk.s || 1.5) * 0.9);
-        dummy.rotation.set(i * 0.4, i * 1.1, i * 0.2);
-        dummy.updateMatrix();
-        rocksMesh.setMatrixAt(i, dummy.matrix);
-      });
-      rocksMesh.instanceMatrix.needsUpdate = true;
-      rocksMesh.frustumCulled = false;
-      worldGroup.add(rocksMesh);
+
+      const rocksBySector = new Map();
+      for (let i = 0; i < mapData.rocks.length; i++) {
+        const rk = mapData.rocks[i];
+        const { key } = getSectorGrp(rk.x, rk.z);
+        let arr = rocksBySector.get(key);
+        if (!arr) { arr = []; rocksBySector.set(key, arr); }
+        arr.push(rk);
+      }
+      for (const [key, list] of rocksBySector.entries()) {
+        const grp = sectorGroupsMap.get(key) || worldGroup;
+        const rocksMesh = new THREE.InstancedMesh(rockGeo, rockMat, list.length);
+        for (let i = 0; i < list.length; i++) {
+          const rk = list[i];
+          dummy.position.set(rk.x, rk.y + (rk.ry || 1) * 0.35, rk.z);
+          dummy.scale.set(rk.s || 1.5, rk.ry || 1.2, (rk.s || 1.5) * 0.9);
+          dummy.rotation.set(i * 0.4, i * 1.1, i * 0.2);
+          dummy.updateMatrix();
+          rocksMesh.setMatrixAt(i, dummy.matrix);
+        }
+        rocksMesh.instanceMatrix.needsUpdate = true;
+        rocksMesh.computeBoundingSphere();
+        grp.add(rocksMesh);
+      }
     }
   } else {
     const floorW = mapData.bounds.halfW * 2 + 10;
@@ -529,7 +572,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
     'jungle_wall',
     'concrete'
   ]);
-  const castShadows = quality !== 'low';
+  const castShadows = enableWorldShadows;
 
   // Instanced Multi-Tier Trees & Natural Rocks for Arena Maps (e.g. MAP 04 - Jungle)
   if (!isOpenWorld) {
@@ -592,24 +635,6 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       worldGroup.add(rocksMesh);
     }
   }
-
-  // Spatial sector bucketing on 1.5km open world map
-  const sectorGroupsMap = new Map();
-  const getSectorGrp = (bx, bz) => {
-    if (!isOpenWorld) return { key: 'root', grp: worldGroup };
-    const sx = Math.round(bx / 350) * 350;
-    const sz = Math.round(bz / 350) * 350;
-    const key = `${sx}_${sz}`;
-    let grp = sectorGroupsMap.get(key);
-    if (!grp) {
-      grp = new THREE.Group();
-      grp.userData.sectorCenter = { x: sx, z: sz };
-      sectorGroupsMap.set(key, grp);
-      sectorGroups.push(grp);
-      worldGroup.add(grp);
-    }
-    return { key, grp };
-  };
 
   // 4. Arena Blocks: Batched Geometry Merging for Open-World & Rich Detailing for Arenas
   if (isOpenWorld) {

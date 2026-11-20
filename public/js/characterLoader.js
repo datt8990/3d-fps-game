@@ -699,8 +699,11 @@ function createPhoenixTacticalBodyTexture(srcTex, suitHex = '#232730', trimHex =
   }
 }
 
+// Cache sculpted female geometries per (archetypeKey, isSwimwear, meshName, matName) so we never clone 15MB vertex buffers per bot!
+const sculptedGeoCache = new Map();
+
 // Sculpt slender athletic anime proportions + Vong 1 & Vong 3 curves (tailoring loose cloth meshes inward when not in bikini)
-function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
+function applyFemaleCurveSculpt(modelRoot, isSwimwear = false, archetypeKey = 'vroid') {
   modelRoot.updateMatrixWorld(true);
   const bustL = modelRoot.getObjectByName('J_Sec_L_Bust1');
   const hipsB = modelRoot.getObjectByName('J_Bip_C_Hips');
@@ -728,6 +731,13 @@ function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
       ? child.material.map((m) => m?.name || '').join(' ')
       : (child.material?.name || '');
     if (/face|eye|hair|shoes_/i.test(matName)) return;
+
+    const geoCacheKey = `${archetypeKey}|${isSwimwear ? '1' : '0'}|${child.name}|${matName}`;
+    const cachedGeo = sculptedGeoCache.get(geoCacheKey);
+    if (cachedGeo) {
+      child.geometry = cachedGeo;
+      return;
+    }
 
     const isOuterGarment = /(tops_|bottoms_|accessory)/i.test(matName);
     child.geometry = child.geometry.clone();
@@ -850,6 +860,7 @@ function applyFemaleCurveSculpt(modelRoot, isSwimwear = false) {
         normAttr.needsUpdate = true;
       }
     }
+    sculptedGeoCache.set(geoCacheKey, child.geometry);
   });
 }
 
@@ -870,11 +881,13 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
           : (opCfg?.id === 'kagura' ? '#06b6d4' : teamGlowColor)))
   );
 
+  const shadowMeshes = [];
   modelRoot.traverse((child) => {
     if (!child.isMesh) return;
     child.castShadow = true;
-    child.receiveShadow = true;
+    child.receiveShadow = false;
     child.frustumCulled = false;
+    shadowMeshes.push(child);
 
     const rawMatName = Array.isArray(child.material)
       ? child.material.map((m) => m?.name || '').join(' ')
@@ -1036,6 +1049,7 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
       child.material = applyMat(child.material);
     }
   });
+  return shadowMeshes;
 }
 
 // Curl hand finger bones naturally around weapon grips
@@ -1114,7 +1128,7 @@ export function instantiateGlbInstance(loadedBundle, opCfg, outCfg, teamGlowColo
     const cloned = SkeletonUtils.clone(gltf.scene);
     const key = Object.keys(CHARACTER_ARCHETYPES).find((k) => CHARACTER_ARCHETYPES[k] === cfg) || 'soldier';
     if (cfg.rigType === 'vroid') {
-      applyFemaleCurveSculpt(cloned, Boolean(outCfg?.isSwimwear));
+      applyFemaleCurveSculpt(cloned, Boolean(outCfg?.isSwimwear), key);
     }
     const scaleMult = opCfg?.helmetStyle === 'heavy' ? 1.07 : 1.0;
     cloned.scale.setScalar(cfg.scale * scaleMult);
@@ -1123,7 +1137,7 @@ export function instantiateGlbInstance(loadedBundle, opCfg, outCfg, teamGlowColo
       cloned.position.y = cfg.yOffset * cfg.scale * scaleMult;
     }
 
-    styleOperatorGlbMaterials(cloned, key, opCfg, outCfg, teamGlowColor);
+    const shadowMeshes = styleOperatorGlbMaterials(cloned, key, opCfg, outCfg, teamGlowColor);
     curlHandsIntoGrip(cloned);
 
     const mixer = new THREE.AnimationMixer(cloned);
@@ -1139,7 +1153,7 @@ export function instantiateGlbInstance(loadedBundle, opCfg, outCfg, teamGlowColo
     }
 
     const { bones, restArmQuats, restHeadQuat } = extractRigBones(cloned);
-    return { modelRoot: cloned, mixer, actions, bones, restArmQuats, restHeadQuat, activeAnim: 'idle' };
+    return { modelRoot: cloned, mixer, actions, bones, restArmQuats, restHeadQuat, activeAnim: 'idle', shadowMeshes };
   } catch (err) {
     console.warn('[CharacterLoader] instantiateGlbInstance error:', err);
     return null;

@@ -14,6 +14,7 @@ import {
   createOperatorRig,
   swapRigWeapon,
   animateOperatorRig,
+  setRigShadowCast,
   createGrenadeMesh
 } from './models.js';
 import { soundEngine } from './audio.js';
@@ -41,11 +42,24 @@ export class FPSGameClient {
     this.net = net;
     this.hud = hud;
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const savedQuality = localStorage.getItem('bs_quality');
+    this.quality = ['low', 'medium', 'high'].includes(savedQuality) ? savedQuality : 'medium';
+
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: this.quality === 'high',
+      powerPreference: 'high-performance',
+      stencil: false
+    });
+    this._dynamicResScale = 1.0;
+    this._lowFpsStreak = 0;
+    this._highFpsStreak = 0;
+    this._applyPixelRatio();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.enabled = this.quality !== 'low';
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.24;
 
@@ -56,12 +70,25 @@ export class FPSGameClient {
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
 
+    // Zero-allocation frustum culling & frame scheduling helpers
+    this._frustum = new THREE.Frustum();
+    this._projScreenMatrix = new THREE.Matrix4();
+    this._cullSphere = new THREE.Sphere(new THREE.Vector3(), 2.2);
+    this._enrichedPlayers = [];
+    this._visibleLootMeshes = [];
+    this._lastMinimapDrawAt = 0;
+    this._lastLootCullAt = 0;
+    this._lastSectorCullAt = 0;
+    this._lastNearestLootAt = 0;
+    this._shadowFrameCounter = 0;
+    this._animFrameTick = 0;
+    this._botShadowBudgetDisabled = false;
+
     this.active = false;
-    this.quality = 'high';
     this.sensitivity = 0.0022;
     this.baseFov = 75;
     const savedFps = localStorage.getItem('bs_fps_cap');
-    this.fpsCap = savedFps !== null && Number.isFinite(Number(savedFps)) ? Number(savedFps) : 60;
+    this.fpsCap = savedFps !== null && Number.isFinite(Number(savedFps)) ? Number(savedFps) : 0;
 
     this.mapId = 'warehouse';
     this.mapData = MAPS.warehouse;
@@ -159,14 +186,26 @@ export class FPSGameClient {
     requestAnimationFrame(this.renderLoop);
   }
 
+  _applyPixelRatio() {
+    const dpr = window.devicePixelRatio || 1;
+    const baseCap = this.quality === 'low' ? 0.85 : (this.quality === 'medium' ? 1.0 : Math.min(dpr, 1.25));
+    const effective = Math.max(0.65, baseCap * (this._dynamicResScale || 1.0));
+    this.renderer.setPixelRatio(effective);
+  }
+
   applySettings({ sensitivity, quality, volume, fpsCap }) {
     if (sensitivity !== undefined) {
       this.sensitivity = 0.0006 + Number(sensitivity) * 0.0032;
     }
     if (quality) {
       this.quality = quality;
+      localStorage.setItem('bs_quality', quality);
+      this._dynamicResScale = 1.0;
+      this._lowFpsStreak = 0;
+      this._botShadowBudgetDisabled = quality === 'low';
       this.renderer.shadowMap.enabled = quality !== 'low';
-      this.renderer.setPixelRatio(quality === 'low' ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+      this.renderer.shadowMap.needsUpdate = true;
+      this._applyPixelRatio();
     }
     if (volume !== undefined) {
       soundEngine.setVolume(volume);
@@ -795,10 +834,15 @@ export class FPSGameClient {
       this.mapObjects = null;
     }
     for (const ent of this.remoteEntities.values()) {
-      if (ent.rig?.group) this.scene.remove(ent.rig.group);
+      if (ent.rig) {
+        ent.rig.disposed = true;
+        if (ent.rig.group) this.scene.remove(ent.rig.group);
+      }
     }
     this.remoteEntities.clear();
     this.pendingRigQueue = [];
+    this._enrichedPlayers = [];
+    this._visibleLootMeshes = [];
     this.lootMeshes.clear();
     this.lootData.clear();
 
@@ -1393,6 +1437,8 @@ export class FPSGameClient {
         name: ent.meta?.name || 'Chiến Binh',
         isAlly: ent.isAlly
       });
+      // Dynamic shadow budget controls castShadow per-frame (keeps GPU shadow pass ultra-fast)
+      setRigShadowCast(rig, false);
       let chuteCanopy = null;
       if (this.mode === 'survival') {
         chuteCanopy = createParachuteMesh();
@@ -1404,25 +1450,62 @@ export class FPSGameClient {
       this.scene.add(rig.group);
       ent.rig = rig;
       ent.chuteCanopy = chuteCanopy;
+      ent.animAccumDt = 0;
+      ent.animBucket = Math.floor(Math.random() * 4);
     } catch (err) {
       console.warn('[instantiateEntityRig] Rig build skipped:', err);
     }
   }
 
-  processPendingRigs(maxPerFrame = 6) {
+  releaseEntityRig(ent) {
+    if (!ent?.rig) return;
+    ent.rig.disposed = true;
+    if (ent.rig.group) this.scene.remove(ent.rig.group);
+    ent.rig = null;
+    ent.chuteCanopy = null;
+  }
+
+  processPendingRigs(maxPerFrame = 2) {
+    const isOpenWorld = Boolean(this.mapData?.terrain);
+    const lx = this.local.x, lz = this.local.z;
+    const streamDistSq = isOpenWorld ? (225 * 225) : Infinity;
+    const cap = isOpenWorld ? 1 : maxPerFrame;
+
+    // In open-world BR, stream rigs lazily by proximity so we never allocate 49 high-poly GLBs across a 1.5km island!
+    let count = 0;
+    if (isOpenWorld) {
+      let bestEnt = null;
+      let bestDistSq = streamDistSq;
+      for (const ent of this.remoteEntities.values()) {
+        if (ent.rig) continue;
+        const tgt = ent.target;
+        if (!tgt || tgt.dead || tgt.dp === 1) continue;
+        const dx = ent.current.x - lx;
+        const dz = ent.current.z - lz;
+        const dSq = dx * dx + dz * dz;
+        if (dSq < bestDistSq) {
+          bestDistSq = dSq;
+          bestEnt = ent;
+        }
+      }
+      if (bestEnt) {
+        this.instantiateEntityRig(bestEnt);
+      }
+      this.pendingRigQueue.length = 0;
+      return;
+    }
+
     if (!this.pendingRigQueue || this.pendingRigQueue.length === 0) return;
     if (this.pendingRigQueue.length > 1) {
-      const lx = this.local.x, lz = this.local.z;
       this.pendingRigQueue.sort((a, b) => {
         const da = (a.current.x - lx) ** 2 + (a.current.z - lz) ** 2;
         const db = (b.current.x - lx) ** 2 + (b.current.z - lz) ** 2;
         return da - db;
       });
     }
-    let count = 0;
-    while (this.pendingRigQueue.length > 0 && count < maxPerFrame) {
+    while (this.pendingRigQueue.length > 0 && count < cap) {
       const ent = this.pendingRigQueue.shift();
-      if (!this.remoteEntities.has(ent.id)) continue;
+      if (!this.remoteEntities.has(ent.id) || ent.rig) continue;
       this.instantiateEntityRig(ent);
       count++;
     }
@@ -1550,12 +1633,23 @@ export class FPSGameClient {
       }
     }
 
-    for (const [id, ent] of this.remoteEntities.entries()) {
-      if (!seenIds.has(id)) {
-        if (ent.rig?.group) this.scene.remove(ent.rig.group);
-        this.remoteEntities.delete(id);
+    if (!msg.partial) {
+      for (const [id, ent] of this.remoteEntities.entries()) {
+        if (!seenIds.has(id)) {
+          this.releaseEntityRig(ent);
+          this.remoteEntities.delete(id);
+        }
       }
     }
+
+    // Cache minimap player list once per snapshot instead of allocating every 60-144Hz render frame
+    this._enrichedPlayers = (msg.players || []).map((p) => ({
+      id: p.id,
+      x: p.x,
+      z: p.z,
+      dead: p.dead,
+      team: this.rosterMeta.get(p.id)?.team || ''
+    }));
 
     if (msg.t) {
       const measuredOffset = msg.t - Date.now();
@@ -1576,9 +1670,10 @@ export class FPSGameClient {
       }
     }
 
+    const effectiveAlive = msg.aliveCount !== undefined ? msg.aliveCount : aliveCount;
     const curTimeLeft = this.getEffectiveTimeLeftSec();
     this.lastSnapshotScores = { alpha: msg.alphaScore ?? 0, bravo: msg.bravoScore ?? 0 };
-    this.lastAliveCount = aliveCount;
+    this.lastAliveCount = effectiveAlive;
 
     this.hud.updateTopScoreAndTimer({
       mode: this.mode,
@@ -1588,7 +1683,7 @@ export class FPSGameClient {
       roundNumber: msg.roundNumber,
       timeLeftSec: curTimeLeft,
       myKills: this.local.kills,
-      aliveCount
+      aliveCount: effectiveAlive
     });
 
     if (this.mode === 'bomb') {
@@ -1711,6 +1806,32 @@ export class FPSGameClient {
       this.frameCount = 0;
       this.fpsClockStart = now;
       this.hud.updateFpsAndPing(this.currentFps, this.net.pingMs, this.fpsCap);
+
+      // Adaptive Dynamic Resolution & Shadow Auto-Scaler so players NEVER drop to 15-20 FPS
+      if (this.currentFps < 38 && (this.fpsCap === 0 || this.fpsCap >= 45)) {
+        this._lowFpsStreak++;
+        this._highFpsStreak = 0;
+        if (this._lowFpsStreak >= 2) {
+          this._lowFpsStreak = 0;
+          this._botShadowBudgetDisabled = true;
+          if (this._dynamicResScale > 0.72) {
+            this._dynamicResScale = Math.max(0.70, Number((this._dynamicResScale - 0.12).toFixed(2)));
+            this._applyPixelRatio();
+          } else if (this.renderer.shadowMap.enabled && this.currentFps < 28) {
+            this.renderer.shadowMap.enabled = false;
+          }
+        }
+      } else if (this.currentFps >= 58) {
+        this._lowFpsStreak = 0;
+        this._highFpsStreak++;
+        if (this._highFpsStreak >= 6 && this._dynamicResScale < 1.0) {
+          this._highFpsStreak = 0;
+          this._dynamicResScale = Math.min(1.0, Number((this._dynamicResScale + 0.08).toFixed(2)));
+          this._applyPixelRatio();
+        }
+      } else {
+        this._lowFpsStreak = 0;
+      }
     }
 
     // Butter-smooth monotonic match clock countdown
@@ -1735,7 +1856,7 @@ export class FPSGameClient {
     }
 
     try {
-      this.processPendingRigs(6);
+      this.processPendingRigs(2);
       this.updateLocalPlayer(dt, now, wStats);
       this.updateRemotePlayers(dt, now * 0.001);
       this.shellPool?.update(dt);
@@ -1760,31 +1881,71 @@ export class FPSGameClient {
       }
     }
 
-    for (const [id, mesh] of this.lootMeshes.entries()) {
-      const lc = this.lootData.get(id);
-      if (lc && this.mapData?.terrain) {
-        const d = Math.hypot(lc.x - this.local.x, lc.z - this.local.z);
-        const maxD = lc.kind === 'deathbox' ? 220 : 120;
-        mesh.visible = d <= maxD;
-        if (!mesh.visible) continue;
+    // Throttle open-world loot distance culling to 5 Hz & only rotate visible loot
+    if (this.lootMeshes.size > 0) {
+      if (now - this._lastLootCullAt >= 200) {
+        this._lastLootCullAt = now;
+        this._visibleLootMeshes.length = 0;
+        const isOW = Boolean(this.mapData?.terrain);
+        const lx = this.local.x, lz = this.local.z;
+        for (const [id, mesh] of this.lootMeshes.entries()) {
+          const lc = this.lootData.get(id);
+          if (lc && isOW) {
+            const dx = lc.x - lx, dz = lc.z - lz;
+            const maxD = lc.kind === 'deathbox' ? 160 : 90;
+            mesh.visible = (dx * dx + dz * dz) <= maxD * maxD;
+            if (!mesh.visible) continue;
+          }
+          if (lc?.kind !== 'deathbox') this._visibleLootMeshes.push(mesh);
+        }
       }
-      if (lc?.kind !== 'deathbox') mesh.rotation.y += dt * 1.6;
+      for (let i = 0; i < this._visibleLootMeshes.length; i++) {
+        this._visibleLootMeshes[i].rotation.y += dt * 1.6;
+      }
     }
 
-    if (this.mapObjects?.sectorGroups?.length) {
-      const cullDist = this.local.dropPhase === 'ground' ? 650 : 1200;
-      for (const sec of this.mapObjects.sectorGroups) {
+    // Throttle open-world sector & camera far-plane updates to 4 Hz
+    if (this.mapObjects?.sectorGroups?.length && now - this._lastSectorCullAt >= 250) {
+      this._lastSectorCullAt = now;
+      const isGround = this.local.dropPhase === 'ground';
+      const wantFar = isGround ? 520 : 950;
+      if (Math.abs(this.camera.far - wantFar) > 20) {
+        this.camera.far = wantFar;
+        this.camera.updateProjectionMatrix();
+      }
+      const cullDist = isGround ? 360 : 820;
+      const cullDistSq = cullDist * cullDist;
+      const lx = this.local.x, lz = this.local.z;
+      for (let i = 0; i < this.mapObjects.sectorGroups.length; i++) {
+        const sec = this.mapObjects.sectorGroups[i];
         const c = sec.userData.sectorCenter;
-        if (c) sec.visible = Math.hypot(c.x - this.local.x, c.z - this.local.z) <= cullDist;
+        if (c) {
+          const dx = c.x - lx, dz = c.z - lz;
+          sec.visible = (dx * dx + dz * dz) <= cullDistSq;
+        }
       }
     }
 
-    if (this.mapObjects?.sun && this.mapData?.terrain) {
-      this.mapObjects.sun.target.position.set(this.local.x, this.local.y, this.local.z);
-      this.mapObjects.sun.position.set(this.local.x + 55, this.local.y + 92, this.local.z + 45);
+    // Throttle shadow map rendering (every 2 frames in arena, every 3 frames in open-world BR)
+    if (this.renderer.shadowMap.enabled) {
+      this._shadowFrameCounter++;
+      const shadowStride = this.mapData?.terrain ? 3 : 2;
+      if (this._shadowFrameCounter >= shadowStride) {
+        this._shadowFrameCounter = 0;
+        if (this.mapObjects?.sun && this.mapData?.terrain) {
+          // Snap sun target to 4m grid to eliminate shadow edge shimmering
+          const sx = Math.round(this.local.x * 0.25) * 4;
+          const sy = Math.round(this.local.y * 0.5) * 2;
+          const sz = Math.round(this.local.z * 0.25) * 4;
+          this.mapObjects.sun.target.position.set(sx, sy, sz);
+          this.mapObjects.sun.position.set(sx + 48, sy + 78, sz + 38);
+          this.mapObjects.sun.target.updateMatrixWorld();
+        }
+        this.renderer.shadowMap.needsUpdate = true;
+      }
     }
 
-    if (this.bigMapOpen) {
+    if (this.bigMapOpen && now - this._lastMinimapDrawAt >= 80) {
       this.hud.drawBigMap?.(
         this.mapData,
         { ...this.local, id: this.localId },
@@ -1822,20 +1983,27 @@ export class FPSGameClient {
       }
     }
 
-    const enrichedPlayers = (this.lastSnapshotPlayers || []).map((p) => ({
-      ...p,
-      team: this.rosterMeta.get(p.id)?.team || ''
-    }));
-    this.hud.drawMinimap(
-      this.mapData,
-      { ...this.local, id: this.localId, team: this.localMeta?.team },
-      enrichedPlayers,
-      Boolean(this.modeConfig?.teamBased),
-      this.latestBomb,
-      this.latestStorm,
-      this.dropPlaneData,
-      this.mapPingMarker
-    );
+    // Throttle 2D Canvas minimap redraw to 15 Hz (saves huge Canvas2D CPU overhead on 60-144Hz monitors!)
+    if (now - this._lastMinimapDrawAt >= 66) {
+      this._lastMinimapDrawAt = now;
+      this.hud.drawMinimap(
+        this.mapData,
+        {
+          id: this.localId,
+          x: this.local.x,
+          z: this.local.z,
+          yaw: this.local.yaw,
+          dropPhase: this.local.dropPhase,
+          team: this.localMeta?.team
+        },
+        this._enrichedPlayers,
+        Boolean(this.modeConfig?.teamBased),
+        this.latestBomb,
+        this.latestStorm,
+        this.dropPlaneData,
+        this.mapPingMarker
+      );
+    }
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -1980,53 +2148,59 @@ export class FPSGameClient {
         }
       }
 
-      if (now - this.lastInputSendAt >= 25) {
+      if (now - this.lastInputSendAt >= 33) {
         this.lastInputSendAt = now;
         this.net.send({
           type: 'input',
           ...input,
           dropPhase: this.local.dropPhase,
           onGround: this.local.onGround,
-          x: Number(this.local.x.toFixed(3)),
-          y: Number(this.local.y.toFixed(3)),
-          z: Number(this.local.z.toFixed(3)),
-          vx: Number((this.local.vx || 0).toFixed(2)),
-          vy: Number((this.local.vy || 0).toFixed(2)),
-          vz: Number((this.local.vz || 0).toFixed(2))
+          x: Math.round(this.local.x * 100) / 100,
+          y: Math.round(this.local.y * 100) / 100,
+          z: Math.round(this.local.z * 100) / 100,
+          vx: Math.round((this.local.vx || 0) * 100) / 100,
+          vy: Math.round((this.local.vy || 0) * 100) / 100,
+          vz: Math.round((this.local.vz || 0) * 100) / 100
         });
       }
       if (this.local.dropPhase !== 'ground') return;
     } else if (this.mode === 'survival') {
       this.hud.updateDropBanner(null);
       if (this.localChuteRig) this.localChuteRig.group.visible = false;
-      let nearestLoot = null;
-      let nearestDist = 2.6;
-      for (const lc of this.lootData.values()) {
-        const d = Math.hypot(lc.x - this.local.x, lc.z - this.local.z);
-        if (d < nearestDist && Math.abs((lc.y || 0) - this.local.y) < 2.2) {
-          nearestDist = d;
-          nearestLoot = lc;
+      if (now - this._lastNearestLootAt >= 180) {
+        this._lastNearestLootAt = now;
+        let nearestLoot = null;
+        let nearestDistSq = 2.6 * 2.6;
+        const lx = this.local.x, ly = this.local.y, lz = this.local.z;
+        for (const lc of this.lootData.values()) {
+          const dx = lc.x - lx;
+          const dz = lc.z - lz;
+          const dSq = dx * dx + dz * dz;
+          if (dSq < nearestDistSq && Math.abs((lc.y || 0) - ly) < 2.2) {
+            nearestDistSq = dSq;
+            nearestLoot = lc;
+          }
         }
+        this.hud.updateLootHint(nearestLoot, this.local.weaponsState);
       }
-      this.hud.updateLootHint(nearestLoot, this.local.weaponsState);
     }
 
     const opMult = OPERATORS[this.localMeta?.operator]?.speedMult || 1.0;
     stepPlayerPhysics(this.local, input, this.mapData, dt, wStats.moveSpeedMult, opMult);
 
-    if (now - this.lastInputSendAt >= 25) {
+    if (now - this.lastInputSendAt >= 33) {
       this.lastInputSendAt = now;
       this.net.send({
         type: 'input',
         ...input,
         dropPhase: this.local.dropPhase,
         onGround: this.local.onGround,
-        x: Number(this.local.x.toFixed(3)),
-        y: Number(this.local.y.toFixed(3)),
-        z: Number(this.local.z.toFixed(3)),
-        vx: Number((this.local.vx || 0).toFixed(2)),
-        vy: Number((this.local.vy || 0).toFixed(2)),
-        vz: Number((this.local.vz || 0).toFixed(2))
+        x: Math.round(this.local.x * 100) / 100,
+        y: Math.round(this.local.y * 100) / 100,
+        z: Math.round(this.local.z * 100) / 100,
+        vx: Math.round((this.local.vx || 0) * 100) / 100,
+        vy: Math.round((this.local.vy || 0) * 100) / 100,
+        vz: Math.round((this.local.vz || 0) * 100) / 100
       });
     }
 
@@ -2224,19 +2398,24 @@ export class FPSGameClient {
   updateRemotePlayers(dt, timeSec) {
     const posLerp = expSmooth(16, dt);
     const angleLerp = expSmooth(18, dt);
+    const isOpenWorld = Boolean(this.mapData?.terrain);
+    const maxDrawDist = isOpenWorld ? 225 : 135;
+    const maxDrawDistSq = maxDrawDist * maxDrawDist;
+    const releaseDistSq = 275 * 275;
+    const lx = this.local.x, lz = this.local.z;
+
+    // Build camera view frustum ONCE per frame for zero-cost off-screen bot culling!
+    this.camera.updateMatrixWorld();
+    this._projScreenMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this._frustum.setFromProjectionMatrix(this._projScreenMatrix);
+    const frameTick = ++this._animFrameTick;
+
+    const allowBotShadows = this.renderer.shadowMap.enabled && !this._botShadowBudgetDisabled && !isOpenWorld;
+    let botShadowsUsed = 0;
+
     for (const ent of this.remoteEntities.values()) {
-      if (!ent.rig) continue;
       const tgt = ent.target;
       const cur = ent.current;
-      if (tgt.dp === 1) {
-        ent.rig.group.visible = false;
-        if (ent.chuteCanopy) ent.chuteCanopy.visible = false;
-        continue;
-      }
-      ent.rig.group.visible = !tgt.dead;
-      if (ent.chuteCanopy) {
-        ent.chuteCanopy.visible = !tgt.dead && tgt.dp === 3;
-      }
       const pred = ent.pred || (ent.pred = { x: tgt.x, y: tgt.y, z: tgt.z });
       const prevX = cur.x;
       const prevZ = cur.z;
@@ -2252,54 +2431,102 @@ export class FPSGameClient {
           if (!tgt.ground && tgt.vy !== undefined) {
             pred.y = Math.max(0, pred.y + (tgt.vy || 0) * step);
           }
-          if (this.mapData) {
-            const h = tgt.crouch ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
-            depenetratePlayerXZ(pred, h, PHYSICS.PLAYER_RADIUS, this.mapData);
-          }
         }
       }
 
-      if (Math.hypot(pred.x - cur.x, pred.z - cur.z) > 8.5) {
+      const dPredX = pred.x - cur.x;
+      const dPredZ = pred.z - cur.z;
+      if (dPredX * dPredX + dPredZ * dPredZ > 72.25) {
         cur.x = pred.x;
         cur.y = pred.y;
         cur.z = pred.z;
       } else {
-        cur.x += (pred.x - cur.x) * posLerp;
+        cur.x += dPredX * posLerp;
         cur.y += (pred.y - cur.y) * posLerp;
-        cur.z += (pred.z - cur.z) * posLerp;
-
-        // Ensure interpolated remote players/bots never visually clip through wall corners
-        if (!tgt.dead && this.mapData) {
-          const h = tgt.crouch ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
-          cur.onGround = Boolean(tgt.ground);
-          depenetratePlayerXZ(cur, h, PHYSICS.PLAYER_RADIUS, this.mapData);
-        }
+        cur.z += dPredZ * posLerp;
       }
 
       cur.yaw += shortestAngleDiff(cur.yaw, tgt.yaw) * angleLerp;
       cur.pitch += ((tgt.pitch || 0) - cur.pitch) * angleLerp;
 
+      const dxMe = cur.x - lx;
+      const dzMe = cur.z - lz;
+      const distSq = dxMe * dxMe + dzMe * dzMe;
+
+      // In open-world BR, release rigs of very distant or permanently eliminated bots to keep GPU VRAM & draw calls tiny
+      if (isOpenWorld && ent.rig && (distSq > releaseDistSq || (tgt.dead && ent.rig.deathProgress >= 0.99))) {
+        this.releaseEntityRig(ent);
+        continue;
+      }
+
+      if (!ent.rig) continue;
+
+      if (tgt.dp === 1 || tgt.dead || distSq > maxDrawDistSq) {
+        ent.rig.group.visible = false;
+        if (ent.chuteCanopy) ent.chuteCanopy.visible = false;
+        setRigShadowCast(ent.rig, false);
+        continue;
+      }
+
+      // Camera frustum culling (generous 2.4m sphere covers tall characters + weapon + jump)
+      this._cullSphere.center.set(cur.x, cur.y + 1.0, cur.z);
+      this._cullSphere.radius = 2.4;
+      const inView = this._frustum.intersectsSphere(this._cullSphere);
+
+      if (!inView) {
+        ent.rig.group.visible = false;
+        if (ent.chuteCanopy) ent.chuteCanopy.visible = false;
+        setRigShadowCast(ent.rig, false);
+        continue;
+      }
+
+      // Only run wall depenetration for nearby visible bots (< 90m)
+      if (distSq < 8100 && this.mapData) {
+        const h = tgt.crouch ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
+        cur.onGround = Boolean(tgt.ground);
+        depenetratePlayerXZ(cur, h, PHYSICS.PLAYER_RADIUS, this.mapData);
+      }
+
+      ent.rig.group.visible = true;
+      if (ent.chuteCanopy) {
+        ent.chuteCanopy.visible = tgt.dp === 3;
+      }
       ent.rig.group.position.set(cur.x, cur.y, cur.z);
       ent.rig.group.rotation.y = cur.yaw;
+
+      // Dynamic bot shadow budget: max 4 visible bots within 26m cast shadows
+      const shouldCastShadow = allowBotShadows && distSq < 676 && botShadowsUsed < 4;
+      if (shouldCastShadow) botShadowsUsed++;
+      setRigShadowCast(ent.rig, shouldCastShadow);
+
+      // Distance-based animation LOD & frame-rate throttling (huge CPU savings with 10-50 bots!)
+      const lod = distSq < 1156 ? 0 : (distSq < 7225 ? 1 : 2); // <34m -> LOD 0 | 34-85m -> LOD 1 | >85m -> LOD 2
+      ent.animAccumDt = (ent.animAccumDt || 0) + dt;
+      const bucket = ent.animBucket || 0;
+      const shouldAnimate = lod === 0 || (lod === 1 ? ((frameTick + bucket) & 1) === 0 : ((frameTick + bucket) & 3) === 0);
+      if (!shouldAnimate) continue;
+
+      const animDt = ent.animAccumDt;
+      ent.animAccumDt = 0;
 
       const serverSpeed = (tgt.vx !== undefined && tgt.vz !== undefined)
         ? Math.hypot(tgt.vx, tgt.vz)
         : Math.hypot(cur.x - prevX, cur.z - prevZ) / Math.max(0.001, dt);
-      const distToMe = Math.hypot(cur.x - this.local.x, cur.z - this.local.z);
 
       animateOperatorRig(
         ent.rig,
         {
-          dead: Boolean(tgt.dead),
+          dead: false,
           crouch: Boolean(tgt.crouch),
           sprint: Boolean(tgt.sprint),
           moveSpeed: serverSpeed,
           pitch: cur.pitch,
           hasBomb: Boolean(tgt.hasBomb),
           shield: Boolean(tgt.shield),
-          showNameplate: ent.isAlly || distToMe < 24
+          showNameplate: ent.isAlly || distSq < 576,
+          lodLevel: lod
         },
-        dt,
+        animDt,
         timeSec
       );
     }

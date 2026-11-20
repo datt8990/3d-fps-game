@@ -227,10 +227,12 @@ export class NetworkClient {
     }
   }
 
-  sendViaRtc(entry, payload) {
+  sendViaRtc(entry, payload, preSerialized = null) {
     if (!entry) return false;
-    const isVolatile = payload?.type === 'world_state' || payload?.type === 'input';
-    const raw = JSON.stringify(payload);
+    const pType = payload?.type;
+    const isVolatile = pType === 'world_state' || pType === 'input' || pType === 'ping_check' || pType === 'pong_check';
+    const isDroppable = pType === 'world_state' || pType === 'input';
+    const raw = preSerialized !== null ? preSerialized : JSON.stringify(payload);
     // Large payloads (>14KB, e.g. match_started with lootCrates/rosters) MUST be chunked over ordered relDc
     // so WebRTC SCTP DataChannel never throws MessageTooLarge or drops the channel!
     const CHUNK_LIMIT = 14000;
@@ -254,6 +256,8 @@ export class NetworkClient {
       ? entry.fastDc
       : (entry.relDc?.readyState === 'open' ? entry.relDc : null);
     if (!dc) return false;
+    // Prevent WebRTC bufferbloat ping spikes: drop stale volatile snapshots/inputs if pipe is congested
+    if (isDroppable && dc.bufferedAmount > 49152) return true;
     try {
       dc.send(raw);
       return true;
@@ -466,8 +470,18 @@ export class NetworkClient {
     }
   }
 
+  hasActiveRelayGuests() {
+    for (const cid of this.relayClientIds) {
+      const rtc = this.rtcPeers.get(cid);
+      const pc = this.peerConns.get(cid);
+      if (!rtc?.ready && !pc?.open) return true;
+    }
+    return false;
+  }
+
   scheduleHostRelay(delayMs = null) {
     if (!this.hostRoom || !this.apiCall) return;
+    if (this.hostRoom.mode === 'practice') return;
     if (this.hostRelayTimer) {
       if (delayMs !== null && delayMs <= 20) {
         clearTimeout(this.hostRelayTimer);
@@ -476,7 +490,12 @@ export class NetworkClient {
         return;
       }
     }
-    const wait = delayMs !== null ? delayMs : (this.hostRoom.status === 'playing' ? 28 : 240);
+    // Only poll rapidly (42ms) when a guest is actively using HTTP Relay or critical packets await delivery.
+    // When solo or all guests are on Direct WebRTC P2P, poll gently (950ms) to accept late joiners with zero network spam!
+    const needsFastRelay = this.relayOutbox.length > 0 || this.hasActiveRelayGuests();
+    const wait = delayMs !== null
+      ? delayMs
+      : (needsFastRelay ? (this.hostRoom.status === 'playing' ? 42 : 220) : 950);
     this.hostRelayTimer = setTimeout(() => {
       this.hostRelayTimer = null;
       this.flushHostRelayOnce();
@@ -687,6 +706,10 @@ export class NetworkClient {
         },
         broadcast: (payload) => {
           const isMatchStart = payload?.type === 'match_started';
+          if (this.rtcPeers.size === 0 && this.peerConns.size === 0 && this.relayClientIds.size === 0) {
+            this.handleIncomingHostLoopback(payload);
+            return;
+          }
           const allTargets = new Set([
             ...this.rtcPeers.keys(),
             ...this.peerConns.keys(),
@@ -701,12 +724,18 @@ export class NetworkClient {
           }
           allTargets.delete(this.clientId);
 
+          // Pre-serialize once across all direct WebRTC peers
+          let preSerialized = null;
+          if (this.rtcPeers.size > 0) {
+            try { preSerialized = JSON.stringify(payload); } catch {}
+          }
+
           // 1. Dispatch to ALL remote guests FIRST so network packets flush before Host builds 3D arena
           for (const cid of allTargets) {
             const rtc = this.rtcPeers.get(cid);
             let sentDirect = false;
             if (rtc?.ready) {
-              sentDirect = this.sendViaRtc(rtc, payload);
+              sentDirect = this.sendViaRtc(rtc, payload, preSerialized);
             }
             if (!sentDirect) {
               const c = this.peerConns.get(cid);
@@ -875,7 +904,7 @@ export class NetworkClient {
         return;
       }
     }
-    const wait = delayMs !== null ? delayMs : (this.inP2PMatch ? 28 : 240);
+    const wait = delayMs !== null ? delayMs : (this.inP2PMatch ? 42 : 220);
     this.clientRelayTimer = setTimeout(() => {
       this.clientRelayTimer = null;
       this.flushClientRelayOnce();
@@ -885,7 +914,8 @@ export class NetworkClient {
   async handleClientIncomingP2PMessage(msg) {
     if (!msg?.type) return;
     if (msg.type === 'pong_check') {
-      this.pingMs = Math.max(2, Math.round(performance.now() - (msg.clientSentAt || performance.now())));
+      const sample = Math.max(2, Math.round(performance.now() - (msg.clientSentAt || performance.now())));
+      this.pingMs = this.pingMs ? Math.round(this.pingMs * 0.55 + sample * 0.45) : sample;
       this.emit('ping_updated', { pingMs: this.pingMs, onlineCount: this.onlineCount });
       return;
     }

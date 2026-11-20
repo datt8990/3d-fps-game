@@ -1660,9 +1660,13 @@ function bindUIEvents() {
     document.getElementById('lbl-vol').textContent = `${Math.round(v * 100)}%`;
     fpsClient.applySettings({ volume: v });
   });
-  document.getElementById('set-quality')?.addEventListener('change', (e) => {
-    fpsClient.applySettings({ quality: e.target.value });
-  });
+  const qualitySel = document.getElementById('set-quality');
+  if (qualitySel) {
+    qualitySel.value = fpsClient.quality;
+    qualitySel.addEventListener('change', (e) => {
+      fpsClient.applySettings({ quality: e.target.value });
+    });
+  }
 
   // FPS Cap Selector
   const fpsBtns = document.querySelectorAll('#set-fps-group .fps-cap-btn');

@@ -123,7 +123,12 @@ export class GameRoomCore {
   }
 
   getLivingCombatants() {
-    return [...this.combatants.values()].filter((p) => !p.dead);
+    if (this._tickLiving) return this._tickLiving;
+    const out = [];
+    for (const p of this.combatants.values()) {
+      if (!p.dead) out.push(p);
+    }
+    return out;
   }
 
   getSummary() {
@@ -2242,91 +2247,143 @@ export class GameRoomCore {
     const now = Date.now();
     const dt = Math.min(0.06, (now - this.lastTickAt) / 1000);
     this.lastTickAt = now;
+    this._tickSeq = (this._tickSeq || 0) + 1;
 
-    // Passive HP Regen (Phoenix Operator) every 1s
-    const doRegen = now - this.lastRegenTickAt >= 1000;
-    if (doRegen) this.lastRegenTickAt = now;
-
-    if (this.mode === 'survival' && this.dropPlane?.active) {
-      const dp = this.dropPlane;
-      if (now >= dp.startAt) {
-        const span = Math.max(1, dp.endAt - dp.startAt);
-        const u = Math.min(1, (now - dp.startAt) / span);
-        dp.x = dp.startX + (dp.endX - dp.startX) * u;
-        dp.z = dp.startZ + (dp.endZ - dp.startZ) * u;
+    // Build O(1) cached living combatants + human positions ONCE per tick (eliminates ~1,500 array allocs/sec in 50-bot BR!)
+    const living = [];
+    const humanCoords = [];
+    for (const c of this.combatants.values()) {
+      if (!c.dead) {
+        living.push(c);
+        if (!c.isBot) humanCoords.push(c);
       }
-      for (const p of this.combatants.values()) {
-        if (!p.dead && p.dropPhase === 'plane') {
-          p.x = dp.x;
-          p.y = dp.y;
-          p.z = dp.z;
-          if (now >= dp.endAt) {
-            p.dropPhase = 'skydive';
-            p.x += (Math.random() - 0.5) * 4;
-            p.y = dp.y - 2.2;
-            p.z += (Math.random() - 0.5) * 4;
-            p.vy = -13;
+    }
+    this._tickLiving = living;
+    const isHeavyLobby = this.combatants.size > 14;
+    const nearHumanDistSq = 240 * 240;
+
+    try {
+      // Passive HP Regen (Phoenix Operator) every 1s
+      const doRegen = now - this.lastRegenTickAt >= 1000;
+      if (doRegen) this.lastRegenTickAt = now;
+
+      if (this.mode === 'survival' && this.dropPlane?.active) {
+        const dp = this.dropPlane;
+        if (now >= dp.startAt) {
+          const span = Math.max(1, dp.endAt - dp.startAt);
+          const u = Math.min(1, (now - dp.startAt) / span);
+          dp.x = dp.startX + (dp.endX - dp.startX) * u;
+          dp.z = dp.startZ + (dp.endZ - dp.startZ) * u;
+        }
+        for (const p of this.combatants.values()) {
+          if (!p.dead && p.dropPhase === 'plane') {
+            p.x = dp.x;
+            p.y = dp.y;
+            p.z = dp.z;
+            if (now >= dp.endAt) {
+              p.dropPhase = 'skydive';
+              p.x += (Math.random() - 0.5) * 4;
+              p.y = dp.y - 2.2;
+              p.z += (Math.random() - 0.5) * 4;
+              p.vy = -13;
+            }
           }
         }
-      }
-      if (now >= dp.endAt) {
-        dp.active = false;
-        this.broadcast({ type: 'drop_plane_ended' });
-      }
-    }
-
-    for (const p of this.combatants.values()) {
-      if (p.dead) {
-        if (p.respawnAt && now >= p.respawnAt && this.roundPhase === 'live') {
-          this.spawnPlayer(p, now);
-        }
-        continue;
-      }
-
-      if (p.reloadingUntil && now >= p.reloadingUntil) {
-        this.finishReload(p);
-      }
-
-      const op = OPERATORS[p.operator] || OPERATORS.vanguard;
-      if (doRegen && op.regenPerSec > 0 && p.hp < p.maxHp && now - (p.lastDamagedAt || 0) >= 4200) {
-        p.hp = Math.min(p.maxHp, p.hp + op.regenPerSec);
-      }
-
-      if (p.isBot && this.roundPhase === 'live') {
-        updateBotAI(p, this, dt, now);
-      }
-
-      // Only step physics on server for AI Bots or human players without recent client-predicted position packets
-      if (p.isBot || (this.mode === 'survival' && p.dropPhase === 'plane') || now - (p.lastClientPosAt || 0) > 450) {
-        if (this.mode === 'survival' && p.dropPhase && p.dropPhase !== 'ground') {
-          stepAirbornePhysics(p, p.input, this.map, dt, this.dropPlane);
-        } else {
-          const wStats = this.getPlayerWeaponStats(p);
-          stepPlayerPhysics(p, p.input, this.map, dt, wStats.moveSpeedMult, op.speedMult);
+        if (now >= dp.endAt) {
+          dp.active = false;
+          this.broadcast({ type: 'drop_plane_ended' });
         }
       }
-      p.yaw = p.input.yaw;
-      p.pitch = p.input.pitch;
-      p.sprinting = Boolean(p.input.sprint && p.input.forward > 0 && !p.crouching && !p.input.ads);
-      p.ads = Boolean(p.input.ads);
-    }
 
-    if (this.grenades.length > 0) {
-      this.tickGrenades(dt, now);
-    }
+      let botSlotIdx = 0;
+      for (const p of this.combatants.values()) {
+        if (p.dead) {
+          if (p.respawnAt && now >= p.respawnAt && this.roundPhase === 'live') {
+            this.spawnPlayer(p, now);
+          }
+          continue;
+        }
 
-    if (this.mode === 'bomb') {
-      this.tickBombMode(dt, now);
-    } else if (this.mode === 'survival') {
-      this.tickSurvivalMode(dt, now);
-    }
+        if (p.reloadingUntil && now >= p.reloadingUntil) {
+          this.finishReload(p);
+        }
 
-    if (now >= this.matchEndsAt && this.mode !== 'bomb') {
-      this.endMatch('time_up');
-      return;
-    }
+        const op = OPERATORS[p.operator] || OPERATORS.vanguard;
+        if (doRegen && op.regenPerSec > 0 && p.hp < p.maxHp && now - (p.lastDamagedAt || 0) >= 4200) {
+          p.hp = Math.min(p.maxHp, p.hp + op.regenPerSec);
+        }
 
-    this.broadcastSnapshot(now);
+        // Spatial AI & Physics LOD for heavy 50-player lobbies:
+        // Bots near any human run full 30Hz AI & physics; bots >240m away from all humans run AI at 7.5Hz & lightweight step!
+        let isFarBot = false;
+        let runBotAiThisTick = true;
+        if (p.isBot && isHeavyLobby && humanCoords.length > 0 && p.dropPhase === 'ground') {
+          botSlotIdx++;
+          isFarBot = true;
+          for (let h = 0; h < humanCoords.length; h++) {
+            const hc = humanCoords[h];
+            const dx = p.x - hc.x, dz = p.z - hc.z;
+            if (dx * dx + dz * dz < nearHumanDistSq) {
+              isFarBot = false;
+              break;
+            }
+          }
+          if (isFarBot && ((this._tickSeq + botSlotIdx) & 3) !== 0) {
+            runBotAiThisTick = false;
+          }
+        }
+
+        if (p.isBot && this.roundPhase === 'live' && runBotAiThisTick) {
+          updateBotAI(p, this, isFarBot ? Math.min(0.16, dt * 4) : dt, now);
+        }
+
+        // Only step physics on server for AI Bots or human players without recent client-predicted position packets
+        if (p.isBot || (this.mode === 'survival' && p.dropPhase === 'plane') || now - (p.lastClientPosAt || 0) > 450) {
+          if (this.mode === 'survival' && p.dropPhase && p.dropPhase !== 'ground') {
+            stepAirbornePhysics(p, p.input, this.map, dt, this.dropPlane);
+          } else if (isFarBot && !runBotAiThisTick) {
+            // Fast ground-clamped drift for distant off-screen bots (skips expensive multi-pass AABB depenetration!)
+            const spd = (p.input.sprint ? 6.8 : 4.8) * (p.input.forward || 0);
+            if (spd !== 0) {
+              p.x = Math.max(-this.map.bounds.halfW + 1, Math.min(this.map.bounds.halfW - 1, p.x - Math.sin(p.input.yaw || 0) * spd * dt));
+              p.z = Math.max(-this.map.bounds.halfD + 1, Math.min(this.map.bounds.halfD - 1, p.z - Math.cos(p.input.yaw || 0) * spd * dt));
+              if (this.map.terrain) p.y = this.map.terrain.floorAt(p.x, p.z);
+            }
+          } else {
+            const wStats = this.getPlayerWeaponStats(p);
+            stepPlayerPhysics(p, p.input, this.map, dt, wStats.moveSpeedMult, op.speedMult);
+          }
+        }
+        p.yaw = p.input.yaw;
+        p.pitch = p.input.pitch;
+        p.sprinting = Boolean(p.input.sprint && p.input.forward > 0 && !p.crouching && !p.input.ads);
+        p.ads = Boolean(p.input.ads);
+      }
+
+      if (this.grenades.length > 0) {
+        this.tickGrenades(dt, now);
+      }
+
+      if (this.mode === 'bomb') {
+        this.tickBombMode(dt, now);
+      } else if (this.mode === 'survival') {
+        this.tickSurvivalMode(dt, now);
+      }
+
+      if (now >= this.matchEndsAt && this.mode !== 'bomb') {
+        this.endMatch('time_up');
+        return;
+      }
+
+      // Pace world snapshots to 20Hz (50ms) in arenas and 15Hz (66ms) in 50-player BR (client interpolates smoothly at 60-144Hz)
+      const snapIntervalMs = isHeavyLobby ? 65 : 48;
+      if (!this._lastSnapshotAt || now - this._lastSnapshotAt >= snapIntervalMs) {
+        this._lastSnapshotAt = now;
+        this.broadcastSnapshot(now);
+      }
+    } finally {
+      this._tickLiving = null;
+    }
   }
 
   tickBombMode(dt, now) {
@@ -2761,19 +2818,25 @@ export class GameRoomCore {
   }
 
   broadcastSnapshot(now) {
-    const players = [];
+    const r2 = (v) => Math.round((v || 0) * 100) / 100;
     const isBR = this.mode === 'survival';
+    this._snapSeq = (this._snapSeq || 0) + 1;
+    const useAoi = isBR && this.combatants.size > 16 && (this._snapSeq & 3) !== 0;
+
+    let aliveCount = 0;
+    const allSnaps = [];
     for (const p of this.combatants.values()) {
+      if (!p.dead) aliveCount++;
       const snap = {
         id: p.id,
-        x: Number(p.x.toFixed(3)),
-        y: Number(p.y.toFixed(3)),
-        z: Number(p.z.toFixed(3)),
-        vx: Number((p.vx || 0).toFixed(2)),
-        vy: Number((p.vy || 0).toFixed(2)),
-        vz: Number((p.vz || 0).toFixed(2)),
-        yaw: Number(p.yaw.toFixed(3)),
-        pitch: Number(p.pitch.toFixed(3)),
+        x: r2(p.x),
+        y: r2(p.y),
+        z: r2(p.z),
+        vx: r2(p.vx),
+        vy: r2(p.vy),
+        vz: r2(p.vz),
+        yaw: r2(p.yaw),
+        pitch: r2(p.pitch),
         crouch: p.crouching ? 1 : 0,
         sprint: p.sprinting ? 1 : 0,
         ads: p.ads ? 1 : 0,
@@ -2793,13 +2856,13 @@ export class GameRoomCore {
       if (isBR) {
         snap.dp = p.dropPhase === 'plane' ? 1 : (p.dropPhase === 'skydive' ? 2 : (p.dropPhase === 'parachute' ? 3 : 0));
       }
-      players.push(snap);
+      allSnaps.push(snap);
     }
 
     const endsAt = this.mode === 'bomb' ? this.roundEndsAt : this.matchEndsAt;
     const timeLeftSec = Math.max(0, Math.ceil((endsAt - now) / 1000));
 
-    const payload = {
+    const basePayload = {
       type: 'world_state',
       t: now,
       endsAt,
@@ -2807,47 +2870,47 @@ export class GameRoomCore {
       bravoScore: this.bravoScore,
       roundNumber: this.roundNumber,
       timeLeftSec,
-      players
+      aliveCount
     };
 
     if (this.grenades.length > 0) {
-      payload.grenades = this.grenades.map((g) => ({
+      basePayload.grenades = this.grenades.map((g) => ({
         id: g.id,
-        x: Number(g.x.toFixed(2)),
-        y: Number(g.y.toFixed(2)),
-        z: Number(g.z.toFixed(2))
+        x: r2(g.x),
+        y: r2(g.y),
+        z: r2(g.z)
       }));
     }
 
     if (this.mode === 'bomb') {
-      payload.bomb = {
+      basePayload.bomb = {
         planted: this.bombState.planted,
         siteId: this.bombState.siteId,
         x: this.bombState.x,
         y: this.bombState.y,
         z: this.bombState.z,
-        bombLeftSec: this.bombState.planted ? Math.max(0, Number(((this.bombState.explodeAt - now) / 1000).toFixed(1))) : 0,
-        plantProg: Number(this.bombState.plantProgress.toFixed(2)),
+        bombLeftSec: this.bombState.planted ? Math.max(0, Math.round(((this.bombState.explodeAt - now) / 100)) / 10) : 0,
+        plantProg: r2(this.bombState.plantProgress),
         planterId: this.bombState.planterId,
-        defuseProg: Number(this.bombState.defuseProgress.toFixed(2)),
+        defuseProg: r2(this.bombState.defuseProgress),
         defuserId: this.bombState.defuserId,
         dropped: this.bombState.dropped,
         dropX: this.bombState.dropX,
         dropZ: this.bombState.dropZ
       };
     } else if (this.mode === 'survival' && this.storm) {
-      payload.storm = {
-        x: Number(this.storm.x.toFixed(1)),
-        z: Number(this.storm.z.toFixed(1)),
-        r: Number(this.storm.radius.toFixed(2))
+      basePayload.storm = {
+        x: Math.round(this.storm.x * 10) / 10,
+        z: Math.round(this.storm.z * 10) / 10,
+        r: r2(this.storm.radius)
       };
       if (this.dropPlane?.active) {
-        payload.dropPlane = {
+        basePayload.dropPlane = {
           active: true,
-          x: Number(this.dropPlane.x.toFixed(2)),
-          y: Number(this.dropPlane.y.toFixed(2)),
-          z: Number(this.dropPlane.z.toFixed(2)),
-          yaw: Number(this.dropPlane.yaw.toFixed(3)),
+          x: r2(this.dropPlane.x),
+          y: r2(this.dropPlane.y),
+          z: r2(this.dropPlane.z),
+          yaw: r2(this.dropPlane.yaw),
           startX: this.dropPlane.startX,
           startZ: this.dropPlane.startZ,
           endX: this.dropPlane.endX,
@@ -2858,7 +2921,32 @@ export class GameRoomCore {
       }
     }
 
-    this.broadcast(payload);
+    if (useAoi) {
+      // Spatial Interest Management (AOI): only send nearby combatants (<290m) on partial ticks — cuts BR bandwidth & client JSON work by ~75%!
+      const aoiDistSq = 290 * 290;
+      for (const h of this.combatants.values()) {
+        if (h.isBot) continue;
+        const hx = h.x, hz = h.z;
+        const nearPlayers = [];
+        for (let i = 0; i < allSnaps.length; i++) {
+          const s = allSnaps[i];
+          if (s.id === h.id) {
+            nearPlayers.push(s);
+            continue;
+          }
+          if (s.dead) continue;
+          const dx = s.x - hx, dz = s.z - hz;
+          if (dx * dx + dz * dz <= aoiDistSq) {
+            nearPlayers.push(s);
+          }
+        }
+        this.sendTo(h.id, { ...basePayload, partial: 1, players: nearPlayers });
+      }
+      return;
+    }
+
+    basePayload.players = allSnaps;
+    this.broadcast(basePayload);
   }
 
   getLobbyPayload() {

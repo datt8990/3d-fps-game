@@ -1,5 +1,6 @@
 // AAA-Grade Rigged GLB Character System (Stylized Military & Spec-Ops) + 30 Detailed 3D Weapons
 import * as THREE from 'three';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { OUTFITS, OPERATORS, WEAPONS, WEAPON_SKINS } from '/shared/constants.js';
 import {
   getWeaponSkinTexture,
@@ -26,11 +27,17 @@ const RIGHT_VEC = new THREE.Vector3(1, 0, 0);
 const _v0 = new THREE.Vector3();
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
+const _v5 = new THREE.Vector3();
+const _v6 = new THREE.Vector3();
+const _v7 = new THREE.Vector3();
 const _q0 = new THREE.Quaternion();
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _q3 = new THREE.Quaternion();
 const _q4 = new THREE.Quaternion();
+const _q5 = new THREE.Quaternion();
 
 if (typeof window !== 'undefined') {
   // Kick off background GLB character preloading early
@@ -2097,6 +2104,83 @@ export function createWeaponModel(weaponId = 'ak47', skinId = 'default', attachm
   return cloned;
 }
 
+const thirdPersonWeaponCache = new Map();
+
+// Batches a 35-mesh procedural weapon down into ~3-5 merged meshes by material for remote bots (8x fewer GPU draw calls, identical visuals)
+function createThirdPersonWeaponModel(weaponId = 'ak47', skinId = 'default', attachments = {}) {
+  const attachKey = Object.entries(attachments || {}).sort().map(([k, v]) => `${k}:${v}`).join(',');
+  const cacheKey = `${weaponId}_${skinId}_${attachKey}`;
+  let mergedTemplate = thirdPersonWeaponCache.get(cacheKey);
+  if (!mergedTemplate) {
+    let baseTemplate = weaponTemplateCache.get(cacheKey);
+    if (!baseTemplate) {
+      baseTemplate = buildWeaponModelDirect(weaponId, skinId, attachments);
+      weaponTemplateCache.set(cacheKey, baseTemplate);
+    }
+    baseTemplate.updateMatrixWorld(true);
+    const invRoot = new THREE.Matrix4().copy(baseTemplate.matrixWorld).invert();
+    const byMat = new Map(); // material -> Array<BufferGeometry>
+    const fallbackGroup = new THREE.Group();
+
+    baseTemplate.traverse((child) => {
+      if (!child.isMesh || !child.geometry || !child.visible) return;
+      const mat = Array.isArray(child.material) ? child.material[0] : child.material;
+      if (!mat) return;
+      try {
+        let g = child.geometry.index ? child.geometry.toNonIndexed() : child.geometry.clone();
+        const relM = new THREE.Matrix4().multiplyMatrices(invRoot, child.matrixWorld);
+        g.applyMatrix4(relM);
+        // Strip mismatched extra attributes so mergeGeometries always succeeds cleanly
+        const keep = new Set(['position', 'normal', 'uv']);
+        for (const attrName of Object.keys(g.attributes)) {
+          if (!keep.has(attrName)) g.deleteAttribute(attrName);
+        }
+        if (!g.attributes.normal) g.computeVertexNormals();
+        if (!g.attributes.uv) {
+          g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+        }
+        let arr = byMat.get(mat);
+        if (!arr) { arr = []; byMat.set(mat, arr); }
+        arr.push(g);
+      } catch {
+        const c = child.clone();
+        c.castShadow = false;
+        c.receiveShadow = false;
+        fallbackGroup.add(c);
+      }
+    });
+
+    mergedTemplate = new THREE.Group();
+    if (BufferGeometryUtils?.mergeGeometries) {
+      for (const [mat, geos] of byMat.entries()) {
+        if (!geos.length) continue;
+        const combined = geos.length === 1 ? geos[0] : BufferGeometryUtils.mergeGeometries(geos, false);
+        if (combined) {
+          if (geos.length > 1) {
+            for (const g of geos) g.dispose();
+          }
+          const m = new THREE.Mesh(combined, mat);
+          m.castShadow = false;
+          m.receiveShadow = false;
+          mergedTemplate.add(m);
+        } else {
+          for (const g of geos) {
+            const m = new THREE.Mesh(g, mat);
+            m.castShadow = false;
+            m.receiveShadow = false;
+            mergedTemplate.add(m);
+          }
+        }
+      }
+    } else {
+      mergedTemplate = baseTemplate.clone(true);
+    }
+    if (fallbackGroup.children.length > 0) mergedTemplate.add(fallbackGroup);
+    thirdPersonWeaponCache.set(cacheKey, mergedTemplate);
+  }
+  return mergedTemplate.clone(true);
+}
+
 function getOperatorFpArmProfile(operatorId, outfitId, outfit) {
   const isFemale = Boolean((OPERATORS[operatorId]?.gender) === 'female');
   const isSwimwear = Boolean(outfit?.isSwimwear);
@@ -2381,7 +2465,7 @@ function mountWeaponOnGroup(weaponMount, weaponId, skinId, attachments) {
   while (weaponMount.children.length > 0) {
     weaponMount.remove(weaponMount.children[0]);
   }
-  const gunMesh = createWeaponModel(weaponId, skinId, attachments);
+  const gunMesh = createThirdPersonWeaponModel(weaponId, skinId, attachments);
   const isMelee = weaponId === 'knife' || weaponId === 'karambit';
   const isPistol = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven'].includes(weaponId);
   gunMesh.scale.setScalar(0.92);
@@ -2876,10 +2960,27 @@ function hydrateGlbIntoRig(rig, loaded, archetypeKey, opCfg, outCfg, teamGlowCol
     rig.restHeadQuat = inst.restHeadQuat;
     rig.activeAnim = inst.activeAnim;
     rig.archetypeKey = archetypeKey;
+    rig.shadowMeshes = inst.shadowMeshes || [];
     rig.bodyRoot.add(inst.modelRoot);
     buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowColor);
+    if (rig.castShadowEnabled !== undefined) {
+      setRigShadowCast(rig, rig.castShadowEnabled);
+    }
   } catch (err) {
     console.warn('[models.js] hydrateGlbIntoRig error:', err);
+  }
+}
+
+export function setRigShadowCast(rig, enabled) {
+  if (!rig) return;
+  const flag = Boolean(enabled);
+  if (rig.castShadowEnabled === flag && rig._shadowApplied) return;
+  rig.castShadowEnabled = flag;
+  if (rig.shadowMeshes && rig.shadowMeshes.length > 0) {
+    for (let i = 0; i < rig.shadowMeshes.length; i++) {
+      rig.shadowMeshes[i].castShadow = flag;
+    }
+    rig._shadowApplied = true;
   }
 }
 
@@ -2995,7 +3096,7 @@ function transitionGlbAnimation(rig, targetKey, fadeSec = 0.16, timeScale = 1.0)
 
 export function animateOperatorRig(rig, state, dt, timeSec = 0) {
   if (!rig) return;
-  const clampedDt = Math.min(0.05, dt);
+  const clampedDt = Math.min(0.12, dt);
 
   if (state.dead) {
     rig.shieldMesh.visible = false;
@@ -3033,8 +3134,9 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
     if (rig.actions?.death) rig.actions.death.stop();
   }
 
+  const lod = state.lodLevel || 0; // 0: close (<35m) full detail | 1: mid (35-85m) fast | 2: far (>85m) ultra-light
   rig.weaponMount.visible = true;
-  rig.nameplate.visible = state.showNameplate !== false;
+  rig.nameplate.visible = lod < 2 && state.showNameplate !== false;
   rig.c4Pack.visible = Boolean(state.hasBomb);
   rig.shieldMesh.visible = Boolean(state.shield);
   if (rig.shieldMesh.visible) rig.shieldMesh.rotation.y = timeSec * 2.5;
@@ -3063,7 +3165,6 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
   }
 
   rig.recoilKick = Math.max(0, rig.recoilKick - clampedDt * 6.5);
-  rig.group.updateMatrixWorld(true);
 
   if (!rig.modelRoot || !rig.bones?.handR) {
     return;
@@ -3082,20 +3183,30 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
     rig.bodyRoot.rotation.y = 0;
   }
 
-  // Restore deterministic rest arm poses before full 1.0 solve so arms never fight keyframes or drift
+  const mountYaw = isVictory && !isShort ? 0.34 : 0.0;
+  const mountPitch = (isVictory ? -0.04 : pitch) + recoil * 0.42;
+
+  // LOD 2 (far > 85m): skip full skeleton IK & matrix traversals completely — massive CPU boost in 50-bot BR!
+  if (lod >= 2 && !isVictory) {
+    rig.weaponMount.position.set(0.15, 1.24, -0.32);
+    rig.weaponMount.rotation.set(mountPitch, 0, 0);
+    return;
+  }
+
+  // Restore deterministic rest arm poses BEFORE the single matrixWorld update so arms never fight keyframes
   if (rig.restArmQuats) {
-    for (const [k, q] of Object.entries(rig.restArmQuats)) {
-      if (bones[k]) bones[k].quaternion.copy(q);
+    for (const k in rig.restArmQuats) {
+      if (bones[k]) bones[k].quaternion.copy(rig.restArmQuats[k]);
     }
   }
   rig.group.updateMatrixWorld(true);
 
-  // Convert bodyRoot-local aim vectors into world directions cleanly
-  const bodyWorldQ = _q0.clone();
+  // Convert bodyRoot-local aim vectors into world directions cleanly (zero allocations!)
+  const bodyWorldQ = _q5;
   rig.bodyRoot.getWorldQuaternion(bodyWorldQ);
 
-  // Gentle vertical pitch tilt on head preserving GLB rest quaternion across Mixamo/RPM/VRoid rigs
-  if (bones.head) {
+  // Gentle vertical pitch tilt on head (close LOD 0 only)
+  if (lod === 0 && bones.head) {
     if (!rig.mixer && rig.restHeadQuat) bones.head.quaternion.copy(rig.restHeadQuat);
     const clampedPitch = Math.max(-0.50, Math.min(0.50, pitch));
     const worldRight = _v0.copy(RIGHT_VEC).applyQuaternion(bodyWorldQ).normalize();
@@ -3109,78 +3220,69 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
     bones.head.quaternion.copy(_q4);
   }
 
-  const mountYaw = isVictory && !isShort ? 0.34 : 0.0;
-  const mountPitch = (isVictory ? -0.04 : pitch) + recoil * 0.42;
-
-  // Deterministic 2-bone tactical weapon grip solver (zero frame oscillation + palm-aligned wrist roll)
+  // Deterministic 2-bone tactical weapon grip solver (zero heap allocations!)
   if (bones.upperArmR && bones.lowerArmR && bones.handR) {
-    const uRDir = isShort
-      ? new THREE.Vector3(0.28, -0.62 + recoil * 0.3, -0.73)
-      : (isVictory
-        ? new THREE.Vector3(0.42, -0.68, -0.58)
-        : new THREE.Vector3(0.32, -0.72 + pitch * 0.2, -0.62));
-    aimBoneSegmentWorld(bones.upperArmR, bones.lowerArmR, uRDir.applyQuaternion(bodyWorldQ), 1.0);
+    if (isShort) _v3.set(0.28, -0.62 + recoil * 0.3, -0.73);
+    else if (isVictory) _v3.set(0.42, -0.68, -0.58);
+    else _v3.set(0.32, -0.72 + pitch * 0.2, -0.62);
+    aimBoneSegmentWorld(bones.upperArmR, bones.lowerArmR, _v3.applyQuaternion(bodyWorldQ), 1.0);
 
-    const lRDir = isShort
-      ? new THREE.Vector3(-0.20, 0.24 + pitch * 0.65 + recoil * 0.7, -0.95)
-      : (isVictory
-        ? new THREE.Vector3(-0.24, 0.14, -0.96)
-        : new THREE.Vector3(-0.26, 0.32 + pitch * 0.55 + recoil * 0.65, -0.91));
-    aimBoneSegmentWorld(bones.lowerArmR, bones.handR, lRDir.applyQuaternion(bodyWorldQ), 1.0);
+    if (isShort) _v3.set(-0.20, 0.24 + pitch * 0.65 + recoil * 0.7, -0.95);
+    else if (isVictory) _v3.set(-0.24, 0.14, -0.96);
+    else _v3.set(-0.26, 0.32 + pitch * 0.55 + recoil * 0.65, -0.91);
+    aimBoneSegmentWorld(bones.lowerArmR, bones.handR, _v3.applyQuaternion(bodyWorldQ), 1.0);
   }
 
   if (bones.upperArmL && bones.lowerArmL && bones.handL && !isMelee) {
-    const uLDir = isShort
-      ? new THREE.Vector3(0.30, -0.58, -0.75)
-      : (isVictory
-        ? new THREE.Vector3(0.18, -0.68, -0.70)
-        : new THREE.Vector3(0.22, -0.64 + pitch * 0.2, -0.73));
-    aimBoneSegmentWorld(bones.upperArmL, bones.lowerArmL, uLDir.applyQuaternion(bodyWorldQ), 1.0);
+    if (isShort) _v3.set(0.30, -0.58, -0.75);
+    else if (isVictory) _v3.set(0.18, -0.68, -0.70);
+    else _v3.set(0.22, -0.64 + pitch * 0.2, -0.73);
+    aimBoneSegmentWorld(bones.upperArmL, bones.lowerArmL, _v3.applyQuaternion(bodyWorldQ), 1.0);
 
-    const rHandW = new THREE.Vector3();
-    const lElbowW = new THREE.Vector3();
-    bones.handR.getWorldPosition(rHandW);
-    bones.lowerArmL.getWorldPosition(lElbowW);
+    bones.handR.getWorldPosition(_v4);
+    bones.lowerArmL.getWorldPosition(_v5);
 
-    const gunFwdLocal = new THREE.Vector3(
+    _v6.set(
       -Math.sin(mountYaw) * Math.cos(mountPitch),
       Math.sin(mountPitch),
       -Math.cos(mountYaw) * Math.cos(mountPitch)
-    ).normalize();
-    const fwdWorld = gunFwdLocal.applyQuaternion(bodyWorldQ);
-    const upWorld = new THREE.Vector3(0, 1, 0).applyQuaternion(bodyWorldQ);
-    const guardOffset = isShort ? 0.04 : 0.22;
-    const guardWorld = rHandW.clone()
-      .addScaledVector(fwdWorld, guardOffset)
-      .addScaledVector(upWorld, isShort ? -0.025 : -0.012);
-    const lForeDirW = guardWorld.clone().sub(lElbowW);
-    aimBoneSegmentWorld(bones.lowerArmL, bones.handL, lForeDirW, 1.0);
+    ).normalize().applyQuaternion(bodyWorldQ);
+    _v7.copy(UP_VEC).applyQuaternion(bodyWorldQ);
 
-    // Roll Left Wrist inward & palm-up so fingers cradle UNDER handguard instead of cutting across receiver
-    bones.handL.updateMatrixWorld(true);
-    const axisL = lForeDirW.clone().normalize();
-    _q1.setFromAxisAngle(axisL, 1.35);
-    bones.handL.getWorldQuaternion(_q2);
-    _q4.multiplyQuaternions(_q1, _q2);
-    if (bones.handL.parent) {
-      bones.handL.parent.getWorldQuaternion(_q3).invert();
-      _q4.premultiply(_q3);
+    const guardOffset = isShort ? 0.04 : 0.22;
+    _v3.copy(_v4)
+      .addScaledVector(_v6, guardOffset)
+      .addScaledVector(_v7, isShort ? -0.025 : -0.012)
+      .sub(_v5);
+    aimBoneSegmentWorld(bones.lowerArmL, bones.handL, _v3, 1.0);
+
+    // Roll Left Wrist inward & palm-up at close LOD 0 so fingers cradle under handguard
+    if (lod === 0) {
+      bones.handL.updateMatrixWorld(true);
+      _v3.normalize();
+      _q1.setFromAxisAngle(_v3, 1.35);
+      bones.handL.getWorldQuaternion(_q2);
+      _q4.multiplyQuaternions(_q1, _q2);
+      if (bones.handL.parent) {
+        bones.handL.parent.getWorldQuaternion(_q3).invert();
+        _q4.premultiply(_q3);
+      }
+      bones.handL.quaternion.copy(_q4);
     }
-    bones.handL.quaternion.copy(_q4);
   }
 
-  // Sync weaponMount squarely inside HandR in bodyRoot uniform scale space
-  rig.group.updateMatrixWorld(true);
-  const handWorldPos = new THREE.Vector3();
-  bones.handR.getWorldPosition(handWorldPos);
-  rig.bodyRoot.worldToLocal(handWorldPos);
-  rig.weaponMount.position.copy(handWorldPos);
+  // Sync weaponMount squarely inside HandR (only update handR branch, NOT entire 60-bone skeleton again!)
+  bones.handR.updateWorldMatrix(true, false);
+  bones.handR.getWorldPosition(_v4);
+  rig.bodyRoot.worldToLocal(_v4);
+  rig.weaponMount.position.copy(_v4);
   rig.weaponMount.rotation.set(mountPitch, mountYaw, 0);
 
-  // Sync scale-invariant bone-tracked tactical gear modules (NVG, vests, holsters, armor)
-  if (rig.tacticalMounts?.length) {
+  // Sync scale-invariant bone-tracked tactical gear modules (NVG, vests, holsters, armor) at LOD 0
+  if (lod === 0 && rig.tacticalMounts?.length) {
     const bodyInvQ = _q3.copy(bodyWorldQ).invert();
-    for (const tm of rig.tacticalMounts) {
+    for (let i = 0; i < rig.tacticalMounts.length; i++) {
+      const tm = rig.tacticalMounts[i];
       if (!tm.bone) continue;
       tm.bone.getWorldPosition(_v0);
       rig.bodyRoot.worldToLocal(_v0);
