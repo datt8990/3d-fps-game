@@ -2,7 +2,7 @@
 // - Verified LOS Waypoint Pathfinding (Dijkstra + String-Pulling Lookahead)
 // - 5-Ray Whisker Obstacle Avoidance (Never slams into walls or corners)
 // - Wall-Safe Combat Strafing, Damage-Direction Reaction & Close-Range Sidearm Swap
-import { PHYSICS } from '../constants.js';
+import { PHYSICS, WEAPONS } from '../constants.js';
 import {
   anglesFromDirection,
   directionFromAngles,
@@ -47,12 +47,7 @@ export function createBotProfile(index = 0) {
   const baseName = BOT_NAMES[index % BOT_NAMES.length];
   const suffix = index >= BOT_NAMES.length ? `_${index - BOT_NAMES.length + 2}` : '';
   const skins = {};
-  for (const k of [
-    'ak47', 'm4a1', 'scarh', 'aug', 'm16a4', 'famas', 'galil', 'hk416',
-    'mp5', 'p90', 'vector', 'ump45', 'mp7', 'm249', 'rpk',
-    'spas12', 'aa12', 'm870', 'awp', 'svd', 'barrett', 'kar98k', 'm200',
-    'deagle', 'usps', 'glock18', 'magnum', 'fiveseven', 'knife', 'karambit'
-  ]) {
+  for (const k of Object.keys(WEAPONS)) {
     skins[k] = preset.skin;
   }
   return {

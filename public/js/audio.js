@@ -1,4 +1,5 @@
-// Realistic Ballistic Web Audio Engine: Convolver Arena Reverb, Hard-Clipped Shockwave Crack, WAV Pack Loader & 30 Weapon Profiles
+// Realistic Ballistic Web Audio Engine: Convolver Arena Reverb, Hard-Clipped Shockwave Crack, WAV Pack Loader & 50 Weapon Profiles
+import { WEAPONS } from '/shared/constants.js';
 import { getConfiguredSoundUrl, getAudioSampleBuffer } from './weaponAssetLoader.js';
 
 const GUN_PROFILES = {
@@ -11,6 +12,12 @@ const GUN_PROFILES = {
   famas:     { crackF: 4300, blastS: 7600, blastE: 680, blastD: 0.13, subG: 0.54, subD: 0.07, rev: 0.46, mechF: 3400, punch: 0.70 },
   galil:     { crackF: 3650, blastS: 7000, blastE: 540, blastD: 0.16, subG: 0.70, subD: 0.09, rev: 0.55, mechF: 2450, punch: 0.82 },
   hk416:     { crackF: 4000, blastS: 7300, blastE: 580, blastD: 0.14, subG: 0.60, subD: 0.08, rev: 0.50, mechF: 3000, punch: 0.76 },
+  ak12:      { crackF: 3850, blastS: 7200, blastE: 560, blastD: 0.15, subG: 0.66, subD: 0.085, rev: 0.52, mechF: 2650, punch: 0.80 },
+  g36c:      { crackF: 4150, blastS: 7500, blastE: 630, blastD: 0.135, subG: 0.56, subD: 0.07, rev: 0.48, mechF: 3150, punch: 0.72 },
+  groza:     { crackF: 3200, blastS: 6500, blastE: 460, blastD: 0.18, subG: 0.80, subD: 0.10, rev: 0.60, mechF: 2250, punch: 0.90 },
+  asval:     { crackF: 1850, blastS: 2400, blastE: 350, blastD: 0.09, subG: 0.36, subD: 0.05, rev: 0.18, mechF: 3200, punch: 0.44, nativeSuppressed: true },
+  fal:       { crackF: 2850, blastS: 6000, blastE: 390, blastD: 0.23, subG: 0.94, subD: 0.13, rev: 0.70, mechF: 1850, punch: 1.00 },
+  mcx:       { crackF: 3900, blastS: 7600, blastE: 540, blastD: 0.16, subG: 0.74, subD: 0.095, rev: 0.58, mechF: 2900, punch: 0.86 },
 
   // SMGs (Fast snappy CQB cracks)
   mp5:       { crackF: 1750, blastS: 2300, blastE: 340, blastD: 0.08, subG: 0.34, subD: 0.05, rev: 0.16, mechF: 3500, punch: 0.42, nativeSuppressed: true },
@@ -18,15 +25,24 @@ const GUN_PROFILES = {
   vector:    { crackF: 3900, blastS: 6800, blastE: 690, blastD: 0.08, subG: 0.38, subD: 0.045, rev: 0.32, mechF: 4100, punch: 0.54 },
   ump45:     { crackF: 2800, blastS: 5400, blastE: 460, blastD: 0.13, subG: 0.58, subD: 0.07, rev: 0.42, mechF: 2400, punch: 0.70 },
   mp7:       { crackF: 4700, blastS: 8200, blastE: 820, blastD: 0.09, subG: 0.40, subD: 0.045, rev: 0.36, mechF: 3850, punch: 0.58 },
+  uzi:       { crackF: 4300, blastS: 7200, blastE: 720, blastD: 0.08, subG: 0.38, subD: 0.045, rev: 0.32, mechF: 3900, punch: 0.52 },
+  mac10:     { crackF: 4050, blastS: 6900, blastE: 700, blastD: 0.075, subG: 0.36, subD: 0.042, rev: 0.30, mechF: 4200, punch: 0.50 },
+  bizon:     { crackF: 3750, blastS: 6500, blastE: 620, blastD: 0.10, subG: 0.46, subD: 0.055, rev: 0.36, mechF: 3300, punch: 0.60 },
+  thompson:  { crackF: 2950, blastS: 5700, blastE: 480, blastD: 0.135, subG: 0.62, subD: 0.075, rev: 0.45, mechF: 2550, punch: 0.72 },
 
   // LMGs (Thunderous sustained heavy fire)
   m249:      { crackF: 3750, blastS: 7200, blastE: 500, blastD: 0.18, subG: 0.78, subD: 0.10, rev: 0.62, mechF: 2600, punch: 0.88, post: 'belt' },
   rpk:       { crackF: 3300, blastS: 6600, blastE: 460, blastD: 0.19, subG: 0.82, subD: 0.11, rev: 0.64, mechF: 2200, punch: 0.90 },
+  pkm:       { crackF: 3050, blastS: 6400, blastE: 410, blastD: 0.21, subG: 0.92, subD: 0.12, rev: 0.68, mechF: 2000, punch: 0.96, post: 'belt' },
+  mg3:       { crackF: 3600, blastS: 7000, blastE: 490, blastD: 0.15, subG: 0.76, subD: 0.09, rev: 0.58, mechF: 3100, punch: 0.88, post: 'belt' },
+  negev:     { crackF: 3850, blastS: 7300, blastE: 520, blastD: 0.16, subG: 0.74, subD: 0.09, rev: 0.58, mechF: 2750, punch: 0.84, post: 'belt' },
 
   // Shotguns (Huge concussive blast + echoing boom)
   spas12:    { crackF: 2500, blastS: 5800, blastE: 260, blastD: 0.27, subG: 1.05, subD: 0.16, rev: 0.78, mechF: 1650, punch: 1.05, post: 'pump' },
   aa12:      { crackF: 2300, blastS: 5200, blastE: 280, blastD: 0.22, subG: 0.94, subD: 0.13, rev: 0.66, mechF: 1750, punch: 0.96 },
   m870:      { crackF: 2650, blastS: 6000, blastE: 250, blastD: 0.29, subG: 1.10, subD: 0.17, rev: 0.82, mechF: 1550, punch: 1.10, post: 'pump' },
+  benellim4: { crackF: 2550, blastS: 5900, blastE: 270, blastD: 0.25, subG: 1.02, subD: 0.15, rev: 0.74, mechF: 1850, punch: 1.02 },
+  db_shotgun:{ crackF: 2400, blastS: 6200, blastE: 220, blastD: 0.32, subG: 1.18, subD: 0.19, rev: 0.86, mechF: 1500, punch: 1.16 },
 
   // Snipers (Massive supersonic CRACK-BOOM! + long outdoor tail)
   awp:       { crackF: 3900, blastS: 8800, blastE: 240, blastD: 0.38, subG: 1.15, subD: 0.22, rev: 0.95, mechF: 2200, punch: 1.15, post: 'bolt' },
@@ -34,13 +50,17 @@ const GUN_PROFILES = {
   barrett:   { crackF: 3200, blastS: 9200, blastE: 170, blastD: 0.48, subG: 1.28, subD: 0.28, rev: 1.05, mechF: 1700, punch: 1.25 },
   kar98k:    { crackF: 4100, blastS: 8400, blastE: 290, blastD: 0.34, subG: 1.04, subD: 0.18, rev: 0.88, mechF: 2400, punch: 1.08, post: 'bolt' },
   m200:      { crackF: 4200, blastS: 9000, blastE: 210, blastD: 0.42, subG: 1.20, subD: 0.24, rev: 0.98, mechF: 2100, punch: 1.20, post: 'bolt' },
+  m24:       { crackF: 4000, blastS: 8600, blastE: 260, blastD: 0.36, subG: 1.10, subD: 0.20, rev: 0.90, mechF: 2300, punch: 1.12, post: 'bolt' },
+  mk14:      { crackF: 3450, blastS: 7400, blastE: 370, blastD: 0.24, subG: 0.88, subD: 0.13, rev: 0.70, mechF: 2450, punch: 0.94 },
 
   // Pistols (Crisp high-velocity pops & heavy magnum cracks)
   deagle:    { crackF: 3500, blastS: 7600, blastE: 420, blastD: 0.21, subG: 0.85, subD: 0.11, rev: 0.72, mechF: 2900, punch: 0.94, brass: true },
   usps:      { crackF: 1950, blastS: 2500, blastE: 380, blastD: 0.075, subG: 0.30, subD: 0.045, rev: 0.14, mechF: 3800, punch: 0.38, nativeSuppressed: true },
   glock18:   { crackF: 4200, blastS: 7000, blastE: 640, blastD: 0.10, subG: 0.46, subD: 0.055, rev: 0.38, mechF: 3500, punch: 0.62 },
   magnum:    { crackF: 3600, blastS: 8000, blastE: 360, blastD: 0.25, subG: 0.96, subD: 0.13, rev: 0.80, mechF: 2500, punch: 1.02, post: 'hammer', brass: false },
-  fiveseven: { crackF: 4500, blastS: 7600, blastE: 700, blastD: 0.11, subG: 0.48, subD: 0.06, rev: 0.42, mechF: 3600, punch: 0.66, brass: true }
+  fiveseven: { crackF: 4500, blastS: 7600, blastE: 700, blastD: 0.11, subG: 0.48, subD: 0.06, rev: 0.42, mechF: 3600, punch: 0.66, brass: true },
+  m1911:     { crackF: 3150, blastS: 6800, blastE: 470, blastD: 0.16, subG: 0.72, subD: 0.09, rev: 0.56, mechF: 2700, punch: 0.82, brass: true },
+  beretta92: { crackF: 4100, blastS: 7100, blastE: 620, blastD: 0.11, subG: 0.48, subD: 0.06, rev: 0.40, mechF: 3450, punch: 0.64, brass: true }
 };
 
 class SoundEngine {
@@ -185,8 +205,8 @@ class SoundEngine {
     const atten = distance <= 1 ? 1.0 : Math.max(0.04, 1 / (1 + distance * 0.048));
     if (atten <= 0.045) return;
 
-    if (weaponId === 'knife' || weaponId === 'karambit') {
-      this.playKnifeSlash(atten, weaponId === 'karambit');
+    if (WEAPONS[weaponId]?.isMelee) {
+      this.playKnifeSlash(atten, weaponId === 'karambit' || weaponId === 'katana');
       return;
     }
 
@@ -412,17 +432,18 @@ class SoundEngine {
   playWeaponDraw(weaponId = 'ak47') {
     const ctx = this.ensureContext();
     if (ctx && this._tryPlayExternalSample('draw', weaponId, 0.55, 0.04)) return;
-    if (weaponId === 'knife' || weaponId === 'karambit') {
+    const wc = WEAPONS[weaponId];
+    if (wc?.isMelee) {
       this._playFoleySlide(1600, 4400, 0.14, 0.28, 4.5);
       this._playMechTick(3600, 0.03, 0.18);
       return;
     }
-    if (['awp', 'barrett', 'svd', 'kar98k', 'm200', 'm249', 'rpk'].includes(weaponId)) {
+    if (wc?.subClass === 'sniper' || wc?.subClass === 'lmg') {
       this._playFoleySlide(520, 1400, 0.14, 0.24, 1.8);
       setTimeout(() => this._playMechTick(1750, 0.032, 0.22), 70);
       return;
     }
-    if (['deagle', 'usps', 'glock18', 'magnum', 'fiveseven'].includes(weaponId)) {
+    if (wc?.subClass === 'pistol') {
       this._playFoleySlide(900, 2600, 0.09, 0.20, 2.5);
       setTimeout(() => this._playMechTick(2800, 0.022, 0.18), 55);
       return;
@@ -536,7 +557,7 @@ class SoundEngine {
       return;
     }
 
-    if (['awp', 'barrett', 'svd', 'kar98k', 'm200'].includes(weaponId)) {
+    if (WEAPONS[weaponId]?.isSniper) {
       const isHeavy = weaponId === 'barrett' || weaponId === 'm200';
       this._scheduleReload(d * 0.12, () => {
         this._playMechTick(isHeavy ? 1200 : 1650, 0.035, 0.26);
@@ -566,8 +587,8 @@ class SoundEngine {
       return;
     }
 
-    if (['deagle', 'usps', 'glock18', 'fiveseven'].includes(weaponId)) {
-      const heavySlide = weaponId === 'deagle';
+    if (WEAPONS[weaponId]?.subClass === 'pistol' && weaponId !== 'magnum') {
+      const heavySlide = weaponId === 'deagle' || weaponId === 'm1911';
       this._scheduleReload(d * 0.12, () => {
         this._playMechTick(2900, 0.02, 0.22);
         this._playFoleySlide(2600, 1100, 0.09, 0.22, 2.8);

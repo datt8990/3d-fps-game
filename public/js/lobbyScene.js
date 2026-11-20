@@ -1,5 +1,6 @@
 // Interactive 3D Military Hangar Showcase for Main Lobby, Operator Select & Weapon Armory
 import * as THREE from 'three';
+import { WEAPONS } from '/shared/constants.js';
 import { createOperatorRig, animateOperatorRig, createWeaponModel, preloadCharacterModels } from './models.js';
 import { getStudioEnvMap } from './textures.js';
 import { createMuzzleFlashRig, triggerMuzzleFlash, updateMuzzleFlash, ShellEjectionPool } from './weaponEffects.js';
@@ -210,10 +211,11 @@ export class LobbyShowcase {
     }
     const holder = new THREE.Group();
     const gun = createWeaponModel(weaponId, skinId, attachments);
-    const isPistol = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven'].includes(weaponId);
-    const isLong = ['awp', 'barrett', 'svd', 'm249', 'rpk', 'kar98k', 'm200', 'm16a4'].includes(weaponId);
-    const isMelee = weaponId === 'knife' || weaponId === 'karambit';
-    const scale = isPistol ? 2.35 : (isLong ? 1.58 : 1.92);
+    const wCfg = WEAPONS[weaponId] || WEAPONS.ak47;
+    const isPistol = wCfg.subClass === 'pistol';
+    const isLong = wCfg.isSniper || wCfg.subClass === 'lmg' || weaponId === 'm16a4' || weaponId === 'fal' || weaponId === 'benellim4' || weaponId === 'db_shotgun';
+    const isMelee = Boolean(wCfg.isMelee);
+    const scale = isPistol ? 2.35 : (isLong ? 1.56 : 1.92);
 
     // Attach volumetric muzzle flash & shell ejection port anchor onto Shop/Armory preview weapon
     let flashRig = null;
@@ -244,9 +246,9 @@ export class LobbyShowcase {
       ejectAnchor,
       isMelee,
       isSuppressed: Boolean(gun.userData.isSuppressed),
-      isShotgun: ['spas12', 'aa12', 'm870'].includes(weaponId),
-      isSniper: ['awp', 'barrett', 'svd', 'kar98k', 'm200'].includes(weaponId),
-      isAuto: !isMelee && !['awp', 'barrett', 'kar98k', 'm200', 'spas12', 'm870', 'deagle', 'usps', 'magnum', 'fiveseven'].includes(weaponId)
+      isShotgun: wCfg.subClass === 'shotgun',
+      isSniper: Boolean(wCfg.isSniper),
+      isAuto: !isMelee && wCfg.fireMode === 'auto'
     };
     this.stageGroup.add(holder);
   }

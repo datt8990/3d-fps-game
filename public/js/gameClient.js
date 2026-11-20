@@ -1303,7 +1303,7 @@ export class FPSGameClient {
       if (ent?.rig) ent.rig.recoilKick = 0.22;
     }
 
-    const isMelee = msg.weaponId === 'knife' || msg.weaponId === 'karambit';
+    const isMelee = Boolean(WEAPONS[msg.weaponId]?.isMelee);
     if (!isMelee && msg.origin && msg.hitPoint) {
       let startPt = msg.origin;
       if (isMe && this.fpRig && this.fpRig.userData?.flashGroup) {

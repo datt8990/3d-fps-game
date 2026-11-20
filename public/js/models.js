@@ -1,4 +1,4 @@
-// AAA-Grade Rigged GLB Character System (Stylized Military & Spec-Ops) + 30 Detailed 3D Weapons
+// AAA-Grade Rigged GLB Character System (Stylized Military & Spec-Ops) + 50 Realistic 3D Firearms
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { OUTFITS, OPERATORS, WEAPONS, WEAPON_SKINS } from '/shared/constants.js';
@@ -7,6 +7,7 @@ import {
   getOutfitTextures,
   getWatchFaceTexture,
   getWeaponMetalBumpTexture,
+  getWeaponRoughnessTexture,
   getWoodStockTexture,
   getPolymerGripTexture
 } from './textures.js';
@@ -59,8 +60,8 @@ function extrudeSideProfile(points, thickness = 0.04, bevel = 0.003, mat) {
     bevelEnabled: bevel > 0,
     bevelThickness: bevel,
     bevelSize: bevel,
-    bevelSegments: 2,
-    curveSegments: 8
+    bevelSegments: 3,
+    curveSegments: 12
   });
   geo.translate(0, 0, -innerDepth * 0.5);
   geo.rotateY(Math.PI / 2);
@@ -495,21 +496,130 @@ function buildSniperOpticScope({
   return scopeGroup;
 }
 
-// Recessed right-side ejection port, bolt carrier & left-side selector switch for mechanical realism
+// Recessed right-side ejection port, bolt carrier, takedown pins & red/white fire-mode selector pips
 function buildReceiverPolish(width, yPort, zPort, darkMat, steelMat, brassMat) {
   const g = new THREE.Group();
   const portPlate = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.018, 0.058), darkMat);
   portPlate.position.set(width * 0.5 + 0.001, yPort, zPort);
   const brassCase = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.009, 0.034), brassMat);
-  brassCase.position.set(width * 0.5 + 0.0025, yPort, zPort + 0.004);
+  brassCase.position.set(width * 0.5 + 0.0028, yPort, zPort + 0.004);
   const dustDoor = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.012, 0.056), steelMat);
   dustDoor.position.set(width * 0.5 + 0.002, yPort - 0.012, zPort);
   const selector = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.012, 0.026), steelMat);
   selector.position.set(-width * 0.5 - 0.002, yPort - 0.022, zPort + 0.068);
   selector.rotation.x = 0.25;
+  // Red/white fire-selector markings + steel takedown pins & bolt catch
+  const redPip = new THREE.Mesh(new THREE.CircleGeometry(0.0022, 8), new THREE.MeshBasicMaterial({ color: '#ef4444' }));
+  redPip.rotation.y = -Math.PI / 2;
+  redPip.position.set(-width * 0.5 - 0.0015, yPort - 0.011, zPort + 0.064);
+  const whitePip = new THREE.Mesh(new THREE.CircleGeometry(0.0020, 8), new THREE.MeshBasicMaterial({ color: '#e2e8f0' }));
+  whitePip.rotation.y = -Math.PI / 2;
+  whitePip.position.set(-width * 0.5 - 0.0015, yPort - 0.011, zPort + 0.075);
+  const pinGeo = new THREE.CylinderGeometry(0.0036, 0.0036, width + 0.005, 10);
+  pinGeo.rotateZ(Math.PI / 2);
+  const pinF = new THREE.Mesh(pinGeo, steelMat);
+  pinF.position.set(0, yPort - 0.028, zPort - 0.048);
+  const pinR = new THREE.Mesh(pinGeo, steelMat);
+  pinR.position.set(0, yPort - 0.026, zPort + 0.088);
   const magBtn = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.010, 0.014), darkMat);
   magBtn.position.set(width * 0.5 + 0.002, yPort - 0.032, zPort - 0.036);
-  g.add(portPlate, brassCase, dustDoor, selector, magBtn);
+  g.add(portPlate, brassCase, dustDoor, selector, redPip, whitePip, pinF, pinR, magBtn);
+  return g;
+}
+
+// Folded Harris-style tactical twin bipod for Snipers & LMGs
+function buildTacticalBipod(y, z, darkMat, steelMat, legLen = 0.19) {
+  const g = new THREE.Group();
+  const mount = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.018, 0.034), darkMat);
+  g.add(mount);
+  for (const side of [-1, 1]) {
+    const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.018, 10), steelMat);
+    hinge.rotation.z = Math.PI / 2;
+    hinge.position.set(side * 0.020, -0.006, 0);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0045, legLen, 10), darkMat);
+    leg.rotation.x = Math.PI / 2;
+    leg.position.set(side * 0.024, -0.010, -legLen * 0.5 + 0.01);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.009, 0.018, 10), darkMat);
+    foot.rotation.x = Math.PI / 2;
+    foot.position.set(side * 0.024, -0.010, -legLen + 0.01);
+    g.add(hinge, leg, foot);
+  }
+  g.position.set(0, y, z);
+  return g;
+}
+
+// Exposed brass cartridge belt feeding into LMG receiver
+function buildBrassAmmoBelt(x, y, z, brassMat, darkMat, count = 6) {
+  const g = new THREE.Group();
+  for (let i = 0; i < count; i++) {
+    const t = i / Math.max(1, count - 1);
+    const bullet = new THREE.Mesh(new THREE.CylinderGeometry(0.0042, 0.0048, 0.038, 8), brassMat);
+    bullet.rotation.x = Math.PI / 2;
+    bullet.position.set(x - t * 0.022, y - Math.sin(t * Math.PI * 0.7) * 0.038, z + i * 0.0115);
+    const link = new THREE.Mesh(new THREE.BoxGeometry(0.010, 0.005, 0.011), darkMat);
+    link.position.set(bullet.position.x, bullet.position.y + 0.003, bullet.position.z);
+    g.add(bullet, link);
+  }
+  return g;
+}
+
+// Folding skeleton tubular steel stock (AS VAL / AK-12 / G36C / MCX / UZI / MAC-10)
+function buildFoldingWireStock(zStart, length, yCenter, darkMat, polymerMat, spreadH = 0.056) {
+  const g = new THREE.Group();
+  const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.052, 12), darkMat);
+  hinge.position.set(0, yCenter, zStart);
+  const topBar = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.0065, length, 10), darkMat);
+  topBar.rotation.x = Math.PI / 2;
+  topBar.position.set(0, yCenter + spreadH * 0.42, zStart + length * 0.5);
+  const botBar = new THREE.Mesh(new THREE.CylinderGeometry(0.0060, 0.0060, length * 1.03, 10), darkMat);
+  botBar.rotation.x = Math.PI / 2 + 0.14;
+  botBar.position.set(0, yCenter - spreadH * 0.34, zStart + length * 0.5);
+  const buttPad = new THREE.Mesh(new THREE.BoxGeometry(0.034, spreadH * 1.75, 0.018), polymerMat);
+  buttPad.position.set(0, yCenter - spreadH * 0.12, zStart + length);
+  g.add(hinge, topBar, botBar, buttPad);
+  return g;
+}
+
+// Iconic cylindrical Drum Magazine (Thompson 50-rd / MG3 / RPK drum)
+function buildDrumMagazine(radius, thickness, y, z, mat, darkMat, steelMat) {
+  const g = new THREE.Group();
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, thickness, 22), mat);
+  drum.rotation.x = Math.PI / 2;
+  const rimF = new THREE.Mesh(new THREE.TorusGeometry(radius * 0.94, 0.004, 8, 22), darkMat);
+  rimF.position.z = -thickness * 0.5;
+  const rimR = rimF.clone();
+  rimR.position.z = thickness * 0.5;
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.28, radius * 0.28, thickness + 0.008, 14), steelMat);
+  hub.rotation.x = Math.PI / 2;
+  const key = new THREE.Mesh(new THREE.BoxGeometry(radius * 0.72, 0.009, 0.006), steelMat);
+  key.position.z = -thickness * 0.5 - 0.005;
+  const neck = new THREE.Mesh(new THREE.BoxGeometry(0.034, radius * 0.65, thickness * 0.85), darkMat);
+  neck.position.set(0, radius * 0.85, 0);
+  g.add(drum, rimF, rimR, hub, key, neck);
+  g.position.set(0, y, z);
+  return g;
+}
+
+// Iconic PP-19 Bizon 64-round under-barrel helical cylinder magazine
+function buildHelicalMagazine(radius, length, y, z, mat, darkMat) {
+  const g = new THREE.Group();
+  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 18), mat);
+  cyl.rotation.x = Math.PI / 2;
+  g.add(cyl);
+  for (let i = -3; i <= 3; i++) {
+    const rib = new THREE.Mesh(new THREE.CylinderGeometry(radius + 0.0025, radius + 0.0025, 0.006, 16), darkMat);
+    rib.rotation.x = Math.PI / 2;
+    rib.position.z = i * (length * 0.12);
+    g.add(rib);
+  }
+  const capF = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.86, radius, 0.016, 16), darkMat);
+  capF.rotation.x = Math.PI / 2;
+  capF.position.z = -length * 0.5 - 0.006;
+  const capR = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.90, 0.016, 16), darkMat);
+  capR.rotation.x = Math.PI / 2;
+  capR.position.z = length * 0.5 + 0.006;
+  g.add(capF, capR);
+  g.position.set(0, y, z);
   return g;
 }
 
@@ -520,73 +630,78 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   const skin = WEAPON_SKINS[skinId] || WEAPON_SKINS.default;
   const skinTex = getWeaponSkinTexture(skinId);
   const metalBump = getWeaponMetalBumpTexture();
+  const metalRough = getWeaponRoughnessTexture();
   const woodTex = getWoodStockTexture('#85461e');
   const polyTex = getPolymerGripTexture('#1f242d');
 
   const bodyMat = new THREE.MeshStandardMaterial({
     map: skinTex,
     bumpMap: metalBump,
-    bumpScale: 0.006,
-    metalness: Math.min(0.95, skin.metalness + 0.08),
-    roughness: Math.max(0.14, skin.roughness - 0.05),
-    envMapIntensity: 1.4
+    bumpScale: 0.0055,
+    roughnessMap: metalRough,
+    metalness: Math.min(0.95, skin.metalness + 0.10),
+    roughness: Math.max(0.20, skin.roughness),
+    envMapIntensity: 1.55
   });
   const darkMetal = new THREE.MeshStandardMaterial({
-    color: '#171a21',
+    color: '#1b1f28',
     bumpMap: metalBump,
-    bumpScale: 0.005,
+    bumpScale: 0.0045,
+    roughnessMap: metalRough,
     metalness: 0.88,
-    roughness: 0.24,
-    envMapIntensity: 1.35
+    roughness: 0.34,
+    envMapIntensity: 1.45
   });
   const polymerMat = new THREE.MeshStandardMaterial({
     map: polyTex,
     bumpMap: polyTex,
-    bumpScale: 0.008,
+    bumpScale: 0.007,
     color: '#ffffff',
-    metalness: 0.16,
-    roughness: 0.62
+    metalness: 0.14,
+    roughness: 0.64
   });
   const woodMat = new THREE.MeshStandardMaterial({
     map: woodTex,
     bumpMap: woodTex,
-    bumpScale: 0.006,
-    metalness: 0.08,
-    roughness: 0.40
+    bumpScale: 0.0055,
+    metalness: 0.06,
+    roughness: 0.38
   });
   const steelMat = new THREE.MeshStandardMaterial({
-    color: '#7a8a9e',
+    color: '#8898ad',
     bumpMap: metalBump,
-    bumpScale: 0.003,
+    bumpScale: 0.0028,
+    roughnessMap: metalRough,
     metalness: 0.94,
-    roughness: 0.16,
-    envMapIntensity: 1.5
+    roughness: 0.22,
+    envMapIntensity: 1.65
   });
   const brassMat = new THREE.MeshStandardMaterial({
     color: '#eab308',
-    metalness: 0.92,
+    metalness: 0.94,
     roughness: 0.18,
-    envMapIntensity: 1.45
+    envMapIntensity: 1.5
   });
-  const useWoodGrip = skinId === 'default' && (weaponId === 'ak47' || weaponId === 'svd' || weaponId === 'rpk' || weaponId === 'm870' || weaponId === 'kar98k');
-  const fdePolyTex = getPolymerGripTexture('#9c7e52');
+  const useWoodGrip = skinId === 'default' && ['ak47', 'svd', 'rpk', 'm870', 'kar98k', 'thompson', 'db_shotgun', 'm1911', 'pkm'].includes(weaponId);
+  const fdePolyTex = getPolymerGripTexture('#a28458');
   const gripMat = useWoodGrip
     ? woodMat
-    : (skinId === 'default' && weaponId === 'scarh'
-      ? new THREE.MeshStandardMaterial({ map: fdePolyTex, bumpMap: fdePolyTex, bumpScale: 0.007, metalness: 0.15, roughness: 0.56 })
+    : (skinId === 'default' && (weaponId === 'scarh' || weaponId === 'mcx')
+      ? new THREE.MeshStandardMaterial({ map: fdePolyTex, bumpMap: fdePolyTex, bumpScale: 0.007, metalness: 0.14, roughness: 0.56 })
       : new THREE.MeshStandardMaterial({
         map: getPolymerGripTexture(skin.woodOrGrip || '#1f242d'),
         bumpMap: polyTex,
         bumpScale: 0.007,
-        metalness: 0.15,
+        metalness: 0.14,
         roughness: 0.54
       }));
   const accentMat = new THREE.MeshStandardMaterial({
     color: skin.accentColor,
     bumpMap: metalBump,
     bumpScale: 0.003,
-    metalness: 0.76,
-    roughness: 0.24
+    roughnessMap: metalRough,
+    metalness: 0.78,
+    roughness: 0.28
   });
 
   let magMesh = null;
@@ -600,8 +715,9 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   let aimDistanceZ = -0.28;
 
   const isExt = attachments?.mag === 'extended';
-  const isMelee = weaponId === 'knife' || weaponId === 'karambit';
-  const isSniper = Boolean(WEAPONS[weaponId]?.isSniper);
+  const wCfg = WEAPONS[weaponId] || WEAPONS.ak47;
+  const isMelee = Boolean(wCfg.isMelee);
+  const isSniper = Boolean(wCfg.isSniper);
   const optic = attachments?.optic || 'iron';
   const useExternalOptic = !isSniper && !isMelee && (optic === 'reddot' || optic === 'acog');
 
@@ -1951,18 +2067,643 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
 
     group.add(frame, barrelRib, ventTop, revBore, magMesh, grip, hammer);
     muzzleZ = -0.23;
-  } else if (weaponId === 'knife' || weaponId === 'karambit') {
+  } else if (weaponId === 'ak12') {
+    // Modernized AK-12 Kalashnikov: Full-length top Picatinny rail, perforated free-float handguard, collapsible skeleton stock
+    const rec = extrudeSideProfile([
+      [-0.145, -0.020], [0.145, -0.020], [0.145, 0.048], [-0.145, 0.048]
+    ], 0.050, 0.004, bodyMat);
+    const dustCover = extrudeSideProfile([
+      [-0.142, 0.046], [0.138, 0.046], [0.132, 0.068], [-0.135, 0.068]
+    ], 0.044, 0.004, darkMetal);
+    group.add(buildPicatinnyRail(0.50, 0.034, 0.072, -0.105, darkMetal));
+    railY = 0.079;
+    opticZ = 0.01;
+
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.21, 12), darkMetal);
+    tube.rotation.x = Math.PI / 2;
+    tube.position.set(0, 0.032, 0.25);
+    const stock = extrudeSideProfile([
+      [-0.19, 0.004], [-0.25, -0.022], [-0.38, -0.058], [-0.385, 0.052], [-0.20, 0.052]
+    ], 0.042, 0.004, polymerMat);
+    const buttPad = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.112, 0.014), darkMetal);
+    buttPad.position.set(0, -0.003, 0.388);
+    const grip = buildErgonomicGrip(0.106, 0.102, 0.032, polymerMat, darkMetal, -0.018, 0.034);
+
+    const shroud = buildTacticalHandguard({
+      zStart: -0.142, zEnd: -0.375, yCenter: 0.030, width: 0.050, height: 0.054,
+      shroudMat: polymerMat, darkMat: darkMetal, steelMat, gasTubeY: 0.050, hasQuadRails: true
+    });
+    const barrel = buildPrecisionBarrel({ rFront: 0.010, rRear: 0.0125, length: 0.32, y: 0.028, zCenter: -0.49, darkMat: darkMetal, steelMat });
+    const brake = buildMultiBaffleBrake(0.014, 0.028, -0.655, darkMetal, steelMat, false);
+    const peq = buildTacticalLaserModule(0.035, 0.032, -0.30, darkMetal, '#22c55e');
+
+    magMesh = buildCurvedMagazine(0.033, 0.062, isExt ? 0.050 : 0.042, 5, 0.088, -0.038, -0.052, polymerMat, darkMetal);
+    if (!useExternalOptic) {
+      group.add(buildOpenIronSights(0.11, -0.36, 0.090, darkMetal, '#4ade80', '#f97316', 0.0085));
+      ironSightY = 0.093;
+      ironRearZ = 0.11;
+    }
+    group.add(rec, dustCover, tube, stock, buttPad, grip, shroud, barrel, brake, peq, magMesh,
+      buildReceiverPolish(0.050, 0.036, 0.01, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.685;
+  } else if (weaponId === 'g36c') {
+    // HK G36C Compact: Signature elevated carry-handle Picatinny bridge, vented short handguard, skeleton folding stock, translucent mag
+    const rec = extrudeSideProfile([
+      [-0.135, -0.022], [0.01, -0.022], [0.018, -0.046], [0.092, -0.046],
+      [0.102, -0.014], [0.275, -0.008], [0.275, 0.056], [-0.135, 0.056]
+    ], 0.050, 0.004, bodyMat);
+    // Iconic elevated G36C carry-handle arch with top rail
+    const archRear = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.046, 0.038), darkMetal);
+    archRear.position.set(0, 0.074, 0.102);
+    const archFront = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.046, 0.038), darkMetal);
+    archFront.position.set(0, 0.074, -0.182);
+    const carryTop = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.016, 0.32), darkMetal);
+    carryTop.position.set(0, 0.096, -0.040);
+    group.add(archRear, archFront, carryTop, buildPicatinnyRail(0.31, 0.034, 0.106, -0.040, darkMetal));
+    railY = 0.113;
+    opticZ = -0.02;
+
+    // Vented short G36C forend slots
+    for (let s = 0; s < 3; s++) {
+      const slot = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.014, 0.030), darkMetal);
+      slot.position.set(0, 0.026, -0.145 - s * 0.044);
+      group.add(slot);
+    }
+    const stock = buildFoldingWireStock(0.142, 0.23, 0.016, darkMetal, polymerMat, 0.068);
+    const grip = buildErgonomicGrip(0.096, 0.100, 0.032, polymerMat, darkMetal, -0.018, 0.032);
+    const barrel = buildPrecisionBarrel({ rFront: 0.010, rRear: 0.012, length: 0.18, y: 0.030, zCenter: -0.355, darkMat: darkMetal, steelMat });
+    const hider = buildMultiBaffleBrake(0.013, 0.030, -0.455, darkMetal, steelMat, false);
+
+    const clearMagMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.28, metalness: 0.25, transparent: true, opacity: 0.86 });
+    magMesh = buildCurvedMagazine(0.034, 0.064, isExt ? 0.048 : 0.040, 4, 0.045, -0.036, -0.052, clearMagMat, darkMetal);
+    if (!useExternalOptic) {
+      group.add(buildOpenIronSights(0.09, -0.18, 0.122, darkMetal, '#38bdf8', '#4ade80', 0.0085));
+      ironSightY = 0.125;
+      ironRearZ = 0.09;
+    }
+    group.add(rec, stock, grip, barrel, hider, magMesh,
+      buildReceiverPolish(0.050, 0.032, 0.01, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.485;
+  } else if (weaponId === 'groza') {
+    // OTs-14 Groza Bullpup AK: Rear banana mag behind grip, elevated iron-sight carry handle, stubby heavy barrel
+    const rec = extrudeSideProfile([
+      [-0.315, -0.026], [0.225, -0.022], [0.225, 0.054], [-0.315, 0.054]
+    ], 0.052, 0.004, bodyMat);
+    const buttPad = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.108, 0.018), polymerMat);
+    buttPad.position.set(0, 0.008, 0.322);
+    const carryRear = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.054, 0.032), darkMetal);
+    carryRear.position.set(0, 0.076, 0.12);
+    const carryFront = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.054, 0.032), darkMetal);
+    carryFront.position.set(0, 0.076, -0.15);
+    const carryBar = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.016, 0.30), darkMetal);
+    carryBar.position.set(0, 0.102, -0.015);
+    group.add(carryRear, carryFront, carryBar);
+    if (useExternalOptic) {
+      group.add(buildPicatinnyRail(0.24, 0.032, 0.112, -0.015, darkMetal));
+      railY = 0.118;
+      opticZ = -0.01;
+    } else {
+      group.add(buildOpenIronSights(0.11, -0.15, 0.120, darkMetal, '#4ade80', '#f97316', 0.008));
+      ironSightY = 0.123;
+      ironRearZ = 0.11;
+    }
+
+    const grip = buildErgonomicGrip(-0.085, 0.098, 0.032, polymerMat, darkMetal, -0.018, 0.028);
+    const vertGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.015, 0.082, 12), polymerMat);
+    vertGrip.position.set(0, -0.052, -0.205);
+    const barrel = buildPrecisionBarrel({ rFront: 0.013, rRear: 0.016, length: 0.18, y: 0.028, zCenter: -0.31, darkMat: darkMetal, steelMat });
+    const collar = buildMultiBaffleBrake(0.016, 0.028, -0.405, darkMetal, steelMat, false);
+
+    magMesh = buildCurvedMagazine(0.033, 0.064, isExt ? 0.050 : 0.042, 5, 0.092, -0.036, 0.165, darkMetal, steelMat);
+    group.add(rec, buttPad, grip, vertGrip, barrel, collar, magMesh,
+      buildReceiverPolish(0.052, 0.032, 0.15, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.435;
+  } else if (weaponId === 'asval') {
+    // AS VAL Spetsnaz: Long thick integral ported suppressor barrel + plum polymer grip + tubular folding wire stock
+    const plumMat = skinId === 'default'
+      ? new THREE.MeshStandardMaterial({ color: '#3b242c', map: polyTex, bumpMap: polyTex, bumpScale: 0.006, roughness: 0.56, metalness: 0.15 })
+      : polymerMat;
+    const rec = extrudeSideProfile([
+      [-0.145, -0.020], [0.135, -0.020], [0.135, 0.052], [-0.145, 0.052]
+    ], 0.046, 0.004, bodyMat);
+    const dustCover = extrudeSideProfile([
+      [-0.140, 0.050], [0.120, 0.050], [0.108, 0.068], [-0.132, 0.066]
+    ], 0.040, 0.004, darkMetal);
+    const stock = buildFoldingWireStock(0.148, 0.245, 0.015, darkMetal, polymerMat, 0.058);
+    const grip = buildErgonomicGrip(0.096, 0.100, 0.032, plumMat, darkMetal, -0.018, 0.034);
+    const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.042, 0.135), plumMat);
+    handguard.position.set(0, 0.016, -0.200);
+
+    // Massive signature AS VAL integral cylindrical suppressor with cooling vent slots
+    const intSupp = buildSuppressorUnit(0.030, -0.405, 0.44, 0.021, darkMetal, steelMat);
+    const clamp = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.022, 16), steelMat);
+    clamp.rotation.x = Math.PI / 2;
+    clamp.position.set(0, 0.030, -0.275);
+
+    magMesh = buildCurvedMagazine(0.032, 0.058, isExt ? 0.048 : 0.040, 4, 0.048, -0.036, -0.048, plumMat, darkMetal);
+    if (useExternalOptic) {
+      const sideArm = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.040, 0.11), darkMetal);
+      sideArm.position.set(-0.022, 0.056, 0.01);
+      group.add(sideArm, buildPicatinnyRail(0.14, 0.032, 0.078, 0.01, darkMetal));
+      railY = 0.084;
+      opticZ = 0.01;
+    } else {
+      group.add(buildOpenIronSights(-0.14, -0.58, 0.076, darkMetal, '#4ade80', '#f97316', 0.008));
+      ironSightY = 0.079;
+      ironRearZ = -0.14;
+    }
+    group.add(rec, dustCover, stock, grip, handguard, intSupp, clamp, magMesh,
+      buildReceiverPolish(0.046, 0.034, 0.01, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.635;
+  } else if (weaponId === 'fal') {
+    // FN FAL Battle Rifle: Long slim 7.62 NATO silhouette, classic carry handle, tapered handguard, straight 20-rd steel mag
+    const rec = extrudeSideProfile([
+      [-0.145, -0.022], [0.165, -0.022], [0.165, 0.054], [-0.145, 0.058]
+    ], 0.046, 0.004, bodyMat);
+    const fullStock = extrudeSideProfile([
+      [-0.145, -0.012], [-0.415, -0.076], [-0.415, 0.040], [-0.145, 0.048]
+    ], 0.042, 0.005, polymerMat);
+    const buttPad = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.118, 0.014), darkMetal);
+    buttPad.position.set(0, -0.018, 0.420);
+    const grip = buildErgonomicGrip(0.104, 0.102, 0.032, polymerMat, darkMetal, -0.020, 0.036);
+
+    const handguard = extrudeSideProfile([
+      [0.165, -0.014], [0.435, 0.004], [0.435, 0.046], [0.165, 0.050]
+    ], 0.046, 0.005, polymerMat);
+    for (let v = 0; v < 4; v++) {
+      const vent = new THREE.Mesh(new THREE.BoxGeometry(0.050, 0.009, 0.026), darkMetal);
+      vent.position.set(0, 0.024, -0.21 - v * 0.052);
+      group.add(vent);
+    }
+    const barrel = buildPrecisionBarrel({ rFront: 0.011, rRear: 0.0135, length: 0.36, y: 0.030, zCenter: -0.58, darkMat: darkMetal, steelMat });
+    const hider = buildMultiBaffleBrake(0.013, 0.030, -0.765, darkMetal, steelMat, false);
+    const fsPost = extrudeSideProfile([[0.435, 0.030], [0.468, 0.030], [0.460, 0.078], [0.442, 0.078]], 0.016, 0.002, darkMetal);
+
+    magMesh = new THREE.Group();
+    const mBox = new THREE.Mesh(new THREE.BoxGeometry(0.034, isExt ? 0.195 : 0.155, 0.074), darkMetal);
+    const mFloor = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.010, 0.078), steelMat);
+    mFloor.position.y = isExt ? -0.10 : -0.08;
+    magMesh.add(mBox, mFloor);
+    magMesh.position.set(0, -0.095, -0.068);
+
+    if (useExternalOptic) {
+      group.add(buildPicatinnyRail(0.24, 0.034, 0.064, 0.01, darkMetal));
+      railY = 0.071;
+      opticZ = 0.01;
+    } else {
+      group.add(buildOpenIronSights(0.115, -0.455, 0.086, darkMetal, '#4ade80', '#f97316', 0.008));
+      ironSightY = 0.089;
+      ironRearZ = 0.115;
+    }
+    group.add(rec, fullStock, buttPad, grip, handguard, barrel, hider, fsPost, magMesh,
+      buildReceiverPolish(0.046, 0.034, 0.01, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.795;
+  } else if (weaponId === 'mcx') {
+    // SIG MCX Spear (XM7 NGSW 6.8mm): Sleek FDE Bronze anodized CNC receiver, long M-LOK rail, minimalist folding stock
+    const bronzeMat = skinId === 'default'
+      ? new THREE.MeshStandardMaterial({ color: '#b5925b', bumpMap: metalBump, bumpScale: 0.004, roughnessMap: metalRough, roughness: 0.34, metalness: 0.62 })
+      : bodyMat;
+    const rec = extrudeSideProfile([
+      [-0.115, -0.022], [0.005, -0.022], [0.012, -0.046], [0.090, -0.046],
+      [0.100, -0.014], [0.125, 0.008], [0.125, 0.072], [-0.115, 0.072]
+    ], 0.050, 0.004, bronzeMat);
+    group.add(buildPicatinnyRail(0.52, 0.034, 0.076, -0.115, darkMetal));
+    railY = 0.083;
+    opticZ = 0.01;
+
+    const stock = buildFoldingWireStock(0.124, 0.245, 0.024, bronzeMat, darkMetal, 0.066);
+    const grip = buildErgonomicGrip(0.104, 0.102, 0.032, gripMat, darkMetal, -0.020, 0.034);
+    const shroud = buildTacticalHandguard({
+      zStart: -0.125, zEnd: -0.395, yCenter: 0.034, width: 0.050, height: 0.056,
+      shroudMat: bronzeMat, darkMat: darkMetal, steelMat, gasTubeY: 0.054, hasQuadRails: true
+    });
+    const afg = extrudeSideProfile([[0.22, 0.004], [0.30, 0.004], [0.27, -0.046], [0.225, -0.036]], 0.028, 0.003, gripMat);
+    const peq = buildTacticalLaserModule(0.036, 0.036, -0.31, darkMetal, '#ef4444');
+    const barrel = buildPrecisionBarrel({ rFront: 0.011, rRear: 0.013, length: 0.28, y: 0.032, zCenter: -0.495, darkMat: darkMetal, steelMat });
+    const brake = buildMultiBaffleBrake(0.015, 0.032, -0.640, steelMat, darkMetal, false);
+
+    magMesh = buildCurvedMagazine(0.035, 0.068, isExt ? 0.048 : 0.040, 4, 0.042, -0.036, -0.048, gripMat, darkMetal);
+    if (!useExternalOptic) {
+      group.add(buildOpenIronSights(0.095, -0.37, 0.094, darkMetal, '#38bdf8', '#facc15', 0.008));
+      ironSightY = 0.097;
+      ironRearZ = 0.095;
+    }
+    group.add(rec, stock, grip, shroud, afg, peq, barrel, brake, magMesh,
+      buildReceiverPolish(0.050, 0.040, 0.012, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.67;
+  } else if (weaponId === 'uzi' || weaponId === 'mac10') {
+    // Iconic Compact Box-Receiver SMGs: Micro UZI & MAC-10 Ingram with grip-inserted stick magazine & wire stock
+    const isUzi = weaponId === 'uzi';
+    const rec = extrudeSideProfile(isUzi
+      ? [[-0.125, -0.005], [0.155, -0.005], [0.155, 0.056], [-0.125, 0.056]]
+      : [[-0.110, -0.008], [0.125, -0.008], [0.125, 0.062], [-0.110, 0.062]],
+      isUzi ? 0.042 : 0.046, 0.004, bodyMat);
+    const topCockKnob = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.008, 0.020, 10), steelMat);
+    topCockKnob.position.set(0, isUzi ? 0.066 : 0.072, isUzi ? -0.01 : 0.03);
+    const grip = buildErgonomicGrip(0.032, 0.096, 0.034, polymerMat, darkMetal, -0.005, 0.012);
+    const stock = buildFoldingWireStock(isUzi ? 0.130 : 0.115, 0.19, 0.022, darkMetal, polymerMat, 0.048);
+
+    const barrel = buildPrecisionBarrel({
+      rFront: isUzi ? 0.0095 : 0.012, rRear: isUzi ? 0.013 : 0.014,
+      length: isUzi ? 0.14 : 0.11, y: 0.028, zCenter: isUzi ? -0.215 : -0.17,
+      darkMat: darkMetal, steelMat
+    });
+    const barrelNut = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.024, 14), steelMat);
+    barrelNut.rotation.x = Math.PI / 2;
+    barrelNut.position.set(0, 0.028, isUzi ? -0.158 : -0.130);
+
+    // Long vertical stick magazine protruding cleanly from the center of the pistol grip
+    magMesh = new THREE.Group();
+    const stickLen = isExt ? 0.25 : 0.20;
+    const stick = new THREE.Mesh(new THREE.BoxGeometry(0.024, stickLen, 0.036), darkMetal);
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.010, 0.040), steelMat);
+    floor.position.y = -stickLen * 0.5;
+    magMesh.add(stick, floor);
+    magMesh.position.set(0, -0.135, 0.038);
+    magMesh.rotation.x = -0.10;
+
+    railY = isUzi ? 0.062 : 0.068;
+    opticZ = 0.0;
+    aimDistanceZ = -0.32;
+    if (useExternalOptic) {
+      group.add(buildPicatinnyRail(0.14, 0.030, railY - 0.002, 0.0, darkMetal));
+    } else {
+      group.add(buildOpenIronSights(0.085, isUzi ? -0.135 : -0.105, railY + 0.012, darkMetal, '#4ade80', '#f97316', 0.008));
+      ironSightY = railY + 0.015;
+      ironRearZ = 0.085;
+    }
+    group.add(rec, topCockKnob, grip, stock, barrel, barrelNut, magMesh,
+      buildReceiverPolish(isUzi ? 0.042 : 0.046, 0.030, -0.02, darkMetal, steelMat, brassMat));
+    muzzleZ = isUzi ? -0.295 : -0.235;
+  } else if (weaponId === 'bizon') {
+    // PP-19 Bizon: AK-74U short receiver + iconic massive 64-round cylindrical helical drum under barrel + skeleton stock
+    const rec = extrudeSideProfile([
+      [-0.140, -0.018], [0.135, -0.018], [0.135, 0.046], [-0.140, 0.046]
+    ], 0.048, 0.004, bodyMat);
+    const dustCover = extrudeSideProfile([
+      [-0.135, 0.044], [0.115, 0.044], [0.105, 0.066], [-0.128, 0.065]
+    ], 0.042, 0.004, darkMetal);
+    const stock = buildFoldingWireStock(0.145, 0.235, 0.016, darkMetal, polymerMat, 0.062);
+    const grip = buildErgonomicGrip(0.098, 0.100, 0.032, polymerMat, darkMetal, -0.016, 0.034);
+    const hgUpper = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.032, 0.19), polymerMat);
+    hgUpper.position.set(0, 0.034, -0.230);
+    const barrel = buildPrecisionBarrel({ rFront: 0.010, rRear: 0.012, length: 0.26, y: 0.028, zCenter: -0.34, darkMat: darkMetal, steelMat });
+    const hider = buildMultiBaffleBrake(0.014, 0.028, -0.475, darkMetal, steelMat, false);
+
+    // Signature massive helical cylinder magazine slung horizontally beneath the handguard!
+    magMesh = buildHelicalMagazine(isExt ? 0.035 : 0.031, 0.275, -0.014, -0.225, darkMetal, steelMat);
+
+    if (useExternalOptic) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.038, 0.11), darkMetal);
+      arm.position.set(-0.022, 0.056, 0.01);
+      group.add(arm, buildPicatinnyRail(0.14, 0.032, 0.078, 0.01, darkMetal));
+      railY = 0.084;
+      opticZ = 0.01;
+    } else {
+      group.add(buildOpenIronSights(-0.11, -0.43, 0.080, darkMetal, '#4ade80', '#f97316', 0.008));
+      ironSightY = 0.083;
+      ironRearZ = -0.11;
+    }
+    group.add(rec, dustCover, stock, grip, hgUpper, barrel, hider, magMesh,
+      buildReceiverPolish(0.048, 0.032, 0.01, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.505;
+  } else if (weaponId === 'thompson') {
+    // M1928 Thompson "Tommy Gun": Blued steel receiver, walnut stock & vertical foregrip, finned barrel + iconic 50-rd Drum Magazine
+    const rec = extrudeSideProfile([
+      [-0.145, -0.014], [0.165, -0.014], [0.165, 0.052], [-0.145, 0.052]
+    ], 0.046, 0.004, bodyMat);
+    const stockMat = skinId === 'default' ? woodMat : bodyMat;
+    const stock = extrudeSideProfile([
+      [-0.142, -0.010], [-0.22, -0.024], [-0.405, -0.086], [-0.405, 0.018], [-0.21, 0.038], [-0.142, 0.044]
+    ], 0.042, 0.005, stockMat);
+    const buttPlate = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.106, 0.012), darkMetal);
+    buttPlate.position.set(0, -0.034, 0.410);
+    const grip = buildErgonomicGrip(0.098, 0.100, 0.032, stockMat, darkMetal, -0.012, 0.036);
+    const foreGrip = buildErgonomicGrip(-0.265, 0.092, 0.030, stockMat, darkMetal, -0.004, -0.022);
+
+    const barrel = buildPrecisionBarrel({ rFront: 0.011, rRear: 0.014, length: 0.34, y: 0.032, zCenter: -0.335, darkMat: darkMetal, steelMat });
+    // Iconic Thompson radial cooling fins along the barrel
+    for (let f = 0; f < 9; f++) {
+      const fin = new THREE.Mesh(new THREE.CylinderGeometry(0.0175, 0.0175, 0.005, 14), darkMetal);
+      fin.rotation.x = Math.PI / 2;
+      fin.position.set(0, 0.032, -0.185 - f * 0.016);
+      group.add(fin);
+    }
+    const cuttsComp = buildMultiBaffleBrake(0.015, 0.032, -0.515, steelMat, darkMetal, false);
+
+    // Iconic 50-Round Circular Drum Magazine!
+    magMesh = buildDrumMagazine(isExt ? 0.094 : 0.084, 0.042, -0.092, -0.085, darkMetal, polymerMat, steelMat);
+
+    if (useExternalOptic) {
+      group.add(buildPicatinnyRail(0.16, 0.032, 0.058, 0.0, darkMetal));
+      railY = 0.065;
+      opticZ = 0.0;
+    } else {
+      group.add(buildOpenIronSights(0.11, -0.49, 0.072, darkMetal, '#4ade80', '#facc15', 0.0085));
+      ironSightY = 0.075;
+      ironRearZ = 0.11;
+    }
+    group.add(rec, stock, buttPlate, grip, foreGrip, barrel, cuttsComp, magMesh,
+      buildReceiverPolish(0.046, 0.032, 0.01, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.545;
+  } else if (weaponId === 'pkm' || weaponId === 'mg3' || weaponId === 'negev') {
+    // Heavy Belt-Fed Squad Machine Guns: PKM Spetsnaz, MG3 Buzzsaw (perforated shroud + drum), IWI Negev NG7
+    const isPkm = weaponId === 'pkm';
+    const isMg3 = weaponId === 'mg3';
+    const boxGreen = skinId === 'default'
+      ? new THREE.MeshStandardMaterial({ color: isPkm ? '#3d4f38' : (isMg3 ? '#3b424c' : '#2b323b'), bumpMap: metalBump, bumpScale: 0.005, roughness: 0.52, metalness: 0.45 })
+      : accentMat;
+
+    const rec = extrudeSideProfile([
+      [-0.175, -0.026], [0.225, -0.026], [0.225, 0.070], [-0.175, 0.070]
+    ], 0.066, 0.005, bodyMat);
+    const feedTray = new THREE.Mesh(new THREE.BoxGeometry(0.070, 0.022, 0.19), darkMetal);
+    feedTray.position.set(0, 0.078, -0.01);
+
+    const stock = isPkm
+      ? extrudeSideProfile([[-0.175, -0.018], [-0.435, -0.078], [-0.435, 0.044], [-0.175, 0.052]], 0.048, 0.005, skinId === 'default' ? woodMat : bodyMat)
+      : (isMg3
+        ? extrudeSideProfile([[-0.175, -0.014], [-0.415, -0.066], [-0.415, 0.048], [-0.175, 0.054]], 0.048, 0.005, polymerMat)
+        : buildFoldingWireStock(0.180, 0.24, 0.018, darkMetal, polymerMat, 0.072));
+    const grip = buildErgonomicGrip(0.118, 0.104, 0.036, isPkm ? (skinId === 'default' ? woodMat : gripMat) : polymerMat, darkMetal, -0.024, 0.034);
+
+    // Barrel shroud / ventilated jacket
+    if (isMg3) {
+      // Iconic MG3 square perforated steel barrel jacket
+      const jacket = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.054, 0.42), darkMetal);
+      jacket.position.set(0, 0.036, -0.42);
+      group.add(jacket);
+      for (let v = 0; v < 6; v++) {
+        const hole = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.016, 0.032), steelMat);
+        hole.position.set(0, 0.036, -0.255 - v * 0.058);
+        group.add(hole);
+      }
+    } else {
+      const shroud = buildTacticalHandguard({
+        zStart: -0.220, zEnd: -0.455, yCenter: 0.026, width: 0.062, height: 0.058,
+        shroudMat: isPkm ? darkMetal : polymerMat, darkMat: darkMetal, steelMat, gasTubeY: 0.004, hasQuadRails: !isPkm
+      });
+      group.add(shroud);
+    }
+
+    const barrel = buildPrecisionBarrel({
+      rFront: 0.013, rRear: 0.016, length: isPkm ? 0.56 : 0.52,
+      y: 0.040, zCenter: -0.52, darkMat: darkMetal, steelMat, fluted: isPkm
+    });
+    const brake = buildMultiBaffleBrake(0.017, 0.040, isPkm ? -0.80 : -0.78, darkMetal, steelMat, !isMg3);
+    const bipod = buildTacticalBipod(-0.016, -0.46, darkMetal, steelMat, 0.22);
+    const belt = buildBrassAmmoBelt(0.044, 0.038, -0.05, brassMat, darkMetal, 6);
+
+    // Huge 100/120-rd Ammo Box (PKM/Negev) or 75-rd Belt Drum (MG3)
+    if (isMg3) {
+      magMesh = buildDrumMagazine(isExt ? 0.082 : 0.072, 0.072, -0.068, -0.035, boxGreen, darkMetal, steelMat);
+      magMesh.position.x = -0.055;
+    } else {
+      magMesh = new THREE.Group();
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.088, isExt ? 0.145 : 0.125, 0.135), boxGreen);
+      const latch = new THREE.Mesh(new THREE.BoxGeometry(0.092, 0.018, 0.036), darkMetal);
+      latch.position.y = 0.055;
+      magMesh.add(box, latch);
+      magMesh.position.set(0.012, -0.092, -0.045);
+    }
+
+    group.add(buildPicatinnyRail(0.24, 0.038, 0.092, -0.01, darkMetal));
+    railY = 0.099;
+    opticZ = -0.01;
+    if (!useExternalOptic) {
+      group.add(buildOpenIronSights(0.10, -0.68, 0.108, darkMetal, '#4ade80', '#f97316', 0.009));
+      ironSightY = 0.111;
+      ironRearZ = 0.10;
+    }
+    group.add(rec, feedTray, stock, grip, barrel, brake, bipod, belt, magMesh,
+      buildReceiverPolish(0.066, 0.042, 0.02, darkMetal, steelMat, brassMat));
+    muzzleZ = isPkm ? -0.84 : -0.82;
+  } else if (weaponId === 'benellim4') {
+    // Benelli M4 Super 90 USMC Tactical Shotgun: Collapsible skeleton stock, full-length mag tube, top rail, ghost ring sights
+    const rec = extrudeSideProfile([
+      [-0.145, -0.022], [0.165, -0.022], [0.165, 0.058], [-0.145, 0.058]
+    ], 0.048, 0.004, bodyMat);
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.22, 12), darkMetal);
+    tube.rotation.x = Math.PI / 2;
+    tube.position.set(0, 0.018, 0.245);
+    const stock = extrudeSideProfile([
+      [-0.19, -0.010], [-0.365, -0.062], [-0.375, 0.042], [-0.21, 0.042]
+    ], 0.044, 0.005, polymerMat);
+    const buttPad = new THREE.Mesh(new THREE.BoxGeometry(0.046, 0.108, 0.014), darkMetal);
+    buttPad.position.set(0, -0.010, 0.378);
+    const grip = buildErgonomicGrip(0.115, 0.102, 0.034, polymerMat, darkMetal, -0.020, 0.038);
+
+    const forend = extrudeSideProfile([
+      [0.165, -0.020], [0.435, -0.014], [0.435, 0.032], [0.165, 0.036]
+    ], 0.050, 0.006, polymerMat);
+    const barrel = buildPrecisionBarrel({ rFront: 0.0145, rRear: 0.0165, length: 0.56, y: 0.038, zCenter: -0.44, darkMat: darkMetal, steelMat });
+    const magTube = new THREE.Mesh(new THREE.CylinderGeometry(0.0135, 0.0135, 0.50, 14), darkMetal);
+    magTube.rotation.x = Math.PI / 2;
+    magTube.position.set(0, 0.008, -0.415);
+    const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.052, 0.020), steelMat);
+    clamp.position.set(0, 0.022, -0.60);
+    // Tactical side saddle with 4 red 12G shotgun shells
+    const shellMat = new THREE.MeshStandardMaterial({ color: '#dc2626', roughness: 0.4 });
+    const saddle = new THREE.Group();
+    for (let s = 0; s < 4; s++) {
+      const sh = new THREE.Mesh(new THREE.CylinderGeometry(0.0075, 0.0075, 0.044, 10), shellMat);
+      sh.position.set(-0.029, 0.016, 0.05 - s * 0.024);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.0078, 0.0078, 0.011, 10), brassMat);
+      cap.position.set(-0.029, 0.038, 0.05 - s * 0.024);
+      saddle.add(sh, cap);
+    }
+
+    group.add(buildPicatinnyRail(0.22, 0.034, 0.062, 0.01, darkMetal));
+    railY = 0.069;
+    opticZ = 0.01;
+    if (!useExternalOptic) {
+      group.add(buildOpenIronSights(0.10, -0.68, 0.078, darkMetal, '#4ade80', '#f97316', 0.009));
+      ironSightY = 0.081;
+      ironRearZ = 0.10;
+    }
+    group.add(rec, tube, stock, buttPad, grip, forend, barrel, magTube, clamp, saddle,
+      buildReceiverPolish(0.048, 0.032, -0.02, darkMetal, steelMat, brassMat));
+    muzzleZ = -0.73;
+  } else if (weaponId === 'db_shotgun') {
+    // S686 Double Barrel Classic Hunting Shotgun: Engraved silver breech, Twin Over-Under / Side-by-Side walnut barrels
+    const silverRec = skinId === 'default' ? steelMat : bodyMat;
+    const stockMat = skinId === 'default' ? woodMat : bodyMat;
+    const breech = extrudeSideProfile([
+      [-0.085, -0.024], [0.115, -0.020], [0.115, 0.052], [-0.085, 0.048]
+    ], 0.048, 0.005, silverRec);
+    const stock = extrudeSideProfile([
+      [-0.080, -0.020], [-0.145, -0.036], [-0.395, -0.095], [-0.395, 0.018], [-0.155, 0.030], [-0.080, 0.044]
+    ], 0.042, 0.006, stockMat);
+    const buttPad = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.116, 0.014), darkMetal);
+    buttPad.position.set(0, -0.039, 0.400);
+    const forend = extrudeSideProfile([
+      [0.115, -0.020], [0.385, -0.010], [0.385, 0.026], [0.115, 0.028]
+    ], 0.048, 0.006, stockMat);
+
+    // Dual Side-by-Side Blued Steel 12G Barrels with center ventilated rib & dual dark bores!
+    for (const bx of [-0.0145, 0.0145]) {
+      const bTube = buildPrecisionBarrel({ rFront: 0.0135, rRear: 0.0150, length: 0.64, y: 0.034, zCenter: -0.43, darkMat: darkMetal, steelMat });
+      bTube.position.x = bx;
+      group.add(bTube);
+    }
+    const centerRib = new THREE.Mesh(new THREE.BoxGeometry(0.010, 0.012, 0.62), darkMetal);
+    centerRib.position.set(0, 0.044, -0.42);
+    const bead = new THREE.Mesh(new THREE.SphereGeometry(0.0036, 8, 8), brassMat);
+    bead.position.set(0, 0.054, -0.73);
+    const lever = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.010, 0.042), darkMetal);
+    lever.position.set(0, 0.054, 0.068);
+    lever.rotation.y = 0.18;
+
+    railY = 0.056;
+    opticZ = -0.02;
+    if (useExternalOptic) {
+      group.add(buildPicatinnyRail(0.14, 0.028, 0.054, -0.02, darkMetal));
+    } else {
+      ironSightY = 0.062;
+      ironRearZ = 0.06;
+    }
+    group.add(breech, stock, buttPad, forend, centerRib, bead, lever);
+    muzzleZ = -0.76;
+  } else if (weaponId === 'm24' || weaponId === 'mk14') {
+    // M24 SWS Bolt-Action Precision Sniper & Mk14 EBR Aluminum-Chassis Marksman DMR
+    const isM24 = weaponId === 'm24';
+    const chassisMat = skinId === 'default'
+      ? (isM24
+        ? new THREE.MeshStandardMaterial({ color: '#1e242c', map: polyTex, bumpMap: polyTex, bumpScale: 0.005, roughness: 0.58, metalness: 0.22 })
+        : new THREE.MeshStandardMaterial({ color: '#4c545e', bumpMap: metalBump, bumpScale: 0.004, roughnessMap: metalRough, roughness: 0.36, metalness: 0.72 }))
+      : bodyMat;
+
+    const rec = extrudeSideProfile(isM24
+      ? [[-0.14, -0.020], [0.36, -0.008], [0.36, 0.042], [0.16, 0.058], [-0.14, 0.058]]
+      : [[-0.14, -0.024], [0.34, -0.016], [0.34, 0.060], [-0.14, 0.062]],
+      0.050, 0.005, chassisMat);
+    const stock = isM24
+      ? extrudeSideProfile([[-0.14, -0.016], [-0.42, -0.072], [-0.42, 0.046], [-0.24, 0.058], [-0.14, 0.048]], 0.046, 0.006, chassisMat)
+      : buildFoldingWireStock(0.145, 0.26, 0.016, steelMat, polymerMat, 0.068);
+    const cheekRiser = new THREE.Mesh(new THREE.BoxGeometry(0.050, 0.022, 0.14), polymerMat);
+    cheekRiser.position.set(0, 0.062, 0.27);
+    const grip = buildErgonomicGrip(0.105, 0.100, 0.032, polymerMat, darkMetal, -0.020, 0.036);
+
+    if (!isM24) {
+      group.add(buildTacticalHandguard({
+        zStart: -0.14, zEnd: -0.37, yCenter: 0.030, width: 0.054, height: 0.054,
+        shroudMat: chassisMat, darkMat: darkMetal, steelMat, hasQuadRails: true
+      }));
+    }
+    const barrel = buildPrecisionBarrel({
+      rFront: isM24 ? 0.013 : 0.012, rRear: isM24 ? 0.016 : 0.0145,
+      length: isM24 ? 0.60 : 0.48, y: 0.038, zCenter: isM24 ? -0.58 : -0.52,
+      darkMat: darkMetal, steelMat, fluted: isM24
+    });
+    const brake = buildMultiBaffleBrake(0.016, 0.038, isM24 ? -0.885 : -0.765, darkMetal, steelMat, isM24);
+    const bipod = buildTacticalBipod(-0.014, -0.33, darkMetal, steelMat, 0.19);
+    const scope = buildSniperOpticScope({
+      y: 0.108, z: -0.02, length: isM24 ? 0.36 : 0.30,
+      objectiveRadius: isM24 ? 0.034 : 0.028,
+      lensColor: isM24 ? '#38bdf8' : '#22c55e',
+      darkMetal, steelMat, accentMat
+    });
+
+    magMesh = new THREE.Group();
+    const sMagH = isM24 ? (isExt ? 0.095 : 0.072) : (isExt ? 0.19 : 0.155);
+    const sMag = new THREE.Mesh(new THREE.BoxGeometry(0.036, sMagH, 0.074), darkMetal);
+    const sPad = new THREE.Mesh(new THREE.BoxGeometry(0.040, 0.010, 0.078), steelMat);
+    sPad.position.y = -sMagH * 0.5;
+    magMesh.add(sMag, sPad);
+    magMesh.position.set(0, -0.02 - sMagH * 0.5, -0.055);
+
+    group.add(buildPicatinnyRail(isM24 ? 0.24 : 0.44, 0.034, 0.064, isM24 ? 0.0 : -0.10, darkMetal));
+    group.add(rec, stock, cheekRiser, grip, barrel, brake, bipod, scope, magMesh,
+      buildReceiverPolish(0.050, 0.038, 0.01, darkMetal, steelMat, brassMat));
+    muzzleZ = isM24 ? -0.92 : -0.80;
+  } else if (weaponId === 'm1911' || weaponId === 'beretta92') {
+    // Classic Iconic Real-World Pistols: Colt M1911A1 .45 (Blued Steel + Walnut Grips) & Beretta M92FS (Open-Top Italian Slide + Exposed Stainless Barrel)
+    const is1911 = weaponId === 'm1911';
+    const slideMat = skinId === 'default'
+      ? new THREE.MeshStandardMaterial({ color: is1911 ? '#252b36' : '#1b2029', bumpMap: metalBump, bumpScale: 0.0035, roughnessMap: metalRough, metalness: 0.88, roughness: 0.26 })
+      : bodyMat;
+    const frameMat = skinId === 'default'
+      ? (is1911 ? slideMat : darkMetal)
+      : accentMat;
+
+    const frame = extrudeSideProfile([
+      [-0.080, -0.012], [0.165, -0.012], [0.165, 0.022], [-0.080, 0.022]
+    ], 0.028, 0.003, frameMat);
+    const slide = extrudeSideProfile(is1911
+      ? [[-0.082, 0.018], [0.175, 0.018], [0.175, 0.054], [-0.076, 0.054]]
+      : [[-0.084, 0.018], [0.162, 0.018], [0.158, 0.054], [-0.078, 0.054]],
+      0.030, 0.0035, slideMat);
+    // Beretta M92FS iconic exposed stainless barrel emerging out the front of open-top slide
+    const bLen = is1911 ? 0.12 : 0.165;
+    const expBarrel = buildPrecisionBarrel({
+      rFront: 0.0075, rRear: 0.0082, length: bLen, y: 0.038, zCenter: is1911 ? -0.130 : -0.118,
+      darkMat: is1911 ? darkMetal : steelMat, steelMat
+    });
+    const grip = buildErgonomicGrip(0.044, 0.102, 0.030, is1911 ? (skinId === 'default' ? woodMat : gripMat) : polymerMat, darkMetal, -0.008, 0.030);
+    const hammer = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.018, 0.016), steelMat);
+    hammer.position.set(0, 0.036, 0.086);
+    hammer.rotation.x = -0.42;
+
+    magMesh = new THREE.Group();
+    const pMagH = isExt ? 0.115 : 0.092;
+    const pMag = new THREE.Mesh(new THREE.BoxGeometry(0.021, pMagH, 0.035), darkMetal);
+    const pPad = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.009, 0.040), steelMat);
+    pPad.position.y = -pMagH * 0.5;
+    magMesh.add(pMag, pPad);
+    magMesh.position.set(0, -0.068, 0.056);
+    magMesh.rotation.x = -0.26;
+
+    railY = 0.058;
+    opticZ = -0.02;
+    aimDistanceZ = -0.36;
+    if (useExternalOptic) {
+      group.add(buildPicatinnyRail(0.085, 0.024, 0.055, -0.02, darkMetal));
+    } else {
+      group.add(buildOpenIronSights(0.068, -0.155, 0.064, darkMetal, '#4ade80', '#f97316', 0.007));
+      ironSightY = 0.067;
+      ironRearZ = 0.068;
+    }
+    group.add(frame, slide, expBarrel, grip, hammer, magMesh,
+      buildPistolSlideDetails(0.030, 0.054, -0.16, 0.075, darkMetal, steelMat, brassMat));
+    muzzleZ = is1911 ? -0.195 : -0.205;
+  } else if (weaponId === 'knife' || weaponId === 'karambit' || weaponId === 'katana') {
     const isKara = weaponId === 'karambit';
+    const isKatana = weaponId === 'katana';
     const bladeMat = new THREE.MeshStandardMaterial({
       map: skinId === 'default' ? null : skinTex,
       bumpMap: metalBump,
       bumpScale: 0.002,
+      roughnessMap: metalRough,
       color: skinId === 'default' ? (isKara ? '#ef4444' : '#e2e8f0') : '#ffffff',
-      metalness: 0.94,
-      roughness: 0.12
+      metalness: 0.95,
+      roughness: 0.14,
+      envMapIntensity: 1.7
     });
 
-    if (isKara) {
+    if (isKatana) {
+      // Tactical Carbon-Forged Japanese Katana / Wakizashi: Diamond-wrapped tsuka handle, circular tsuba guard, curved razor blade with hamon ridge
+      const tsuka = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.017, 0.19, 12), polymerMat);
+      tsuka.rotation.x = Math.PI / 2;
+      tsuka.position.set(0, 0, 0.08);
+      for (let w = 0; w < 6; w++) {
+        const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.0165, 0.0032, 6, 12), accentMat);
+        wrap.position.set(0, 0, 0.015 + w * 0.026);
+        group.add(wrap);
+      }
+      const pommel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.016, 0.018, 12), darkMetal);
+      pommel.rotation.x = Math.PI / 2;
+      pommel.position.set(0, 0, 0.180);
+      const tsuba = new THREE.Mesh(new THREE.CylinderGeometry(0.040, 0.040, 0.008, 18), darkMetal);
+      tsuba.rotation.x = Math.PI / 2;
+      tsuba.position.set(0, 0, -0.018);
+      const habaki = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.028, 0.024), brassMat);
+      habaki.position.set(0, 0.002, -0.032);
+      const blade = extrudeSideProfile([
+        [0.040, -0.010], [0.22, -0.006], [0.42, 0.006], [0.56, 0.024],
+        [0.52, 0.034], [0.38, 0.022], [0.18, 0.014], [0.040, 0.014]
+      ], 0.0055, 0.0018, bladeMat);
+      group.add(tsuka, pommel, tsuba, habaki, blade);
+    } else if (isKara) {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.006, 12, 22), darkMetal);
       ring.rotation.y = Math.PI / 2;
       ring.position.set(0, -0.032, 0.105);
@@ -1988,64 +2729,81 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
       fuller.position.set(0, 0.008, -0.115);
       group.add(handle, pommel, guard, blade, fuller);
     }
-    muzzleZ = -0.25;
+    muzzleZ = isKatana ? -0.52 : -0.25;
   }
 
-  // Mount Open/Transparent Optics & Muzzle Attachments
+  // Mount Realistic EOTech EXPS3 Holo / Trijicon ACOG TA31 & Muzzle Attachments
   let aimSightY = ironSightY;
   let aimSightZ = ironRearZ;
 
   if (!isSniper && !isMelee) {
     if (optic === 'reddot') {
+      // Realistic EOTech EXPS3 Holographic Sight with protective steel hood, battery cylinder & emerald AR lens
       const opticGroup = new THREE.Group();
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.011, 0.068), darkMetal);
-      base.position.set(0, railY + 0.005, opticZ);
-      const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.034, 0.044), darkMetal);
-      wallL.position.set(-0.017, railY + 0.026, opticZ);
-      const wallR = wallL.clone();
-      wallR.position.x = 0.017;
-      const topArch = new THREE.Mesh(new THREE.BoxGeometry(0.039, 0.005, 0.044), darkMetal);
-      topArch.position.set(0, railY + 0.044, opticZ);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.013, 0.078), darkMetal);
+      base.position.set(0, railY + 0.006, opticZ);
+      const batteryCap = new THREE.Mesh(new THREE.CylinderGeometry(0.0095, 0.0095, 0.032, 12), steelMat);
+      batteryCap.rotation.z = Math.PI / 2;
+      batteryCap.position.set(0, railY + 0.016, opticZ - 0.028);
+      const hoodL = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.036, 0.048), darkMetal);
+      hoodL.position.set(-0.019, railY + 0.028, opticZ + 0.004);
+      const hoodR = hoodL.clone();
+      hoodR.position.x = 0.019;
+      const topHood = new THREE.Mesh(new THREE.BoxGeometry(0.043, 0.0055, 0.048), darkMetal);
+      topHood.position.set(0, railY + 0.046, opticZ + 0.004);
+      const qdLever = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.010, 0.028), steelMat);
+      qdLever.position.set(-0.020, railY + 0.006, opticZ + 0.006);
 
       const glass = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.028, 0.028),
-        new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.15, side: THREE.DoubleSide, depthWrite: false })
+        new THREE.PlaneGeometry(0.031, 0.029),
+        new THREE.MeshBasicMaterial({ color: '#34d399', transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false })
       );
-      glass.position.set(0, railY + 0.026, opticZ);
+      glass.position.set(0, railY + 0.028, opticZ + 0.004);
 
       const dot = new THREE.Mesh(
-        new THREE.SphereGeometry(0.0018, 8, 8),
+        new THREE.SphereGeometry(0.0016, 8, 8),
         new THREE.MeshBasicMaterial({ color: '#ff2e2e' })
       );
-      dot.position.set(0, railY + 0.026, opticZ);
+      dot.position.set(0, railY + 0.028, opticZ + 0.004);
+      const holoRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.0052, 0.0062, 18),
+        new THREE.MeshBasicMaterial({ color: '#ff3b3b', side: THREE.DoubleSide, transparent: true, opacity: 0.78 })
+      );
+      holoRing.position.set(0, railY + 0.028, opticZ + 0.004);
 
-      opticGroup.add(base, wallL, wallR, topArch, glass, dot);
+      opticGroup.add(base, batteryCap, hoodL, hoodR, topHood, qdLever, glass, dot, holoRing);
       group.add(opticGroup);
-      aimSightY = railY + 0.026;
-      aimSightZ = opticZ;
+      aimSightY = railY + 0.028;
+      aimSightZ = opticZ + 0.004;
     } else if (optic === 'acog') {
+      // Realistic Trijicon ACOG TA31 4x32 with armored thumb-screw mount, glowing red fiber collector & sapphire lens
       const acogGroup = new THREE.Group();
-      const mount = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.016, 0.072), darkMetal);
+      const mount = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.016, 0.082), darkMetal);
       mount.position.set(0, railY + 0.006, opticZ);
-      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.017, 0.115, 16), darkMetal);
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.0185, 0.0175, 0.125, 18), darkMetal);
       tube.rotation.x = Math.PI / 2;
-      tube.position.set(0, railY + 0.026, opticZ);
-      const bellFront = new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.018, 0.042, 16), darkMetal);
+      tube.position.set(0, railY + 0.027, opticZ);
+      const bellFront = new THREE.Mesh(new THREE.CylinderGeometry(0.0245, 0.0185, 0.048, 18), darkMetal);
       bellFront.rotation.x = Math.PI / 2;
-      bellFront.position.set(0, railY + 0.026, opticZ - 0.068);
-      const fiber = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0032, 0.088, 8), new THREE.MeshBasicMaterial({ color: '#ef4444' }));
+      bellFront.position.set(0, railY + 0.027, opticZ - 0.072);
+      const turretTop = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.014, 10), steelMat);
+      turretTop.position.set(0, railY + 0.046, opticZ + 0.024);
+      const turretSide = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.014, 10), steelMat);
+      turretSide.rotation.z = Math.PI / 2;
+      turretSide.position.set(0.022, railY + 0.027, opticZ + 0.020);
+      const fiber = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0032, 0.088, 10), new THREE.MeshBasicMaterial({ color: '#ef4444' }));
       fiber.rotation.x = Math.PI / 2;
-      fiber.position.set(0, railY + 0.047, opticZ - 0.005);
-      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.015, 14), new THREE.MeshBasicMaterial({ color: '#38bdf8' }));
-      lens.position.set(0, railY + 0.026, opticZ + 0.058);
-      acogGroup.add(mount, tube, bellFront, fiber, lens);
+      fiber.position.set(0, railY + 0.049, opticZ - 0.012);
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.0155, 16), new THREE.MeshBasicMaterial({ color: '#38bdf8' }));
+      lens.position.set(0, railY + 0.027, opticZ + 0.063);
+      acogGroup.add(mount, tube, bellFront, turretTop, turretSide, fiber, lens);
       group.add(acogGroup);
-      aimSightY = railY + 0.026;
+      aimSightY = railY + 0.027;
       aimSightZ = opticZ;
     }
 
     const muzzle = attachments?.muzzle || 'none';
-    if (muzzle === 'suppressor' && weaponId !== 'mp5' && weaponId !== 'usps') {
+    if (muzzle === 'suppressor' && !wCfg.builtInSuppressed) {
       group.add(buildSuppressorUnit(barrelY, muzzleZ - 0.085, 0.18, 0.020, darkMetal, steelMat));
       muzzleZ -= 0.175;
     } else if (muzzle === 'compensator') {
@@ -2057,7 +2815,7 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   if (magMesh) magMesh.name = 'gun_mag';
   if (boltMesh) boltMesh.name = 'gun_bolt';
 
-  const isSuppressed = attachments?.muzzle === 'suppressor' || weaponId === 'mp5' || weaponId === 'usps' || weaponId === 'm4a1';
+  const isSuppressed = attachments?.muzzle === 'suppressor' || Boolean(wCfg.builtInSuppressed) || weaponId === 'm4a1';
   const ejectPortPos = new THREE.Vector3(0.032, barrelY + 0.008, 0.012);
 
   group.userData = {
@@ -2325,7 +3083,8 @@ export function createFirstPersonRig(weaponId, skinId, attachments, outfitId = '
   rArmGroup.add(rTriggerFinger);
 
   // Left Arm + Character Wrist Gear (Bikini Bangle vs Tactical Watch/Bracer) + Supporting Hand
-  const isShort = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven', 'knife', 'karambit'].includes(weaponId);
+  const fpCfg = WEAPONS[weaponId];
+  const isShort = Boolean(fpCfg?.isMelee || fpCfg?.subClass === 'pistol');
   const lArmGroup = new THREE.Group();
   const lWrist = new THREE.Vector3(-0.028, -0.056, isShort ? 0.045 : -0.13);
   const lElbow = new THREE.Vector3(-0.18, -0.15, isShort ? 0.28 : 0.16);
@@ -2466,8 +3225,9 @@ function mountWeaponOnGroup(weaponMount, weaponId, skinId, attachments) {
     weaponMount.remove(weaponMount.children[0]);
   }
   const gunMesh = createThirdPersonWeaponModel(weaponId, skinId, attachments);
-  const isMelee = weaponId === 'knife' || weaponId === 'karambit';
-  const isPistol = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven'].includes(weaponId);
+  const tpCfg = WEAPONS[weaponId];
+  const isMelee = Boolean(tpCfg?.isMelee);
+  const isPistol = tpCfg?.subClass === 'pistol';
   gunMesh.scale.setScalar(0.92);
   if (isMelee) {
     gunMesh.position.set(0, 0.01, -0.055);
@@ -3174,8 +3934,9 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
   const isVictory = Boolean(state.victoryPose);
   const pitch = isVictory ? -0.14 : (state.pitch || 0);
   const recoil = isVictory ? 0 : (rig.recoilKick || 0);
-  const isShort = ['deagle', 'usps', 'glock18', 'magnum', 'fiveseven', 'knife', 'karambit'].includes(rig.currentWeaponId);
-  const isMelee = rig.currentWeaponId === 'knife' || rig.currentWeaponId === 'karambit';
+  const curW = WEAPONS[rig.currentWeaponId];
+  const isShort = Boolean(curW?.isMelee || curW?.subClass === 'pistol');
+  const isMelee = Boolean(curW?.isMelee);
 
   if (isVictory) {
     rig.bodyRoot.rotation.y = Math.sin(timeSec * 0.75) * 0.08;

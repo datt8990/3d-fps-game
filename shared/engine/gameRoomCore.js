@@ -2613,7 +2613,7 @@ export class GameRoomCore {
         const d = Math.hypot(wp.x - this.storm.x, wp.z - this.storm.z);
         if (d < bestDist) { bestDist = d; dropPt = wp; }
       }
-      const elitePool = ['awp', 'barrett', 'm249', 'scarh', 'm200'].filter((id) => Boolean(WEAPONS[id]));
+      const elitePool = ['awp', 'barrett', 'm249', 'scarh', 'm200', 'groza', 'mcx', 'pkm', 'mg3', 'm24', 'mk14'].filter((id) => Boolean(WEAPONS[id]));
       const eliteId = elitePool[Math.floor(Math.random() * elitePool.length)] || 'ak47';
       const dropY = this.map.terrain ? this.map.terrain.floorAt(dropPt.x, dropPt.z) : 0;
       const airdropCrates = [

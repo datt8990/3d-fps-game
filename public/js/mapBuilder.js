@@ -1117,7 +1117,7 @@ export function createLootCrateMesh(crateOrType = 'medkit') {
   }
 
   if (kind === 'weapon' && weaponId) {
-    const isElite = weaponId === 'awp' || weaponId === 'barrett' || weaponId === 'm249' || weaponId === 'scarh' || weaponId === 'm200';
+    const isElite = ['awp', 'barrett', 'm249', 'scarh', 'm200', 'pkm', 'mg3', 'mcx', 'groza', 'm24', 'mk14'].includes(weaponId);
     const ringColor = isElite ? '#f59e0b' : '#38bdf8';
     const g = new THREE.Group();
 
