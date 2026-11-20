@@ -682,7 +682,7 @@ function batchStaticWeaponParts(rootGroup) {
     } catch {}
   });
 
-  if (toRemove.length < 4) return rootGroup;
+  if (toRemove.length < 2) return rootGroup;
   for (const child of toRemove) {
     child.parent?.remove(child);
   }
@@ -2905,6 +2905,8 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
     aimSightLocalPos: new THREE.Vector3(0, aimSightY, aimSightZ),
     aimDistanceZ
   };
+  if (magMesh?.isGroup) batchStaticWeaponParts(magMesh);
+  if (boltMesh?.isGroup) batchStaticWeaponParts(boltMesh);
   batchStaticWeaponParts(group);
   return group;
 }

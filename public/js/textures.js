@@ -473,23 +473,52 @@ function makeWallConcreteTextures(baseHex = '#64748b', stripeColor = null) {
   bctx.fillStyle = '#808080';
   bctx.fillRect(0, 0, 512, 512);
 
-  // Architectural concrete panel joints & tie-rod holes
-  ctx.strokeStyle = 'rgba(15, 23, 42, 0.30)';
+  //Architectural concrete panel joints, tie-rod holes, weathering & contact AO gradients
+  ctx.strokeStyle = 'rgba(15, 23, 42, 0.36)';
   ctx.lineWidth = 3;
-  bctx.strokeStyle = '#404040';
+  bctx.strokeStyle = '#383838';
   bctx.lineWidth = 3;
   for (let y = 0; y <= 512; y += 128) {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke();
-    bctx.beginPath(); bctx.moveTo(0, y); bctx.lineTo(512, y); bctx.stroke();
+    bctx.beginPath(); ctx.moveTo(0, y); bctx.lineTo(512, y); bctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.09)';
+    ctx.fillRect(0, y + 2, 512, 3);
   }
   for (let x = 0; x <= 512; x += 256) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 512); ctx.stroke();
     bctx.beginPath(); bctx.moveTo(x, 0); bctx.lineTo(x, 512); bctx.stroke();
   }
+  // Form-tie recessed bolt holes on concrete panels
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.52)';
+  bctx.fillStyle = '#242424';
+  for (let py = 32; py < 512; py += 128) {
+    for (const px of [36, 220, 292, 476]) {
+      ctx.beginPath(); ctx.arc(px, py, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py + 64, 4.5, 0, Math.PI * 2); ctx.fill();
+      bctx.beginPath(); bctx.arc(px, py, 5, 0, Math.PI * 2); bctx.fill();
+      bctx.beginPath(); bctx.arc(px, py + 64, 5, 0, Math.PI * 2); bctx.fill();
+    }
+  }
+  // Subtle top & bottom contact Ambient Occlusion + grime gradient
+  const botAo = ctx.createLinearGradient(0, 420, 0, 512);
+  botAo.addColorStop(0, 'rgba(9, 13, 22, 0)');
+  botAo.addColorStop(1, 'rgba(9, 13, 22, 0.44)');
+  ctx.fillStyle = botAo;
+  ctx.fillRect(0, 420, 512, 92);
 
   if (stripeColor) {
     ctx.fillStyle = stripeColor;
-    ctx.fillRect(0, 380, 512, 24);
+    ctx.fillRect(0, 376, 512, 26);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.45)';
+    for (let sx = -32; sx < 544; sx += 44) {
+      ctx.beginPath();
+      ctx.moveTo(sx, 376);
+      ctx.lineTo(sx + 18, 376);
+      ctx.lineTo(sx + 4, 402);
+      ctx.lineTo(sx - 14, 402);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   addNoise(ctx, 512, 512, 0.07);
