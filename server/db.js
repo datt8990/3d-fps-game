@@ -278,6 +278,8 @@ class GameDatabase {
       loadout: user.loadout,
       unlocked: user.unlocked,
       friends: user.friends || [],
+      friendRequests: user.friendRequests || [],
+      sentFriendRequests: user.sentFriendRequests || [],
       history: (user.history || []).slice(0, 10)
     };
     const b64 = Buffer.from(JSON.stringify(payloadObj), 'utf8').toString('base64url');
@@ -317,6 +319,8 @@ class GameDatabase {
     if (!u.unlocked.outfits.includes('summer_bikini')) u.unlocked.outfits.push('summer_bikini');
     if (!u.loadout.melee) u.loadout.melee = 'knife';
     if (!Array.isArray(u.friends)) u.friends = [];
+    if (!Array.isArray(u.friendRequests)) u.friendRequests = [];
+    if (!Array.isArray(u.sentFriendRequests)) u.sentFriendRequests = [];
     if (u.username && u.username.toLowerCase() === 'admin') {
       if (!u.gp || u.gp < 1000000000) u.gp = 1000000000;
       if (!u.rp || u.rp < 5000) u.rp = 5000;
@@ -358,6 +362,8 @@ class GameDatabase {
       loadout: user.loadout,
       unlocked: user.unlocked,
       friends: user.friends,
+      friendRequests: user.friendRequests || [],
+      sentFriendRequests: user.sentFriendRequests || [],
       pendingInvite: user.pendingInvite && Date.now() - user.pendingInvite.at < 60000 ? user.pendingInvite : null,
       history: (user.history || []).slice(0, 12)
     };
@@ -512,7 +518,28 @@ class GameDatabase {
     return { user: this.sanitizeUser(user) };
   }
 
-  // Friends & Squad Invite System
+  // Friends, Requests, Player Profiles & Squad Invite System
+  findUserByIdentifier(queryRaw) {
+    const q = String(queryRaw || '').trim().toLowerCase();
+    if (!q) return null;
+    return Object.values(this.db.users).find(
+      (u) =>
+        (u.id && u.id.toLowerCase() === q) ||
+        (u.username && u.username.toLowerCase() === q) ||
+        (u.friendCode && u.friendCode.toLowerCase() === q)
+    ) || null;
+  }
+
+  getRelationship(viewer, target) {
+    if (!viewer || !target) return 'none';
+    if (viewer.id === target.id) return 'self';
+    const tLow = target.username.toLowerCase();
+    if ((viewer.friends || []).some((f) => f.toLowerCase() === tLow)) return 'friend';
+    if ((viewer.friendRequests || []).some((r) => String(r.from || r).toLowerCase() === tLow)) return 'incoming_request';
+    if ((viewer.sentFriendRequests || []).some((f) => f.toLowerCase() === tLow)) return 'outgoing_request';
+    return 'none';
+  }
+
   addFriend(userId, queryRaw) {
     const user = this.ensureUserSchema(this.db.users[userId]);
     if (!user) return { error: 'Chưa đăng nhập.' };
@@ -523,50 +550,258 @@ class GameDatabase {
       (u) => u.id !== user.id && (u.username.toLowerCase() === q || (u.friendCode || '').toLowerCase() === q)
     );
     if (!target) {
-      return { error: 'Không tìm thấy chiến binh này trên hệ thống (Bạn của bạn cần đăng nhập ít nhất 1 lần).' };
+      return { error: 'Không tìm thấy chiến binh này (Người chơi cần đăng nhập ít nhất 1 lần).' };
     }
 
     this.ensureUserSchema(target);
-    if (!user.friends.includes(target.username)) user.friends.push(target.username);
-    if (!target.friends.includes(user.username)) target.friends.push(user.username);
+    const tLow = target.username.toLowerCase();
+    const uLow = user.username.toLowerCase();
+
+    if (user.friends.some((f) => f.toLowerCase() === tLow)) {
+      return { error: `Bạn và ${target.username} đã là bạn bè rồi!` };
+    }
+
+    // If target already sent us a friend request, accept mutually right away!
+    const hasIncoming = user.friendRequests.some((r) => String(r.from || r).toLowerCase() === tLow);
+    if (hasIncoming) {
+      user.friendRequests = user.friendRequests.filter((r) => String(r.from || r).toLowerCase() !== tLow);
+      target.sentFriendRequests = target.sentFriendRequests.filter((f) => f.toLowerCase() !== uLow);
+      if (!user.friends.some((f) => f.toLowerCase() === tLow)) user.friends.push(target.username);
+      if (!target.friends.some((f) => f.toLowerCase() === uLow)) target.friends.push(user.username);
+      this.saveLocal();
+      return { user: this.sanitizeUser(user), friendAdded: target.username, acceptedImmediately: true };
+    }
+
+    if (user.sentFriendRequests.some((f) => f.toLowerCase() === tLow)) {
+      return { error: `Đã gửi lời mời kết bạn tới ${target.username}, vui lòng chờ đồng ý!` };
+    }
+
+    user.sentFriendRequests.push(target.username);
+    target.friendRequests = target.friendRequests.filter((r) => String(r.from || r).toLowerCase() !== uLow);
+    target.friendRequests.unshift({
+      from: user.username,
+      friendCode: user.friendCode,
+      rp: user.rp,
+      level: user.level,
+      at: Date.now()
+    });
+    if (target.friendRequests.length > 30) target.friendRequests.length = 30;
     this.saveLocal();
-    return { user: this.sanitizeUser(user), friendAdded: target.username };
+    return { user: this.sanitizeUser(user), requestSentTo: target.username };
   }
 
-  getFriendsStatus(userId) {
+  respondFriendRequest(userId, fromUsernameRaw, accept = true) {
+    const user = this.ensureUserSchema(this.db.users[userId]);
+    if (!user) return { error: 'Chưa đăng nhập.' };
+    const fLow = String(fromUsernameRaw || '').trim().toLowerCase();
+    const uLow = user.username.toLowerCase();
+    if (!fLow) return { error: 'Thiếu tên người gửi.' };
+
+    user.friendRequests = (user.friendRequests || []).filter((r) => String(r.from || r).toLowerCase() !== fLow);
+    const sender = Object.values(this.db.users).find((u) => u.username.toLowerCase() === fLow);
+    if (sender) {
+      this.ensureUserSchema(sender);
+      sender.sentFriendRequests = (sender.sentFriendRequests || []).filter((f) => f.toLowerCase() !== uLow);
+      if (accept) {
+        if (!user.friends.some((f) => f.toLowerCase() === fLow)) user.friends.push(sender.username);
+        if (!sender.friends.some((f) => f.toLowerCase() === uLow)) sender.friends.push(user.username);
+      }
+    }
+    this.saveLocal();
+    return { ok: true, accepted: Boolean(accept), username: sender?.username || fromUsernameRaw, user: this.sanitizeUser(user) };
+  }
+
+  removeFriend(userId, targetUsernameRaw) {
+    const user = this.ensureUserSchema(this.db.users[userId]);
+    if (!user) return { error: 'Chưa đăng nhập.' };
+    const tLow = String(targetUsernameRaw || '').trim().toLowerCase();
+    const uLow = user.username.toLowerCase();
+    user.friends = (user.friends || []).filter((f) => f.toLowerCase() !== tLow);
+    user.sentFriendRequests = (user.sentFriendRequests || []).filter((f) => f.toLowerCase() !== tLow);
+    const target = Object.values(this.db.users).find((u) => u.username.toLowerCase() === tLow);
+    if (target) {
+      this.ensureUserSchema(target);
+      target.friends = (target.friends || []).filter((f) => f.toLowerCase() !== uLow);
+      target.friendRequests = (target.friendRequests || []).filter((r) => String(r.from || r).toLowerCase() !== uLow);
+    }
+    this.saveLocal();
+    return { ok: true, user: this.sanitizeUser(user) };
+  }
+
+  getFriendsStatus(userId, liveRoomCodes = null) {
     const user = this.ensureUserSchema(this.db.users[userId]);
     if (!user) return [];
     const now = Date.now();
+    this.pruneExpiredCloudRooms();
     return user.friends.map((fname) => {
       const f = Object.values(this.db.users).find((u) => u.username.toLowerCase() === fname.toLowerCase());
-      if (!f) return { username: fname, online: false, roomCode: null, rank: getRankByRp(1200) };
-      const online = now - (f.lastSeenAt || 0) < 45000;
+      if (!f) return { username: fname, online: false, roomCode: null, level: 1, rp: 1200, rank: getRankByRp(1200) };
+      this.ensureUserSchema(f);
+      const online = now - (f.lastSeenAt || 0) < 30000;
+      let validRoom = online && f.currentRoomCode ? String(f.currentRoomCode).toUpperCase() : null;
+      if (validRoom && liveRoomCodes && !liveRoomCodes.has(validRoom)) {
+        f.currentRoomCode = null;
+        validRoom = null;
+      }
       return {
+        id: f.id,
         username: f.username,
         friendCode: f.friendCode,
+        level: f.level || 1,
+        operator: f.loadout?.operator || 'vanguard',
         online,
-        roomCode: online ? f.currentRoomCode : null,
+        roomCode: validRoom,
         rp: f.rp,
         rank: getRankByRp(f.rp)
       };
+    }).sort((a, b) => Number(b.online) - Number(a.online) || (b.rp || 0) - (a.rp || 0));
+  }
+
+  getIncomingRequests(userId) {
+    const user = this.ensureUserSchema(this.db.users[userId]);
+    if (!user) return [];
+    const now = Date.now();
+    return (user.friendRequests || []).map((r) => {
+      const uname = typeof r === 'string' ? r : r.from;
+      const sender = Object.values(this.db.users).find((u) => u.username.toLowerCase() === String(uname || '').toLowerCase());
+      return {
+        from: sender?.username || uname,
+        friendCode: sender?.friendCode || r.friendCode || '',
+        level: sender?.level || r.level || 1,
+        rp: sender?.rp || r.rp || 1200,
+        rank: getRankByRp(sender?.rp || r.rp || 1200),
+        online: sender ? (now - (sender.lastSeenAt || 0) < 30000) : false,
+        at: r.at || now
+      };
     });
+  }
+
+  getPlayerPublicProfile(viewerUserId, identifier, liveRoomCodes = null) {
+    const viewer = viewerUserId ? this.ensureUserSchema(this.db.users[viewerUserId]) : null;
+    const target = this.findUserByIdentifier(identifier);
+    if (!target) {
+      // Fallback for leaderboard rival AI entries
+      const rival = (this.db.rivals || []).find((r) => r.username.toLowerCase() === String(identifier || '').trim().toLowerCase());
+      if (rival) {
+        return {
+          id: rival.id,
+          username: rival.username,
+          friendCode: 'BOT-PRO',
+          isRivalBot: true,
+          level: rival.level || 25,
+          xp: 0,
+          rp: rival.rp,
+          rank: getRankByRp(rival.rp),
+          online: false,
+          roomCode: null,
+          stats: rival.stats || { matches: 40, wins: 22, kills: 420, deaths: 310, assists: 80, headshots: 110 },
+          loadout: { operator: 'vanguard', outfit: 'urban', primary: 'ak47', secondary: 'deagle', melee: 'knife' },
+          history: [],
+          relationship: 'none'
+        };
+      }
+      return { error: 'Không tìm thấy hồ sơ chiến binh này.' };
+    }
+
+    this.ensureUserSchema(target);
+    this.pruneExpiredCloudRooms();
+    const now = Date.now();
+    const online = now - (target.lastSeenAt || 0) < 30000;
+    let validRoom = online && target.currentRoomCode ? String(target.currentRoomCode).toUpperCase() : null;
+    if (validRoom && liveRoomCodes && !liveRoomCodes.has(validRoom)) {
+      target.currentRoomCode = null;
+      validRoom = null;
+    }
+
+    return {
+      id: target.id,
+      username: target.username,
+      friendCode: target.friendCode,
+      level: target.level || 1,
+      xp: target.xp || 0,
+      rp: target.rp || 1200,
+      rank: getRankByRp(target.rp || 1200),
+      online,
+      roomCode: validRoom,
+      stats: {
+        matches: target.stats?.matches || 0,
+        wins: target.stats?.wins || 0,
+        kills: target.stats?.kills || 0,
+        deaths: target.stats?.deaths || 0,
+        assists: target.stats?.assists || 0,
+        headshots: target.stats?.headshots || 0
+      },
+      loadout: {
+        operator: target.loadout?.operator || 'vanguard',
+        outfit: target.loadout?.outfit || 'urban',
+        primary: target.loadout?.primary || 'ak47',
+        secondary: target.loadout?.secondary || 'deagle',
+        melee: target.loadout?.melee || 'knife'
+      },
+      history: (target.history || []).slice(0, 8),
+      relationship: this.getRelationship(viewer, target)
+    };
+  }
+
+  searchPlayers(viewerUserId, queryRaw = '', liveRoomCodes = null) {
+    const viewer = viewerUserId ? this.ensureUserSchema(this.db.users[viewerUserId]) : null;
+    const q = String(queryRaw || '').trim().toLowerCase();
+    const now = Date.now();
+    this.pruneExpiredCloudRooms();
+
+    const list = [];
+    for (const u of Object.values(this.db.users)) {
+      if (!u?.username) continue;
+      if (viewer && u.id === viewer.id) continue;
+      this.ensureUserSchema(u);
+      const online = now - (u.lastSeenAt || 0) < 30000;
+      if (q) {
+        const matchName = u.username.toLowerCase().includes(q);
+        const matchCode = (u.friendCode || '').toLowerCase().includes(q);
+        if (!matchName && !matchCode) continue;
+      } else if (!online) {
+        continue;
+      }
+      let validRoom = online && u.currentRoomCode ? String(u.currentRoomCode).toUpperCase() : null;
+      if (validRoom && liveRoomCodes && !liveRoomCodes.has(validRoom)) {
+        u.currentRoomCode = null;
+        validRoom = null;
+      }
+      list.push({
+        id: u.id,
+        username: u.username,
+        friendCode: u.friendCode,
+        level: u.level || 1,
+        rp: u.rp || 1200,
+        rank: getRankByRp(u.rp || 1200),
+        online,
+        roomCode: validRoom,
+        relationship: this.getRelationship(viewer, u)
+      });
+    }
+    return list
+      .sort((a, b) => Number(b.online) - Number(a.online) || (b.rp || 0) - (a.rp || 0))
+      .slice(0, 18);
   }
 
   sendRoomInvite(senderUser, targetUsername, roomCode, modeName, mapName) {
     const target = Object.values(this.db.users).find(
       (u) => u.username.toLowerCase() === String(targetUsername || '').trim().toLowerCase()
     );
-    if (!target) return { error: 'Không tìm thấy bạn bè.' };
-    target.pendingInvite = {
+    if (!target) return { error: 'Không tìm thấy người chơi này.' };
+    const invite = {
       id: crypto.randomBytes(4).toString('hex'),
+      fromId: senderUser.id,
       fromName: senderUser.username,
+      fromRank: getRankByRp(senderUser.rp)?.name || 'Bạc',
       roomCode: String(roomCode || '').toUpperCase(),
       modeName: modeName || 'Đấu Đội 5v5',
       mapName: mapName || 'Nhà Kho',
       at: Date.now()
     };
+    target.pendingInvite = invite;
     this.saveLocal();
-    return { ok: true };
+    return { ok: true, targetUserId: target.id, invite };
   }
 
   clearPendingInvite(userId) {
@@ -599,6 +834,11 @@ class GameDatabase {
   removeCloudRoom(code, userId = null) {
     const clean = String(code || '').toUpperCase();
     delete this.db.p2pRooms[clean];
+    for (const u of Object.values(this.db.users)) {
+      if (u?.currentRoomCode && String(u.currentRoomCode).toUpperCase() === clean) {
+        u.currentRoomCode = null;
+      }
+    }
     if (userId && this.db.users[userId]?.currentRoomCode === clean) {
       this.db.users[userId].currentRoomCode = null;
     }
@@ -608,8 +848,13 @@ class GameDatabase {
   pruneExpiredCloudRooms() {
     const now = Date.now();
     for (const [code, room] of Object.entries(this.db.p2pRooms)) {
-      if (now - (room.updatedAt || 0) > 38000) {
+      if (now - (room.updatedAt || 0) > 18000) {
         delete this.db.p2pRooms[code];
+        for (const u of Object.values(this.db.users)) {
+          if (u?.currentRoomCode && String(u.currentRoomCode).toUpperCase() === code) {
+            u.currentRoomCode = null;
+          }
+        }
       }
     }
   }

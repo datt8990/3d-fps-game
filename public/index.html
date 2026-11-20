@@ -89,15 +89,15 @@
           <span class="gp-icon">◈</span>
           <span id="top-gp">4,500</span> GP
         </div>
-        <div class="user-pill">
+        <div id="btn-open-my-profile" class="user-pill clickable-pill" title="Bấm để xem Hồ Sơ Cá Nhân & Chiến Tích">
           <span id="top-rank-badge" class="rank-mini">II</span>
           <div>
             <div id="top-username" class="user-name">Chiến Binh</div>
             <div id="top-rank-text" class="user-rank">Bạc Đoàn • 1200 RP</div>
           </div>
         </div>
-        <button id="btn-toggle-friends" class="btn-secondary btn-sm" title="Mở Danh sách Bạn bè & Tổ đội">
-          👥 Bạn Bè
+        <button id="btn-toggle-friends" class="btn-secondary btn-sm" style="position:relative;" title="Mở Danh sách Bạn bè, Lời mời & Tổ đội">
+          👥 Bạn Bè <span id="friends-badge" class="notif-badge hidden">0</span>
         </button>
         <button id="btn-open-settings" class="icon-btn" title="Cài đặt Đồ họa & Chuột">⚙</button>
         <button id="btn-logout" class="icon-btn" title="Đổi Tài Khoản">⇄</button>
@@ -109,24 +109,37 @@
       <div class="panel-header-row" style="margin-bottom:8px;">
         <div>
           <div class="panel-tag" style="margin-bottom:2px;">TỔ ĐỘI & BẠN BÈ ONLINE</div>
-          <div class="muted">Mã kết bạn của bạn: <strong id="my-friend-code" style="color:#facc15;">VN-0000</strong></div>
+          <div class="muted" style="display:flex;align-items:center;gap:6px;">
+            Mã của bạn: <strong id="my-friend-code" style="color:#facc15;">VN-0000</strong>
+            <button type="button" id="btn-copy-friend-code" class="btn-secondary btn-xs" title="Sao chép mã kết bạn">📋</button>
+          </div>
         </div>
         <button id="btn-close-friends" class="icon-btn">✕</button>
       </div>
 
-      <form id="add-friend-form" class="chat-input-row" style="margin-bottom:10px;">
-        <input id="add-friend-input" type="text" maxlength="20" placeholder="Nhập Tên hoặc Mã VN-xxxx..." />
+      <form id="add-friend-form" class="chat-input-row" style="margin-bottom:8px;">
+        <input id="add-friend-input" type="text" maxlength="20" placeholder="Tìm tên hoặc nhập Mã VN-xxxx..." />
         <button type="submit" class="btn-primary btn-sm">+ Kết Bạn</button>
       </form>
 
       <div class="panel-tag">VÀO NHANH BẰNG MÃ PHÒNG BẠN BÈ</div>
-      <form id="drawer-join-code-form" class="chat-input-row" style="margin-bottom:12px;">
+      <form id="drawer-join-code-form" class="chat-input-row" style="margin-bottom:10px;">
         <input id="drawer-room-code-input" type="text" maxlength="10" placeholder="Nhập Mã Phòng (VD: BS1001)..." />
         <button type="submit" class="btn-primary btn-sm">Vào Ngay</button>
       </form>
 
-      <div class="panel-tag">DANH SÁCH BẠN BÈ</div>
-      <div id="friends-list-box" class="stack-list" style="flex:1;overflow-y:auto;"></div>
+      <div class="friends-scroll-body">
+        <div id="friend-requests-section" class="hidden" style="margin-bottom:10px;">
+          <div class="panel-tag" style="color:#fbbf24;">🔔 LỜI MỜI KẾT BẠN ĐANG CHỜ</div>
+          <div id="friend-requests-box" class="stack-list"></div>
+        </div>
+
+        <div class="panel-tag">DANH SÁCH BẠN BÈ (<span id="friends-count-lbl">0</span>)</div>
+        <div id="friends-list-box" class="stack-list" style="margin-bottom:12px;"></div>
+
+        <div class="panel-tag" id="online-players-tag">CHIẾN BINH ĐANG ONLINE</div>
+        <div id="online-players-box" class="stack-list"></div>
+      </div>
     </aside>
 
     <!-- TAB 1: SẢNH CHÍNH (HOME + QUICK PLAY + CODE JOIN + GLOBAL CHAT) -->
@@ -504,6 +517,19 @@
 
       <div class="row-gap" style="margin-top:18px;justify-content:flex-end;">
         <button id="btn-close-settings" class="btn-primary">Lưu &amp; Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PLAYER PROFILE MODAL (XEM HỒ SƠ CHIẾN BINH, THÀNH TÍCH, KẾT BẠN & MỜI ĐẤU) -->
+  <div id="player-profile-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-panel profile-modal-card">
+      <div class="panel-header-row" style="margin-bottom:10px;">
+        <div class="panel-tag" style="margin:0;">HỒ SƠ CHIẾN BINH • BATTLE STRIKE</div>
+        <button id="btn-close-profile-modal" class="icon-btn">✕</button>
+      </div>
+      <div id="player-profile-body">
+        <div class="muted" style="padding:24px;text-align:center;">Đang tải hồ sơ chiến binh...</div>
       </div>
     </div>
   </div>

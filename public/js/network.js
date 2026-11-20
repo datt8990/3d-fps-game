@@ -58,6 +58,40 @@ export class NetworkClient {
     this.rtcChunkSeq = 0;
     this.lastMatchStartedKey = null;
     this.lastResyncRequestAt = 0;
+    this.hostPruneTimer = null;
+    this.guestHeartbeatTimer = null;
+    this._unloadBeaconSent = false;
+
+    if (typeof window !== 'undefined') {
+      const onExit = () => this.sendUnloadLeaveBeacon();
+      window.addEventListener('pagehide', onExit);
+      window.addEventListener('beforeunload', onExit);
+    }
+  }
+
+  sendUnloadLeaveBeacon() {
+    if (this._unloadBeaconSent) return;
+    if (this.hostRoom) {
+      this._unloadBeaconSent = true;
+      const code = this.hostRoom.code;
+      try {
+        navigator.sendBeacon?.('/api/rooms/close', new Blob([JSON.stringify({ code })], { type: 'text/plain' }));
+      } catch {}
+    } else if (this.relayRoomCode) {
+      this._unloadBeaconSent = true;
+      try {
+        if (this.clientRtc?.ready) this.sendViaRtc(this.clientRtc, { type: 'p2p_leave' });
+      } catch {}
+      try {
+        if (this.hostConn?.open) this.hostConn.send({ type: 'p2p_leave' });
+      } catch {}
+      try {
+        navigator.sendBeacon?.(
+          `/api/relay/${this.relayRoomCode}/client-sync`,
+          new Blob([JSON.stringify({ clientId: this.clientId, outgoing: [{ type: 'p2p_leave' }] })], { type: 'text/plain' })
+        );
+      } catch {}
+    }
   }
 
   on(type, fn) {
@@ -573,6 +607,7 @@ export class NetworkClient {
         const msg = this.decodeRtcMessage(ev.data);
         if (!msg || typeof msg.type !== 'string') return;
         if (msg.type === 'ping_check') {
+          this.hostRoom?.touchHuman(fromId);
           this.sendViaRtc(entry, { type: 'pong_check', clientSentAt: msg.clientSentAt });
           return;
         }
@@ -605,6 +640,8 @@ export class NetworkClient {
 
   handleRelayHostIncomingPacket(fromId, msg) {
     if (!fromId || !msg || typeof msg.type !== 'string' || !this.hostRoom) return;
+    this.hostRoom.touchHuman(fromId);
+    if (msg.type === 'p2p_heartbeat') return;
 
     if (msg.type === 'rtc_offer' && msg.sdp) {
       this.handleHostDirectRtcOffer(fromId, msg.sdp);
@@ -787,10 +824,30 @@ export class NetworkClient {
     this.emit('joined_room', { room: this.hostRoom.getLobbyPayload() });
     this.startPingLoop();
 
-    // Start Cloud Room Relay + Direct WebRTC Signaling over /api/relay
+    // Start Cloud Room Relay + Direct WebRTC Signaling + Ghost-Player Reaper
+    this._unloadBeaconSent = false;
+    if (this.hostPruneTimer) clearInterval(this.hostPruneTimer);
+    this.hostPruneTimer = setInterval(() => {
+      if (!this.hostRoom) return;
+      const evicted = this.hostRoom.pruneStaleHumans(11000);
+      for (const gid of evicted) {
+        this.relayClientIds.delete(gid);
+        const rtc = this.rtcPeers.get(gid);
+        if (rtc) {
+          try { rtc.pc.close(); } catch {}
+          this.rtcPeers.delete(gid);
+        }
+        const pc = this.peerConns.get(gid);
+        if (pc) {
+          try { pc.close(); } catch {}
+          this.peerConns.delete(gid);
+        }
+      }
+    }, 3000);
+
     if (options.mode !== 'practice') {
       this.flushHostRelayOnce();
-      this.hostHeartbeatTimer = setInterval(() => this.publishRoomHeartbeat(), 10000);
+      this.hostHeartbeatTimer = setInterval(() => this.publishRoomHeartbeat(), 7000);
       this.publishRoomHeartbeat();
     }
 
@@ -864,7 +921,16 @@ export class NetworkClient {
 
   routePacketToHostRoom(playerId, msg) {
     if (!this.hostRoom) return;
+    this.hostRoom.touchHuman(playerId);
     switch (msg.type) {
+      case 'kick_player': {
+        if (msg.targetId && this.hostRoom.kickPlayer(playerId, msg.targetId)) {
+          this.relayClientIds.delete(msg.targetId);
+          const rtc = this.rtcPeers.get(msg.targetId);
+          if (rtc) { try { rtc.pc.close(); } catch {} this.rtcPeers.delete(msg.targetId); }
+        }
+        break;
+      }
       case 'switch_team': this.hostRoom.switchPlayerTeam(playerId); break;
       case 'update_room': this.hostRoom.updateRoomSettings(playerId, msg); break;
       case 'start_match': this.hostRoom.startMatch(playerId); break;
@@ -975,6 +1041,11 @@ export class NetworkClient {
         this.lastResyncRequestAt = now;
         this.sendToRemoteHost({ type: 'resync_match' });
       }
+      return;
+    }
+    if (msg.type === 'kicked_from_room') {
+      await this.cleanupP2PSession();
+      this.emit('left_room', { rooms: [] });
       return;
     }
     if (msg.type === 'match_ended') {
@@ -1127,6 +1198,7 @@ export class NetworkClient {
     this.relayRoomCode = cleanCode;
     this.relayJoinedOnce = false;
     this.p2pDirectReady = false;
+    this._unloadBeaconSent = false;
     this.clientRelayOutbox = [
       {
         type: 'p2p_hello',
@@ -1141,6 +1213,13 @@ export class NetworkClient {
     ];
     this.flushClientRelayOnce(onFailFallback);
     this.startClientDirectRtc(cleanCode);
+
+    // Send lightweight 3s liveness heartbeat so Host always knows this guest is genuinely inside the room
+    if (this.guestHeartbeatTimer) clearInterval(this.guestHeartbeatTimer);
+    this.guestHeartbeatTimer = setInterval(() => {
+      if (!this.relayRoomCode) return;
+      this.sendToRemoteHost({ type: 'p2p_heartbeat' });
+    }, 3000);
 
     const joinGuardTimer = setTimeout(() => {
       if (!this.relayJoinedOnce && !this.p2pDirectReady && this.relayRoomCode === cleanCode) {
@@ -1197,6 +1276,14 @@ export class NetworkClient {
     if (this._joinGuardTimer) {
       clearTimeout(this._joinGuardTimer);
       this._joinGuardTimer = null;
+    }
+    if (this.hostPruneTimer) {
+      clearInterval(this.hostPruneTimer);
+      this.hostPruneTimer = null;
+    }
+    if (this.guestHeartbeatTimer) {
+      clearInterval(this.guestHeartbeatTimer);
+      this.guestHeartbeatTimer = null;
     }
     if (this.hostRelayTimer) {
       clearTimeout(this.hostRelayTimer);

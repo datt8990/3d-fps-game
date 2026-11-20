@@ -241,6 +241,7 @@ export class GameRoomCore {
       currentStreak: 0,
       score: 0,
       ping: isBot ? 12 + Math.floor(Math.random() * 14) : 16,
+      lastSeenAt: Date.now(),
       damageTakenBy: new Map(),
 
       input: {
@@ -263,7 +264,60 @@ export class GameRoomCore {
     return alphaCount <= bravoCount ? 'alpha' : 'bravo';
   }
 
+  evictDuplicateUser(clientInfo) {
+    if (!clientInfo) return [];
+    const targetUid = clientInfo.userId || null;
+    const targetName = String(clientInfo.username || '').trim().toLowerCase();
+    const removedIds = [];
+    for (const [cid, p] of this.combatants.entries()) {
+      if (p.isBot || cid === clientInfo.id) continue;
+      const sameUser = targetUid && p.userId && p.userId === targetUid;
+      const sameName = targetName && p.name && p.name.trim().toLowerCase() === targetName;
+      if (sameUser || sameName) {
+        this.combatants.delete(cid);
+        this.antiCheat.removePlayer(cid);
+        removedIds.push(cid);
+      }
+    }
+    return removedIds;
+  }
+
+  touchHuman(playerId) {
+    const p = this.combatants.get(playerId);
+    if (p && !p.isBot) {
+      p.lastSeenAt = Date.now();
+    }
+  }
+
+  pruneStaleHumans(timeoutMs = 11000) {
+    const now = Date.now();
+    const staleIds = [];
+    for (const [cid, p] of this.combatants.entries()) {
+      if (p.isBot || cid === this.hostId) continue;
+      const last = p.lastSeenAt || p.spawnedAt || 0;
+      if (now - last > timeoutMs) {
+        staleIds.push(cid);
+      }
+    }
+    for (const cid of staleIds) {
+      this.removeHumanPlayer(cid);
+    }
+    return staleIds;
+  }
+
+  kickPlayer(requesterId, targetId) {
+    if (!this.hostId || requesterId !== this.hostId) return false;
+    if (!targetId || targetId === this.hostId) return false;
+    const target = this.combatants.get(targetId);
+    if (!target || target.isBot) return false;
+    this.sendTo(targetId, { type: 'error_msg', text: 'Chủ phòng đã mời bạn rời khỏi phòng đấu.' });
+    this.sendTo(targetId, { type: 'kicked_from_room' });
+    this.removeHumanPlayer(targetId);
+    return true;
+  }
+
   addHumanPlayer(clientInfo) {
+    this.evictDuplicateUser(clientInfo);
     if (this.combatants.size >= this.maxPlayers) {
       const botToReplace = this.getBots()[0];
       if (botToReplace) {
@@ -320,6 +374,7 @@ export class GameRoomCore {
   }
 
   replaceBotWithHuman(clientInfo) {
+    this.evictDuplicateUser(clientInfo);
     const bots = this.getBots();
     const chosenBot =
       bots.find((b) => !b.dead && b.dropPhase === 'plane') ||
@@ -1680,6 +1735,7 @@ export class GameRoomCore {
   handleClientInput(playerId, rawInput) {
     const p = this.combatants.get(playerId);
     if (!p || p.isBot) return;
+    p.lastSeenAt = Date.now();
     const clean = this.antiCheat.sanitizeInput(rawInput);
     p.input = clean;
     p.yaw = clean.yaw;

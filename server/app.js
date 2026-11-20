@@ -4,6 +4,13 @@ import { gameDB } from './db.js';
 
 export const app = express();
 app.use(express.json({ limit: '512kb' }));
+app.use(express.text({ type: 'text/plain', limit: '128kb' }));
+app.use((req, _res, next) => {
+  if (typeof req.body === 'string' && req.body.trim().startsWith('{')) {
+    try { req.body = JSON.parse(req.body); } catch {}
+  }
+  next();
+});
 
 // Cloud Room Relay Queues (Guarantees 100% Vercel cross-device room join & gameplay fallback when WebRTC NAT/PeerJS fails!)
 const relayQueues = new Map();
@@ -37,13 +44,23 @@ function getOrCreateRelay(code, hostId = null) {
   return q;
 }
 
-// Hook for local WS server to inject live WS rooms into /api/rooms
+// Hook for local WS server to inject live WS rooms into /api/rooms & push realtime invites
 let localWsRoomsProvider = () => [];
 let onLoadoutUpdatedHook = null;
+let onSquadInviteHook = null;
 
-export function registerLocalServerHooks({ getRooms, onLoadoutUpdated }) {
+export function registerLocalServerHooks({ getRooms, onLoadoutUpdated, onSquadInvite }) {
   if (getRooms) localWsRoomsProvider = getRooms;
   if (onLoadoutUpdated) onLoadoutUpdatedHook = onLoadoutUpdated;
+  if (onSquadInvite) onSquadInviteHook = onSquadInvite;
+}
+
+function getLiveRoomCodes() {
+  const codes = new Set();
+  for (const r of [...localWsRoomsProvider(), ...gameDB.getActiveCloudRooms()]) {
+    if (r?.code) codes.add(String(r.code).toUpperCase());
+  }
+  return codes;
 }
 
 function resolveUser(req) {
@@ -111,15 +128,24 @@ app.post('/api/unlock', (req, res) => {
   res.json(result);
 });
 
-// 4. Friends & Squad Room Invites
+// 4. Friends, Requests, Player Profiles & Squad Room Invites
 app.get('/api/friends', (req, res) => {
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
+  const liveCodes = getLiveRoomCodes();
   const sanitized = gameDB.sanitizeUser(user);
+  // Drop stale invites pointing to rooms that already closed
+  let pendingInvite = sanitized.pendingInvite;
+  if (pendingInvite?.roomCode && !liveCodes.has(String(pendingInvite.roomCode).toUpperCase())) {
+    gameDB.clearPendingInvite(user.id);
+    pendingInvite = null;
+  }
   res.json({
     friendCode: user.friendCode,
-    friends: gameDB.getFriendsStatus(user.id),
-    pendingInvite: sanitized.pendingInvite
+    friends: gameDB.getFriendsStatus(user.id, liveCodes),
+    incomingRequests: gameDB.getIncomingRequests(user.id),
+    onlinePlayers: gameDB.searchPlayers(user.id, '', liveCodes),
+    pendingInvite
   });
 });
 
@@ -128,9 +154,38 @@ app.post('/api/friends/add', (req, res) => {
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
   const result = gameDB.addFriend(user.id, req.body?.query);
   if (result.error) return res.status(400).json(result);
+  const liveCodes = getLiveRoomCodes();
   res.json({
     ...result,
-    friends: gameDB.getFriendsStatus(user.id)
+    friends: gameDB.getFriendsStatus(user.id, liveCodes),
+    incomingRequests: gameDB.getIncomingRequests(user.id)
+  });
+});
+
+app.post('/api/friends/respond', (req, res) => {
+  const user = resolveUser(req);
+  if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
+  const { username, accept } = req.body || {};
+  const result = gameDB.respondFriendRequest(user.id, username, accept !== false);
+  if (result.error) return res.status(400).json(result);
+  const liveCodes = getLiveRoomCodes();
+  res.json({
+    ...result,
+    friends: gameDB.getFriendsStatus(user.id, liveCodes),
+    incomingRequests: gameDB.getIncomingRequests(user.id)
+  });
+});
+
+app.post('/api/friends/remove', (req, res) => {
+  const user = resolveUser(req);
+  if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
+  const result = gameDB.removeFriend(user.id, req.body?.username);
+  if (result.error) return res.status(400).json(result);
+  const liveCodes = getLiveRoomCodes();
+  res.json({
+    ...result,
+    friends: gameDB.getFriendsStatus(user.id, liveCodes),
+    incomingRequests: gameDB.getIncomingRequests(user.id)
   });
 });
 
@@ -140,6 +195,9 @@ app.post('/api/friends/invite', (req, res) => {
   const { targetUsername, roomCode, modeName, mapName } = req.body || {};
   const result = gameDB.sendRoomInvite(user, targetUsername, roomCode, modeName, mapName);
   if (result.error) return res.status(400).json(result);
+  if (result.targetUserId && result.invite) {
+    onSquadInviteHook?.(result.targetUserId, result.invite);
+  }
   res.json(result);
 });
 
@@ -147,6 +205,24 @@ app.post('/api/friends/dismiss-invite', (req, res) => {
   const user = resolveUser(req);
   if (user) gameDB.clearPendingInvite(user.id);
   res.json({ ok: true });
+});
+
+app.get('/api/players/search', (req, res) => {
+  const user = resolveUser(req);
+  const q = String(req.query.q || '');
+  const liveCodes = getLiveRoomCodes();
+  res.json({
+    players: gameDB.searchPlayers(user?.id || null, q, liveCodes)
+  });
+});
+
+app.get('/api/players/profile/:identifier', (req, res) => {
+  const viewer = resolveUser(req);
+  const identifier = decodeURIComponent(req.params.identifier || '');
+  const liveCodes = getLiveRoomCodes();
+  const profile = gameDB.getPlayerPublicProfile(viewer?.id || null, identifier, liveCodes);
+  if (profile.error) return res.status(404).json(profile);
+  res.json({ profile });
 });
 
 // 5. Online Rooms Directory & Friend Matchmaking (Works on Vercel & Local!)

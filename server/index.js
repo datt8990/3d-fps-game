@@ -68,6 +68,13 @@ registerLocalServerHooks({
         room?.updateHumanLoadout(client.id, sanitizedUser.loadout, sanitizedUser.rp);
       }
     }
+  },
+  onSquadInvite: (targetUserId, invite) => {
+    for (const client of clientsById.values()) {
+      if (client.userId === targetUserId && client.ws.readyState === 1) {
+        safeSend(client.ws, { type: 'squad_invite', invite });
+      }
+    }
   }
 });
 
@@ -157,7 +164,17 @@ function safeSend(ws, obj) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
 }
 
+function syncUserRoomCode(userId, roomCode = null) {
+  if (!userId) return;
+  const u = gameDB.getUserById(userId);
+  if (u) {
+    u.currentRoomCode = roomCode ? String(roomCode).toUpperCase() : null;
+    u.lastSeenAt = Date.now();
+  }
+}
+
 function leaveCurrentRoom(client) {
+  syncUserRoomCode(client.userId, null);
   if (!client.roomId) return;
   const room = rooms.get(client.roomId);
   client.roomId = null;
@@ -179,6 +196,7 @@ const matchmaker = new HumanPriorityMatchmaker({
       return joined;
     }
     client.roomId = room.id;
+    syncUserRoomCode(client.userId, room.code);
     if (wasWaiting) {
       safeSend(client.ws, { type: 'joined_room', room: room.getLobbyPayload() });
     }
@@ -187,6 +205,8 @@ const matchmaker = new HumanPriorityMatchmaker({
 });
 
 wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
   const clientId = 'p_' + crypto.randomBytes(5).toString('hex');
   const client = {
     id: clientId,
@@ -286,6 +306,7 @@ wss.on('connection', (ws) => {
           break;
         }
         client.roomId = room.id;
+        syncUserRoomCode(client.userId, room.code);
         safeSend(ws, { type: 'joined_room', room: room.getLobbyPayload() });
         if (msg.autoStart) room.startMatch(client.id);
         break;
@@ -313,6 +334,7 @@ wss.on('connection', (ws) => {
           break;
         }
         client.roomId = target.id;
+        syncUserRoomCode(client.userId, target.code);
         if (wasWaiting) {
           safeSend(ws, { type: 'joined_room', room: target.getLobbyPayload() });
         }
@@ -440,6 +462,21 @@ wss.on('connection', (ws) => {
         rooms.get(client.roomId)?.handleVoiceAudio(client.id, msg);
         break;
       }
+
+      case 'kick_player': {
+        const room = rooms.get(client.roomId);
+        if (room && msg.targetId) {
+          const kicked = room.kickPlayer(client.id, msg.targetId);
+          if (kicked) {
+            const targetClient = clientsById.get(msg.targetId);
+            if (targetClient && targetClient.roomId === room.id) {
+              targetClient.roomId = null;
+              syncUserRoomCode(targetClient.userId, null);
+            }
+          }
+        }
+        break;
+      }
     }
   });
 
@@ -450,6 +487,20 @@ wss.on('connection', (ws) => {
     broadcastLobbyRoomList();
   });
 });
+
+// Automatically terminate half-open / crashed client sockets so ghost names NEVER linger in rooms!
+setInterval(() => {
+  for (const client of clientsById.values()) {
+    const sock = client.ws;
+    if (!sock) continue;
+    if (sock.isAlive === false) {
+      try { sock.terminate(); } catch {}
+      continue;
+    }
+    sock.isAlive = false;
+    try { sock.ping(); } catch {}
+  }
+}, 12000);
 
 server.listen(PORT, () => {
   console.log(`\n========================================================`);

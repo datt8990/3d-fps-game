@@ -34,6 +34,9 @@ const state = {
   currentRoom: null,
   roomsList: [],
   friendsList: [],
+  incomingRequests: [],
+  onlinePlayers: [],
+  pendingInviteTarget: null,
   pendingUrlRoomCode: new URLSearchParams(window.location.search).get('room') || ''
 };
 
@@ -748,22 +751,36 @@ function updateUserData(user, toastMsg = '') {
 }
 
 // ============================================================================
-// 3. FRIENDS & SQUAD INVITE SYSTEM
+// 3. FRIENDS, REQUESTS, PLAYER PROFILES & SQUAD INVITE SYSTEM
 // ============================================================================
 function startFriendsPolling() {
   if (friendsPollTimer) clearInterval(friendsPollTimer);
   fetchFriendsStatus();
-  friendsPollTimer = setInterval(fetchFriendsStatus, 6000);
+  friendsPollTimer = setInterval(fetchFriendsStatus, 3500);
+}
+
+function updateFriendsNotifBadge() {
+  const badge = document.getElementById('friends-badge');
+  if (!badge) return;
+  const count = (state.incomingRequests?.length || 0);
+  if (count > 0) {
+    badge.textContent = String(count);
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
 }
 
 async function fetchFriendsStatus() {
   if (!state.token || fpsClient.active) return;
   try {
     const res = await apiCall('/api/friends');
-    if (res.friends) {
-      state.friendsList = res.friends;
-      renderFriendsList();
-    }
+    if (res.friends) state.friendsList = res.friends;
+    if (res.incomingRequests) state.incomingRequests = res.incomingRequests;
+    const searchVal = document.getElementById('add-friend-input')?.value?.trim() || '';
+    if (!searchVal && res.onlinePlayers) state.onlinePlayers = res.onlinePlayers;
+    updateFriendsNotifBadge();
+    renderFriendsDrawerContent();
     if (res.pendingInvite && res.pendingInvite.id !== lastShownInviteId) {
       lastShownInviteId = res.pendingInvite.id;
       showSquadInvitePopup(res.pendingInvite);
@@ -771,31 +788,284 @@ async function fetchFriendsStatus() {
   } catch {}
 }
 
+async function sendSquadInviteSmart(targetUsername) {
+  if (!targetUsername) return;
+  // If already in a room, invite straight away; if in lobby, auto-create a room and invite immediately!
+  if (!state.currentRoom?.code) {
+    state.pendingInviteTarget = targetUsername;
+    soundEngine.ensureContext();
+    const mode = state.selectedQuickMode === 'practice' ? 'tdm' : (state.selectedQuickMode || 'tdm');
+    const mapId = state.selectedQuickMap || 'warehouse';
+    net.send({
+      type: 'create_room',
+      name: `Tổ Đội của ${state.user?.username || 'Chiến Binh'}`,
+      mode,
+      mapId,
+      maxPlayers: mode === 'survival' ? 50 : 10,
+      fillBots: true,
+      botDifficulty: 'normal'
+    });
+    showToast(`Đang mở phòng tổ đội và gửi lời mời tới ${targetUsername}...`);
+    return;
+  }
+
+  const res = await apiCall('/api/friends/invite', 'POST', {
+    targetUsername,
+    roomCode: state.currentRoom.code,
+    modeName: state.currentRoom.modeConfig?.shortName || 'Đấu Đội',
+    mapName: state.currentRoom.mapName || 'Nhà Kho'
+  });
+  if (res?.error) return showToast(res.error);
+  if (res?.ok) showToast(`⚡ Đã gửi lời mời vào phòng #${state.currentRoom.code} tới ${targetUsername}!`);
+}
+
+async function openPlayerProfile(identifier) {
+  if (!identifier) return;
+  const modal = document.getElementById('player-profile-modal');
+  const body = document.getElementById('player-profile-body');
+  if (!modal || !body) return;
+  modal.classList.remove('hidden');
+  body.innerHTML = '<div class="muted" style="padding:24px;text-align:center;">Đang tải hồ sơ chiến binh...</div>';
+
+  try {
+    const res = await apiCall(`/api/players/profile/${encodeURIComponent(identifier)}`);
+    if (res?.error || !res?.profile) {
+      body.innerHTML = `<div class="muted" style="padding:20px;text-align:center;">${escapeHtml(res?.error || 'Không tìm thấy hồ sơ.')}</div>`;
+      return;
+    }
+    const p = res.profile;
+    const st = p.stats || {};
+    const kd = (st.deaths || 0) > 0 ? ((st.kills || 0) / st.deaths).toFixed(2) : String(st.kills || 0);
+    const winRate = (st.matches || 0) > 0 ? Math.round(((st.wins || 0) / st.matches) * 100) : 0;
+    const hsRate = (st.kills || 0) > 0 ? Math.round(((st.headshots || 0) / st.kills) * 100) : 0;
+    const opName = OPERATORS[p.loadout?.operator]?.name || 'VANGUARD';
+    const priName = WEAPONS[p.loadout?.primary]?.name || 'AK-47';
+    const secName = WEAPONS[p.loadout?.secondary]?.name || 'Desert Eagle';
+    const statusText = p.isRivalBot
+      ? '<span class="muted">🤖 Chiến Binh AI Huyền Thoại</span>'
+      : (p.online
+        ? `<span style="color:#4ade80;font-weight:700;">● Đang Online ${p.roomCode ? `• Phòng #${escapeHtml(p.roomCode)}` : '• Sảnh Chính'}</span>`
+        : '<span class="muted">○ Ngoại tuyến</span>');
+
+    const actionHtml = [];
+    if (p.relationship === 'self') {
+      actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-copy-code" data-code="${escapeHtml(p.friendCode)}">📋 Copy Mã Kết Bạn (${escapeHtml(p.friendCode)})</button>`);
+    } else if (!p.isRivalBot) {
+      if (p.relationship === 'none') {
+        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-add-friend" data-user="${escapeHtml(p.username)}">👤+ Gửi Lời Mời Kết Bạn</button>`);
+      } else if (p.relationship === 'outgoing_request') {
+        actionHtml.push(`<button class="btn-secondary btn-sm" disabled>⏳ Đã Gửi Lời Mời Kết Bạn</button>`);
+      } else if (p.relationship === 'incoming_request') {
+        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-accept-req" data-user="${escapeHtml(p.username)}">✓ Chấp Nhận Kết Bạn</button>`);
+        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-decline-req" data-user="${escapeHtml(p.username)}">✕ Từ Chối</button>`);
+      } else if (p.relationship === 'friend') {
+        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-remove-friend" data-user="${escapeHtml(p.username)}" style="color:#fca5a5;">✕ Xóa Bạn</button>`);
+      }
+
+      if (p.online) {
+        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-invite-squad" data-user="${escapeHtml(p.username)}">⚔ Mời Đấu Chung</button>`);
+      }
+      if (p.roomCode && p.roomCode !== state.currentRoom?.code) {
+        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-join-room" data-room="${escapeHtml(p.roomCode)}">▶ Vào Phòng #${escapeHtml(p.roomCode)}</button>`);
+      }
+    }
+
+    const histHtml = (p.history || []).length
+      ? p.history.slice(0, 6).map((h) => `
+          <div class="history-row ${h.won ? 'win' : 'loss'}">
+            <div>
+              <strong>${h.won ? 'THẮNG' : 'BẠI'}</strong> • ${escapeHtml(h.mapName || 'Đấu Trường')}
+              <div class="muted">K/D: ${h.kills || 0}/${h.deaths || 0} • HS: ${h.headshots || 0}</div>
+            </div>
+            <div style="text-align:right;font-size:12px;">
+              <div style="color:${(h.rpDelta || 0) >= 0 ? '#4ade80' : '#f87171'};font-weight:700;">${(h.rpDelta || 0) >= 0 ? '+' : ''}${h.rpDelta || 0} RP</div>
+            </div>
+          </div>
+        `).join('')
+      : '<div class="muted" style="font-size:12px;padding:6px 0;">Chưa có lịch sử trận đấu gần đây.</div>';
+
+    body.innerHTML = `
+      <div class="profile-hero">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div class="profile-avatar-badge" style="border-color:${p.rank?.color || '#38bdf8'};">
+            ${escapeHtml(p.rank?.icon || '★')}
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong style="font-size:20px;color:#fff;">${escapeHtml(p.username)}</strong>
+              <span class="mode-pill" style="color:${p.rank?.color || '#38bdf8'};">${escapeHtml(p.rank?.name || 'Bạc')} • ${p.rp || 1200} RP</span>
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:3px;">Cấp ${p.level || 1} • Mã: <strong style="color:#facc15;">${escapeHtml(p.friendCode || '---')}</strong></div>
+            <div style="font-size:12px;margin-top:3px;">${statusText}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-kpi-grid">
+        <div class="profile-kpi">
+          <div class="profile-kpi-val" style="color:#38bdf8;">${kd}</div>
+          <div class="profile-kpi-lbl">Tỉ Lệ K/D</div>
+        </div>
+        <div class="profile-kpi">
+          <div class="profile-kpi-val" style="color:#4ade80;">${winRate}%</div>
+          <div class="profile-kpi-lbl">Tỉ Lệ Thắng (${st.wins || 0}/${st.matches || 0})</div>
+        </div>
+        <div class="profile-kpi">
+          <div class="profile-kpi-val" style="color:#f59e0b;">${hsRate}%</div>
+          <div class="profile-kpi-lbl">Headshot (${st.headshots || 0})</div>
+        </div>
+        <div class="profile-kpi">
+          <div class="profile-kpi-val">${st.kills || 0}</div>
+          <div class="profile-kpi-lbl">Tổng Hạ Gục</div>
+        </div>
+      </div>
+
+      <div class="panel-tag">TRANG BỊ HIỆN TẠI</div>
+      <div class="profile-loadout-row">
+        <div class="profile-loadout-chip"><span class="muted">Nhân vật:</span><br><strong>${escapeHtml(opName)}</strong></div>
+        <div class="profile-loadout-chip"><span class="muted">Súng chính:</span><br><strong>${escapeHtml(priName)}</strong></div>
+        <div class="profile-loadout-chip"><span class="muted">Súng phụ:</span><br><strong>${escapeHtml(secName)}</strong></div>
+      </div>
+
+      <div class="panel-tag">LỊCH SỬ TRẬN GẦN ĐÂY</div>
+      <div class="history-list" style="max-height:175px;overflow-y:auto;">${histHtml}</div>
+
+      <div class="profile-actions-bar">${actionHtml.join('')}</div>
+    `;
+
+    body.querySelector('#prof-copy-code')?.addEventListener('click', (e) => {
+      navigator.clipboard?.writeText(e.currentTarget.dataset.code || '');
+      showToast(`Đã copy mã kết bạn: ${e.currentTarget.dataset.code}`);
+    });
+    body.querySelector('#prof-add-friend')?.addEventListener('click', async (e) => {
+      const uname = e.currentTarget.dataset.user;
+      const r = await apiCall('/api/friends/add', 'POST', { query: uname });
+      if (r?.error) return showToast(r.error);
+      showToast(r.acceptedImmediately ? `Đã trở thành bạn bè với ${uname}!` : `Đã gửi lời mời kết bạn tới ${uname}!`);
+      fetchFriendsStatus();
+      openPlayerProfile(uname);
+    });
+    body.querySelector('#prof-accept-req')?.addEventListener('click', async (e) => {
+      const uname = e.currentTarget.dataset.user;
+      const r = await apiCall('/api/friends/respond', 'POST', { username: uname, accept: true });
+      if (r?.ok) {
+        showToast(`Đã chấp nhận kết bạn với ${uname}!`);
+        fetchFriendsStatus();
+        openPlayerProfile(uname);
+      }
+    });
+    body.querySelector('#prof-decline-req')?.addEventListener('click', async (e) => {
+      const uname = e.currentTarget.dataset.user;
+      const r = await apiCall('/api/friends/respond', 'POST', { username: uname, accept: false });
+      if (r?.ok) {
+        showToast(`Đã từ chối lời mời của ${uname}.`);
+        fetchFriendsStatus();
+        openPlayerProfile(uname);
+      }
+    });
+    body.querySelector('#prof-remove-friend')?.addEventListener('click', async (e) => {
+      const uname = e.currentTarget.dataset.user;
+      const r = await apiCall('/api/friends/remove', 'POST', { username: uname });
+      if (r?.ok) {
+        showToast(`Đã xóa ${uname} khỏi danh sách bạn bè.`);
+        fetchFriendsStatus();
+        openPlayerProfile(uname);
+      }
+    });
+    body.querySelector('#prof-invite-squad')?.addEventListener('click', async (e) => {
+      const uname = e.currentTarget.dataset.user;
+      modal.classList.add('hidden');
+      await sendSquadInviteSmart(uname);
+    });
+    body.querySelector('#prof-join-room')?.addEventListener('click', (e) => {
+      const code = e.currentTarget.dataset.room;
+      modal.classList.add('hidden');
+      document.getElementById('friends-drawer')?.classList.add('hidden');
+      joinRoomByCode(code);
+    });
+  } catch {
+    body.innerHTML = '<div class="muted" style="padding:20px;text-align:center;">Lỗi tải hồ sơ chiến binh.</div>';
+  }
+}
+
+function renderFriendsDrawerContent() {
+  renderIncomingRequests();
+  renderFriendsList();
+  renderOnlinePlayersList();
+}
+
+function renderIncomingRequests() {
+  const sec = document.getElementById('friend-requests-section');
+  const box = document.getElementById('friend-requests-box');
+  if (!sec || !box) return;
+  const reqs = state.incomingRequests || [];
+  if (!reqs.length) {
+    sec.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  sec.classList.remove('hidden');
+  box.innerHTML = reqs.map((r) => `
+    <div class="roster-slot">
+      <div>
+        <strong class="profile-name-link" data-open-profile="${escapeHtml(r.from)}">${escapeHtml(r.from)}</strong>
+        <div class="muted" style="font-size:11px;">${escapeHtml(r.rank?.name || 'Bạc')} • Cấp ${r.level || 1}</div>
+      </div>
+      <div class="row-gap">
+        <button class="btn-primary btn-xs" data-accept-req="${escapeHtml(r.from)}">✓ Đồng Ý</button>
+        <button class="btn-secondary btn-xs" data-decline-req="${escapeHtml(r.from)}">✕</button>
+      </div>
+    </div>
+  `).join('');
+
+  box.querySelectorAll('[data-open-profile]').forEach((el) => {
+    el.addEventListener('click', () => openPlayerProfile(el.dataset.openProfile));
+  });
+  box.querySelectorAll('button[data-accept-req]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const r = await apiCall('/api/friends/respond', 'POST', { username: b.dataset.acceptReq, accept: true });
+      if (r?.ok) {
+        showToast(`Đã kết bạn với ${b.dataset.acceptReq}!`);
+        fetchFriendsStatus();
+      }
+    });
+  });
+  box.querySelectorAll('button[data-decline-req]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const r = await apiCall('/api/friends/respond', 'POST', { username: b.dataset.declineReq, accept: false });
+      if (r?.ok) fetchFriendsStatus();
+    });
+  });
+}
+
 function renderFriendsList() {
   const box = document.getElementById('friends-list-box');
+  const countLbl = document.getElementById('friends-count-lbl');
+  if (countLbl) countLbl.textContent = String(state.friendsList.length || 0);
   if (!box) return;
   if (!state.friendsList.length) {
-    box.innerHTML = `<div class="muted" style="padding:12px 0;">Chưa có bạn bè. Nhập Tên hoặc Mã VN-xxxx của bạn bè ở ô trên để kết bạn!</div>`;
+    box.innerHTML = `<div class="muted" style="padding:8px 0;font-size:12px;">Chưa có bạn bè. Bấm vào chiến binh Online bên dưới hoặc nhập tên/mã VN-xxxx để kết bạn!</div>`;
     return;
   }
 
   box.innerHTML = state.friendsList.map((f) => {
     const statusHtml = f.online
-      ? `<span style="color:#4ade80;font-size:11px;">● Online ${f.roomCode ? `(Phòng #${f.roomCode})` : ''}</span>`
+      ? `<span style="color:#4ade80;font-size:11px;">● Online ${f.roomCode ? `(Phòng #${escapeHtml(f.roomCode)})` : ''}</span>`
       : `<span class="muted" style="font-size:11px;">○ Ngoại tuyến</span>`;
 
-    const actionBtns = [];
-    if (f.roomCode) {
-      actionBtns.push(`<button class="btn-primary btn-sm" data-join-friend="${f.roomCode}">Vào Chung</button>`);
+    const actionBtns = [`<button class="btn-secondary btn-xs" data-open-profile="${escapeHtml(f.username)}" title="Xem Hồ Sơ">👤</button>`];
+    if (f.roomCode && f.roomCode !== state.currentRoom?.code) {
+      actionBtns.push(`<button class="btn-primary btn-xs" data-join-friend="${escapeHtml(f.roomCode)}">Vào Chung</button>`);
     }
-    if (state.currentRoom?.code && f.online) {
-      actionBtns.push(`<button class="btn-secondary btn-sm" data-invite-friend="${escapeHtml(f.username)}">Mời</button>`);
+    if (f.online) {
+      actionBtns.push(`<button class="btn-secondary btn-xs" data-invite-friend="${escapeHtml(f.username)}">Mời Đấu</button>`);
     }
 
     return `
       <div class="roster-slot">
         <div>
-          <strong>${escapeHtml(f.username)}</strong>
+          <strong class="profile-name-link" data-open-profile="${escapeHtml(f.username)}">${escapeHtml(f.username)}</strong>
+          <span style="color:${f.rank?.color || '#94a3b8'};font-size:10.5px;margin-left:4px;">${escapeHtml(f.rank?.icon || '')}</span>
           <div>${statusHtml}</div>
         </div>
         <div class="row-gap">${actionBtns.join('')}</div>
@@ -803,24 +1073,67 @@ function renderFriendsList() {
     `;
   }).join('');
 
+  box.querySelectorAll('[data-open-profile]').forEach((el) => {
+    el.addEventListener('click', () => openPlayerProfile(el.dataset.openProfile));
+  });
   box.querySelectorAll('button[data-join-friend]').forEach((b) => {
     b.addEventListener('click', () => {
       joinRoomByCode(b.dataset.joinFriend);
       document.getElementById('friends-drawer')?.classList.add('hidden');
     });
   });
-
   box.querySelectorAll('button[data-invite-friend]').forEach((b) => {
+    b.addEventListener('click', () => sendSquadInviteSmart(b.dataset.inviteFriend));
+  });
+}
+
+function renderOnlinePlayersList() {
+  const box = document.getElementById('online-players-box');
+  if (!box) return;
+  const list = state.onlinePlayers || [];
+  if (!list.length) {
+    box.innerHTML = '<div class="muted" style="padding:6px 0;font-size:12px;">Không có người chơi nào khác đang trực tuyến.</div>';
+    return;
+  }
+  box.innerHTML = list.map((p) => {
+    let relBtn = `<button class="btn-primary btn-xs" data-quick-add="${escapeHtml(p.username)}">+ Kết Bạn</button>`;
+    if (p.relationship === 'friend') relBtn = '<span class="muted" style="font-size:11px;">✓ Bạn bè</span>';
+    else if (p.relationship === 'outgoing_request') relBtn = '<span class="muted" style="font-size:11px;">⏳ Đã gửi</span>';
+    else if (p.relationship === 'incoming_request') relBtn = `<button class="btn-primary btn-xs" data-accept-req="${escapeHtml(p.username)}">✓ Đồng Ý</button>`;
+    return `
+      <div class="roster-slot">
+        <div>
+          <strong class="profile-name-link" data-open-profile="${escapeHtml(p.username)}">${escapeHtml(p.username)}</strong>
+          <div class="muted" style="font-size:11px;">
+            <span style="color:${p.online ? '#4ade80' : '#94a3b8'};">${p.online ? '● Online' : '○ Offline'}</span> • ${escapeHtml(p.rank?.name || 'Bạc')}
+          </div>
+        </div>
+        <div class="row-gap">
+          <button class="btn-secondary btn-xs" data-open-profile="${escapeHtml(p.username)}" title="Xem Hồ Sơ">👤</button>
+          ${relBtn}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  box.querySelectorAll('[data-open-profile]').forEach((el) => {
+    el.addEventListener('click', () => openPlayerProfile(el.dataset.openProfile));
+  });
+  box.querySelectorAll('button[data-quick-add]').forEach((b) => {
     b.addEventListener('click', async () => {
-      if (!state.currentRoom?.code) return showToast('Hãy tạo hoặc vào một phòng đấu trước khi mời!');
-      const targetUsername = b.dataset.inviteFriend;
-      const res = await apiCall('/api/friends/invite', 'POST', {
-        targetUsername,
-        roomCode: state.currentRoom.code,
-        modeName: state.currentRoom.modeConfig?.shortName,
-        mapName: state.currentRoom.mapName
-      });
-      if (res.ok) showToast(`Đã gửi lời mời tổ đội tới ${targetUsername}!`);
+      const r = await apiCall('/api/friends/add', 'POST', { query: b.dataset.quickAdd });
+      if (r?.error) return showToast(r.error);
+      showToast(r.acceptedImmediately ? `Đã kết bạn với ${b.dataset.quickAdd}!` : `Đã gửi lời mời kết bạn tới ${b.dataset.quickAdd}!`);
+      fetchFriendsStatus();
+    });
+  });
+  box.querySelectorAll('button[data-accept-req]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const r = await apiCall('/api/friends/respond', 'POST', { username: b.dataset.acceptReq, accept: true });
+      if (r?.ok) {
+        showToast(`Đã kết bạn với ${b.dataset.acceptReq}!`);
+        fetchFriendsStatus();
+      }
     });
   });
 }
@@ -830,9 +1143,10 @@ function showSquadInvitePopup(invite) {
   const desc = document.getElementById('invite-desc');
   if (!popup || !desc) return;
   soundEngine.playUiTone(920, 0.14);
-  desc.innerHTML = `<strong>${escapeHtml(invite.fromName)}</strong> mời bạn vào phòng <strong>#${escapeHtml(invite.roomCode)}</strong> (${escapeHtml(invite.modeName)} - ${escapeHtml(invite.mapName)})`;
+  desc.innerHTML = `<strong class="profile-name-link" id="invite-sender-link">${escapeHtml(invite.fromName)}</strong> mời bạn vào phòng <strong>#${escapeHtml(invite.roomCode)}</strong> (${escapeHtml(invite.modeName)} - ${escapeHtml(invite.mapName)})`;
   popup.classList.remove('hidden');
 
+  document.getElementById('invite-sender-link')?.addEventListener('click', () => openPlayerProfile(invite.fromName));
   document.getElementById('btn-accept-invite').onclick = () => {
     popup.classList.add('hidden');
     apiCall('/api/friends/dismiss-invite', 'POST');
@@ -934,18 +1248,24 @@ function renderWaitingRoom(room) {
 
   const alphaContainer = document.getElementById('room-team-alpha');
   const bravoContainer = document.getElementById('room-team-bravo');
-  const players = room.players || [];
+  const players = (room.players || []).filter((p) => !p.isBot && !String(p.id || '').startsWith('bot_'));
 
-  const renderSlot = (p) => `
-    <div class="roster-slot">
-      <div>
-        <strong>${escapeHtml(p.name)}</strong>
-        ${p.id === room.hostId ? '<span style="color:#facc15;font-size:11px;"> ★ Chủ phòng</span>' : ''}
-        <div class="muted">${OPERATORS[p.operator]?.name || 'VANGUARD'} • ${WEAPONS[p.primary]?.name || 'AK-47'}</div>
+  const renderSlot = (p) => {
+    const canKick = isHost && p.id !== room.hostId && p.id !== net.clientId;
+    return `
+      <div class="roster-slot">
+        <div>
+          <strong class="profile-name-link" data-open-profile="${escapeHtml(p.name)}">${escapeHtml(p.name)}</strong>
+          ${p.id === room.hostId ? '<span style="color:#facc15;font-size:11px;"> ★ Chủ phòng</span>' : ''}
+          <div class="muted">${OPERATORS[p.operator]?.name || 'VANGUARD'} • ${WEAPONS[p.primary]?.name || 'AK-47'}</div>
+        </div>
+        <div class="row-gap">
+          <span class="mode-pill">${p.rank?.name || 'Bạc'}</span>
+          ${canKick ? `<button class="btn-secondary btn-xs" data-kick-id="${escapeHtml(p.id)}" title="Mời khỏi phòng" style="color:#fca5a5;">✕</button>` : ''}
+        </div>
       </div>
-      <span class="mode-pill">${p.rank?.name || 'Bạc'}</span>
-    </div>
-  `;
+    `;
+  };
 
   if (room.modeConfig?.teamBased) {
     const perTeam = Math.max(1, Math.floor((room.maxPlayers || 10) / 2));
@@ -962,6 +1282,17 @@ function renderWaitingRoom(room) {
     bravoContainer.innerHTML = players.slice(half).map(renderSlot).join('') +
       (room.fillBots && botSlots > 0 ? `<div class="roster-slot empty">Chế độ Solo (${room.maxPlayers} người) — +${botSlots} AI Bot khi bắt đầu</div>` : '');
   }
+
+  [alphaContainer, bravoContainer].forEach((container) => {
+    container?.querySelectorAll('[data-open-profile]').forEach((el) => {
+      el.addEventListener('click', () => openPlayerProfile(el.dataset.openProfile));
+    });
+    container?.querySelectorAll('button[data-kick-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        net.send({ type: 'kick_player', targetId: btn.dataset.kickId });
+      });
+    });
+  });
 
   const chatEl = document.getElementById('room-chat-log');
   if (chatEl && room.chat) {
@@ -1037,7 +1368,7 @@ async function loadRankedLeaderboard() {
       return `
         <tr class="${isMe}">
           <td><strong>#${row.position}</strong></td>
-          <td><strong>${escapeHtml(row.username)}</strong> ${row.isHuman ? '<span style="color:#38bdf8;font-size:11px;">[Người chơi]</span>' : ''}</td>
+          <td><button class="profile-name-link" data-profile="${escapeHtml(row.username)}" title="Xem hồ sơ">${escapeHtml(row.username)}</button> ${row.isHuman ? '<span style="color:#38bdf8;font-size:11px;">[Người chơi]</span>' : ''}</td>
           <td style="color:${row.rank.color};font-weight:700;">${row.rank.icon} ${row.rank.name}</td>
           <td><strong>${row.rp} RP</strong></td>
           <td>${kd}</td>
@@ -1045,6 +1376,9 @@ async function loadRankedLeaderboard() {
         </tr>
       `;
     }).join('');
+    tbody.querySelectorAll('.profile-name-link').forEach((btn) => {
+      btn.addEventListener('click', () => openPlayerProfile(btn.dataset.profile));
+    });
   }
 }
 
@@ -1127,8 +1461,16 @@ function bindNetworkEvents() {
   net.on('joined_room', ({ room }) => {
     hideQueueModal();
     state.currentRoom = room;
+    if (state.token && room?.code) {
+      apiCall(`/api/profile?roomCode=${encodeURIComponent(room.code)}`).catch(() => {});
+    }
     switchTab('rooms');
     updateRoomTabPanels();
+    if (state.pendingInviteTarget && room?.code) {
+      const target = state.pendingInviteTarget;
+      state.pendingInviteTarget = null;
+      sendSquadInviteSmart(target);
+    }
   });
 
   net.on('room_lobby', ({ room }) => {
@@ -1145,10 +1487,21 @@ function bindNetworkEvents() {
   net.on('left_room', (msg) => {
     hideQueueModal();
     state.currentRoom = null;
+    state.pendingInviteTarget = null;
+    if (state.token) {
+      apiCall('/api/profile?roomCode=').catch(() => {});
+    }
     if (msg.rooms) state.roomsList = msg.rooms;
     voice.stop();
     if (fpsClient.active) exitMatchToLobbyUI();
     updateRoomTabPanels();
+  });
+
+  net.on('squad_invite', ({ invite }) => {
+    if (invite && invite.id !== lastShownInviteId && !fpsClient.active) {
+      lastShownInviteId = invite.id;
+      showSquadInvitePopup(invite);
+    }
   });
 
   net.on('chat_msg', ({ msg }) => {
@@ -1352,6 +1705,25 @@ function bindUIEvents() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
+  // My Profile Modal & Close Controls
+  document.getElementById('btn-open-my-profile')?.addEventListener('click', () => {
+    if (state.user?.username) openPlayerProfile(state.user.username);
+  });
+  document.getElementById('btn-close-profile-modal')?.addEventListener('click', () => {
+    document.getElementById('player-profile-modal')?.classList.add('hidden');
+  });
+  document.getElementById('player-profile-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      document.getElementById('player-profile-modal')?.classList.add('hidden');
+    }
+  });
+  document.getElementById('btn-copy-friend-code')?.addEventListener('click', () => {
+    const code = state.user?.friendCode;
+    if (!code) return;
+    navigator.clipboard?.writeText(code);
+    showToast(`Đã sao chép Mã Kết Bạn: ${code}`);
+  });
+
   // Friends Drawer
   document.getElementById('btn-toggle-friends')?.addEventListener('click', () => {
     const dr = document.getElementById('friends-drawer');
@@ -1369,11 +1741,36 @@ function bindUIEvents() {
     const res = await apiCall('/api/friends/add', 'POST', { query: inp.value.trim() });
     if (res.error) return showToast(res.error);
     inp.value = '';
-    if (res.friends) {
-      state.friendsList = res.friends;
-      renderFriendsList();
+    const tag = document.getElementById('online-players-tag');
+    if (tag) tag.textContent = 'Đang Online';
+    if (res.friends) state.friendsList = res.friends;
+    if (res.incomingRequests) state.incomingRequests = res.incomingRequests;
+    if (res.requestSentTo) {
+      showToast(`📩 Đã gửi lời mời kết bạn tới ${res.requestSentTo}!`);
+    } else if (res.friendAdded) {
+      showToast(`✓ Đã trở thành bạn bè với ${res.friendAdded}!`);
     }
-    showToast(`Đã kết bạn với ${res.friendAdded}!`);
+    fetchFriendsStatus();
+  });
+
+  let playerSearchTimer = null;
+  document.getElementById('add-friend-input')?.addEventListener('input', (e) => {
+    const q = e.target.value.trim();
+    if (playerSearchTimer) clearTimeout(playerSearchTimer);
+    const tag = document.getElementById('online-players-tag');
+    if (!q) {
+      if (tag) tag.textContent = 'Đang Online';
+      fetchFriendsStatus();
+      return;
+    }
+    playerSearchTimer = setTimeout(async () => {
+      const res = await apiCall(`/api/players/search?q=${encodeURIComponent(q)}`);
+      if (res?.players) {
+        state.onlinePlayers = res.players;
+        if (tag) tag.textContent = `Kết quả (${res.players.length})`;
+        renderOnlinePlayersList();
+      }
+    }, 220);
   });
 
   // Room Code Join Inputs (Home, Browser, Friend Drawer)
