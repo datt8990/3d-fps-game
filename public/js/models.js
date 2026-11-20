@@ -3470,14 +3470,19 @@ function buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowC
 
   // 2. PHOENIX (NỮ): Platinum Spec-Ops Operator matching reference (Plate Carrier + White ID Badge + Cyan Chemlights + Cheek Bandage + Holster & Dual Thigh Straps)
   if (opId === 'phoenix') {
-    const tacMat = new THREE.MeshStandardMaterial({ color: '#1b1f26', metalness: 0.34, roughness: 0.56 });
-    const matteMat = new THREE.MeshStandardMaterial({ color: '#11141a', metalness: 0.25, roughness: 0.68 });
-    const steelTrim = new THREE.MeshStandardMaterial({ color: '#64748b', metalness: 0.85, roughness: 0.25 });
+    const isUrban = !outCfg || outCfg.id === 'urban';
+    const isGold = outCfg?.id === 'royal_gold';
+    const vestMain = isUrban ? '#1e222b' : (isGold ? '#ca8a04' : (outCfg.id === 'arctic' ? '#cbd5e1' : (outCfg.id === 'crimson' ? '#991b1b' : (outCfg.id === 'cyber' ? '#3b0764' : (outCfg.vest || '#1b1f26')))));
+    const vestAccent = isUrban ? '#e2e8f0' : (outCfg.accent || '#e2e8f0');
+    const tacMat = new THREE.MeshStandardMaterial({ color: vestMain, metalness: isGold ? 0.78 : 0.34, roughness: isGold ? 0.24 : 0.54 });
+    const matteMat = new THREE.MeshStandardMaterial({ color: isUrban ? '#11141a' : (outCfg.secondary || '#11141a'), metalness: 0.25, roughness: 0.64 });
+    const steelTrim = new THREE.MeshStandardMaterial({ color: isGold ? '#facc15' : '#64748b', metalness: 0.85, roughness: 0.24 });
     const badgeMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.35, metalness: 0.08 });
-    const chemMat = new THREE.MeshStandardMaterial({ color: '#a5f3fc', emissive: '#67e8f9', emissiveIntensity: 0.95, roughness: 0.22 });
+    const chemCol = isUrban ? '#67e8f9' : vestAccent;
+    const chemMat = new THREE.MeshStandardMaterial({ color: chemCol, emissive: chemCol, emissiveIntensity: 1.15, roughness: 0.22 });
 
-    // Slim contoured charcoal Plate Carrier + triple rifle mag pouches (cleared cleanly outside sculpted bust)
-    const vest = makePlateCarrierVest('#1e222b', '#e2e8f0', -0.149, 0.082, 0.176, true);
+    // Slim contoured Plate Carrier + triple rifle mag pouches (cleared cleanly outside sculpted bust)
+    const vest = makePlateCarrierVest(vestMain, vestAccent, -0.149, 0.082, 0.176, true);
 
     // Side comms radio pouch + whip antenna on left flank
     const radioPouch = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.072, 0.044), matteMat);
@@ -3560,10 +3565,13 @@ function buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowC
 
   // 3. KAGURA (Female Tactical Black Armored Spec-Ops Operator on ViviFemale.glb — slim tailored silhouette)
   if (opId === 'kagura') {
-    const suitArmor = (outCfg?.id === 'urban' || outCfg?.id === 'stealth_ops') ? '#151922' : darkArmor;
+    const isGold = outCfg?.id === 'royal_gold';
+    const suitArmor = (outCfg?.id === 'urban' || outCfg?.id === 'stealth_ops')
+      ? '#151922'
+      : (isGold ? '#ca8a04' : (outCfg?.id === 'crimson' ? '#991b1b' : (outCfg?.id === 'cyber' ? '#4c1d95' : (outCfg?.id === 'arctic' ? '#cbd5e1' : (outCfg?.primary || darkArmor)))));
     const armorGlow = outCfg?.id === 'urban' ? '#06b6d4' : accentHex;
-    const plateMat = new THREE.MeshStandardMaterial({ color: suitArmor, metalness: 0.56, roughness: 0.30 });
-    const glowMat = new THREE.MeshStandardMaterial({ color: armorGlow, emissive: armorGlow, emissiveIntensity: 1.4, roughness: 0.2 });
+    const plateMat = new THREE.MeshStandardMaterial({ color: suitArmor, metalness: isGold ? 0.82 : 0.56, roughness: isGold ? 0.20 : 0.30 });
+    const glowMat = new THREE.MeshStandardMaterial({ color: armorGlow, emissive: armorGlow, emissiveIntensity: 1.5, roughness: 0.2 });
 
     // Slim contoured Black Tactical Plate Carrier Vest (cleared cleanly outside sculpted bust)
     const vest = makePlateCarrierVest(suitArmor, armorGlow, -0.151, 0.084, 0.178, true);

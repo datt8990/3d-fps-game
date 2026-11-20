@@ -348,12 +348,12 @@ function blendWithWhite(hex, tintStrength = 0.35) {
 
 const recolorTexCache = new Map();
 
-function recolorGlbTexture(srcTex, primaryHex, secondaryHex, minLum = 0.24) {
+function recolorGlbTexture(srcTex, primaryHex, secondaryHex, minLum = 0.24, accentHex = '', outfitId = 'urban') {
   if (!srcTex || typeof document === 'undefined') return null;
   const img = srcTex.image;
   if (!img || !img.width || !img.height) return null;
 
-  const cacheKey = `${srcTex.uuid}_${primaryHex}_${secondaryHex}_${minLum.toFixed(2)}`;
+  const cacheKey = `${srcTex.uuid}_${primaryHex}_${secondaryHex}_${accentHex}_${outfitId}_${minLum.toFixed(2)}`;
   if (recolorTexCache.has(cacheKey)) return recolorTexCache.get(cacheKey);
 
   try {
@@ -378,8 +378,8 @@ function recolorGlbTexture(srcTex, primaryHex, secondaryHex, minLum = 0.24) {
       const a = data[i + 3];
       if (a < 8) continue;
       const lum = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
-      const shade = minLum + (1 - minLum) * Math.pow(lum, 0.72);
-      const t = Math.min(1, Math.max(0, (lum - 0.14) / 0.58));
+      const shade = minLum + (1 - minLum) * Math.pow(lum, 0.68);
+      const t = Math.min(1, Math.max(0, (lum - 0.10) / 0.52));
       const rMix = sR + (pR - sR) * t;
       const gMix = sG + (pG - sG) * t;
       const bMix = sB + (pB - sB) * t;
@@ -388,6 +388,116 @@ function recolorGlbTexture(srcTex, primaryHex, secondaryHex, minLum = 0.24) {
       data[i + 2] = Math.min(255, Math.round(bMix * shade));
     }
     ctx.putImageData(imgData, 0, 0);
+
+    // Paint distinct high-contrast tactical / luxury outfit patterns directly onto garment UVs
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-atop';
+    if (outfitId === 'jungle' || outfitId === 'desert' || outfitId === 'arctic') {
+      ctx.fillStyle = secondaryHex;
+      ctx.globalAlpha = outfitId === 'arctic' ? 0.34 : 0.44;
+      for (let k = 0; k < 26; k++) {
+        const cx = ((k * 97 + 29) % w);
+        const cy = ((k * 139 + 41) % h);
+        const rw = (w * 0.08) + ((k * 23) % Math.round(w * 0.10));
+        const rh = (h * 0.04) + ((k * 17) % Math.round(h * 0.07));
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rw, rh, (k % 6) * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (accentHex) {
+        ctx.fillStyle = accentHex;
+        ctx.globalAlpha = outfitId === 'arctic' ? 0.25 : 0.16;
+        for (let k = 0; k < 12; k++) {
+          ctx.fillRect(((k * 127 + 19) % w), ((k * 83 + 11) % h), w * 0.07, h * 0.03);
+        }
+      }
+    } else if (outfitId === 'crimson') {
+      // Aggressive Crimson Elite diagonal dark-carbon armor chevrons & glowing red tactical piping
+      ctx.strokeStyle = '#09090b';
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = Math.max(4, w * 0.028);
+      for (let d = -h; d < w + h; d += Math.round(w * 0.16)) {
+        ctx.beginPath();
+        ctx.moveTo(d, 0);
+        ctx.lineTo(d + h * 0.55, h);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = accentHex || '#ff4d4f';
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = Math.max(2, w * 0.010);
+      for (let d = -h; d < w + h; d += Math.round(w * 0.16)) {
+        ctx.beginPath();
+        ctx.moveTo(d + 8, 0);
+        ctx.lineTo(d + h * 0.55 + 8, h);
+        ctx.stroke();
+      }
+    } else if (outfitId === 'stealth_ops') {
+      // Stealth Night-Ops carbon diamond weave + sharp glowing emerald tactical seam lines
+      ctx.strokeStyle = 'rgba(255,255,255,0.09)';
+      ctx.lineWidth = 1.5;
+      const step = Math.max(14, Math.round(w * 0.045));
+      for (let i = -h; i < w + h; i += step) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + h, h); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(i, h); ctx.lineTo(i + h, 0); ctx.stroke();
+      }
+      ctx.strokeStyle = accentHex || '#10b981';
+      ctx.globalAlpha = 0.90;
+      ctx.lineWidth = Math.max(3, w * 0.012);
+      for (let y = Math.round(h * 0.16); y < h; y += Math.round(h * 0.24)) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+    } else if (outfitId === 'cyber') {
+      // Electric Cyberpunk Neon cyan & hot-magenta glowing circuit traces!
+      const step = Math.max(24, Math.round(w * 0.09));
+      ctx.strokeStyle = '#22d3ee';
+      ctx.globalAlpha = 0.92;
+      ctx.lineWidth = Math.max(3, w * 0.011);
+      for (let y = step; y < h; y += step * 2) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w * 0.34, y);
+        ctx.lineTo(w * 0.44, y + step * 0.5);
+        ctx.lineTo(w, y + step * 0.5);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = '#f472b6';
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = Math.max(2.5, w * 0.009);
+      for (let y = Math.round(step * 1.5); y < h; y += step * 2) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w * 0.58, y);
+        ctx.lineTo(w * 0.68, y - step * 0.45);
+        ctx.lineTo(w, y - step * 0.45);
+        ctx.stroke();
+      }
+    } else if (outfitId === 'royal_gold') {
+      // Imperial Royal Gold: rich gilded filigree borders & obsidian-gold luxury chevron panels
+      ctx.strokeStyle = '#1c1917';
+      ctx.globalAlpha = 0.52;
+      ctx.lineWidth = Math.max(5, w * 0.032);
+      for (let y = Math.round(h * 0.14); y < h; y += Math.round(h * 0.22)) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w * 0.5, y + h * 0.08);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = '#fef08a';
+      ctx.globalAlpha = 0.95;
+      ctx.lineWidth = Math.max(2.5, w * 0.012);
+      for (let y = Math.round(h * 0.14); y < h; y += Math.round(h * 0.22)) {
+        ctx.beginPath();
+        ctx.moveTo(0, y - 5);
+        ctx.lineTo(w * 0.5, y + h * 0.08 - 5);
+        ctx.lineTo(w, y - 5);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
 
     const outTex = new THREE.CanvasTexture(canvas);
     outTex.colorSpace = THREE.SRGBColorSpace;
@@ -398,7 +508,7 @@ function recolorGlbTexture(srcTex, primaryHex, secondaryHex, minLum = 0.24) {
     outTex.offset.copy(srcTex.offset);
     outTex.needsUpdate = true;
 
-    if (recolorTexCache.size > 48) {
+    if (recolorTexCache.size > 96) {
       const firstKey = recolorTexCache.keys().next().value;
       recolorTexCache.delete(firstKey);
     }
@@ -427,11 +537,26 @@ function upgradeToStandardMaterial(srcMat) {
   });
 }
 
-function applyRecoloredClothingMat(mat, primaryHex, secondaryHex, minLum = 0.25, fallbackTintStrength = 0.65) {
-  const recolored = mat.map ? recolorGlbTexture(mat.map, primaryHex, secondaryHex, minLum) : null;
+function applyRecoloredClothingMat(mat, primaryHex, secondaryHex, minLum = 0.25, fallbackTintStrength = 0.65, accentHex = '', outfitId = 'urban') {
+  const recolored = mat.map ? recolorGlbTexture(mat.map, primaryHex, secondaryHex, minLum, accentHex, outfitId) : null;
   if (recolored) {
     mat.map = recolored;
     mat.color.set('#ffffff');
+    if (outfitId === 'cyber') {
+      mat.emissive.set('#ffffff');
+      mat.emissiveMap = recolored;
+      mat.emissiveIntensity = 0.34;
+    } else if (outfitId === 'royal_gold') {
+      mat.emissive.set('#ca8a04');
+      mat.emissiveIntensity = 0.14;
+    } else if (outfitId === 'crimson') {
+      mat.emissive.set('#7f1d1d');
+      mat.emissiveIntensity = 0.12;
+    } else if (outfitId === 'stealth_ops') {
+      mat.emissive.set('#ffffff');
+      mat.emissiveMap = recolored;
+      mat.emissiveIntensity = 0.16;
+    }
   } else {
     mat.color.copy(blendWithWhite(primaryHex, fallbackTintStrength));
   }
@@ -899,6 +1024,7 @@ const styledMatCache = new Map();
 
 export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlowColor) {
   const isSwimwear = Boolean(outCfg?.isSwimwear);
+  const outfitId = outCfg?.id || 'urban';
   const isVroidFemale = ['vita', 'vivi', 'shino', 'shibu', 'sample_a'].includes(key);
   const isPhoenix = opCfg?.id === 'phoenix';
   const primaryHex = outCfg?.primary || (opCfg?.id === 'aria' ? '#22d3ee' : '#38bdf8');
@@ -906,11 +1032,15 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
   const vestHex = outCfg?.vest || secHex;
   const accentHex = outCfg?.accent || teamGlowColor;
   const glowCol = new THREE.Color(
-    opCfg?.id === 'titan' ? '#f59e0b'
-      : (opCfg?.id === 'shadow' ? '#10b981'
-        : (opCfg?.id === 'aria' ? '#22d3ee'
-          : (opCfg?.id === 'kagura' ? '#06b6d4' : teamGlowColor)))
+    outfitId !== 'urban' && outCfg?.accent
+      ? outCfg.accent
+      : (opCfg?.id === 'titan' ? '#f59e0b'
+        : (opCfg?.id === 'shadow' ? '#10b981'
+          : (opCfg?.id === 'aria' ? '#22d3ee'
+            : (opCfg?.id === 'kagura' ? '#06b6d4' : teamGlowColor))))
   );
+  const isRoyalGold = outfitId === 'royal_gold';
+  const isCyber = outfitId === 'cyber';
 
   const shadowMeshes = [];
   modelRoot.traverse((child) => {
@@ -931,68 +1061,77 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
     }
 
     const applyMat = (srcMat) => {
-      const cacheKey = `${key}_${opCfg?.id || 'op'}_${outCfg?.id || 'out'}_${teamGlowColor}_${srcMat.name || srcMat.uuid}`;
+      const cacheKey = `${key}_${opCfg?.id || 'op'}_${outfitId}_${teamGlowColor}_${srcMat.name || srcMat.uuid}`;
       if (styledMatCache.has(cacheKey)) {
         return styledMatCache.get(cacheKey);
       }
       const mat = upgradeToStandardMaterial(srcMat);
-      mat.envMapIntensity = 1.25;
+      mat.envMapIntensity = isRoyalGold ? 1.75 : 1.28;
       const mName = (mat.name || '').toLowerCase();
 
       if (key === 'soldier') {
         if (mName.includes('visor')) {
           mat.color.set('#e2e8f0');
           mat.emissive.copy(glowCol);
-          mat.emissiveIntensity = 0.95;
-          mat.metalness = 0.85;
+          mat.emissiveIntensity = 1.05;
+          mat.metalness = 0.88;
           mat.roughness = 0.10;
         } else {
-          const pCol = outCfg?.id === 'urban' ? '#475569' : primaryHex;
-          const sCol = outCfg?.id === 'urban' ? '#1e293b' : secHex;
-          applyRecoloredClothingMat(mat, pCol, sCol, 0.24, 0.55);
-          mat.metalness = 0.24;
-          mat.roughness = 0.46;
+          const pCol = outfitId === 'urban' ? '#475569' : primaryHex;
+          const sCol = outfitId === 'urban' ? '#1e293b' : secHex;
+          applyRecoloredClothingMat(mat, pCol, sCol, 0.28, 0.72, accentHex, outfitId);
+          mat.metalness = isRoyalGold ? 0.74 : (isCyber ? 0.45 : 0.24);
+          mat.roughness = isRoyalGold ? 0.22 : (isCyber ? 0.30 : 0.44);
         }
       } else if (key === 'xbot') {
-        const armorBase = opCfg?.id === 'titan' && outCfg?.id === 'urban' ? '#94a3b8' : primaryHex;
+        const armorBase = opCfg?.id === 'titan' && outfitId === 'urban' ? '#94a3b8' : primaryHex;
         if (mName.includes('joint')) {
-          mat.color.set('#1e293b');
+          mat.color.set(secHex);
           mat.emissive.copy(glowCol);
-          mat.emissiveIntensity = 0.85;
-          mat.metalness = 0.72;
-          mat.roughness = 0.24;
+          mat.emissiveIntensity = isCyber ? 1.35 : 0.95;
+          mat.metalness = 0.76;
+          mat.roughness = 0.20;
         } else {
-          mat.color.copy(blendWithWhite(armorBase, 0.85));
-          mat.metalness = 0.58;
-          mat.roughness = 0.24;
+          mat.color.copy(blendWithWhite(armorBase, 0.92));
+          if (isRoyalGold) {
+            mat.emissive.set('#ca8a04');
+            mat.emissiveIntensity = 0.16;
+          } else if (isCyber) {
+            mat.emissive.set('#4c1d95');
+            mat.emissiveIntensity = 0.25;
+          }
+          mat.metalness = isRoyalGold ? 0.88 : 0.62;
+          mat.roughness = isRoyalGold ? 0.18 : 0.24;
         }
       } else if (key === 'orion') {
         if (mName.includes('wireframe')) {
           mat.color.set(accentHex);
           mat.emissive.copy(glowCol);
-          mat.emissiveIntensity = 1.15;
-          mat.metalness = 0.75;
-          mat.roughness = 0.22;
+          mat.emissiveIntensity = 1.35;
+          mat.metalness = 0.78;
+          mat.roughness = 0.20;
         } else {
-          const stealthCol = (outCfg?.id === 'urban' || outCfg?.id === 'stealth_ops') ? '#1e2636' : primaryHex;
-          const stealthSec = (outCfg?.id === 'urban' || outCfg?.id === 'stealth_ops') ? '#0b0f19' : secHex;
-          applyRecoloredClothingMat(mat, stealthCol, stealthSec, 0.20, 0.75);
-          mat.metalness = 0.42;
-          mat.roughness = 0.34;
+          const stealthCol = outfitId === 'urban' ? '#1e2636' : primaryHex;
+          const stealthSec = outfitId === 'urban' ? '#0b0f19' : secHex;
+          applyRecoloredClothingMat(mat, stealthCol, stealthSec, 0.26, 0.78, accentHex, outfitId);
+          mat.metalness = isRoyalGold ? 0.78 : (isCyber ? 0.48 : 0.42);
+          mat.roughness = isRoyalGold ? 0.20 : 0.32;
         }
       } else if (key === 'rpm' || key === 'male_specops') {
         if (mName.includes('outfit_top')) {
-          applyRecoloredClothingMat(mat, primaryHex, secHex, 0.26, 0.72);
-          mat.roughness = 0.48;
+          applyRecoloredClothingMat(mat, primaryHex, secHex, 0.30, 0.78, accentHex, outfitId);
+          mat.metalness = isRoyalGold ? 0.72 : (isCyber ? 0.42 : 0.14);
+          mat.roughness = isRoyalGold ? 0.24 : 0.44;
         } else if (mName.includes('outfit_bottom')) {
-          applyRecoloredClothingMat(mat, secHex, vestHex, 0.22, 0.65);
-          mat.roughness = 0.54;
+          applyRecoloredClothingMat(mat, secHex, vestHex, 0.26, 0.70, accentHex, outfitId);
+          mat.metalness = isRoyalGold ? 0.45 : 0.10;
+          mat.roughness = 0.50;
         } else if (mName.includes('footwear')) {
-          applyRecoloredClothingMat(mat, vestHex, '#111827', 0.20, 0.55);
-          mat.roughness = 0.38;
+          applyRecoloredClothingMat(mat, vestHex, '#111827', 0.24, 0.60, accentHex, outfitId);
+          mat.roughness = 0.36;
         } else if (mName.includes('headwear')) {
-          applyRecoloredClothingMat(mat, secHex, primaryHex, 0.24, 0.60);
-          mat.roughness = 0.62;
+          applyRecoloredClothingMat(mat, primaryHex, secHex, 0.28, 0.68, accentHex, outfitId);
+          mat.roughness = 0.52;
         } else {
           mat.color.set('#ffffff');
           mat.roughness = 0.48;
@@ -1017,30 +1156,46 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
           mat.metalness = 0.02;
           mat.envMapIntensity = 0.88;
         } else if (mName.includes('body_00_skin') && isPhoenix && !isSwimwear) {
-          const phxSuit = outCfg?.id === 'urban' ? '#232730' : primaryHex;
-          const phxTrim = outCfg?.id === 'urban' ? '#12151c' : secHex;
+          const phxSuit = outfitId === 'urban' ? '#232730' : primaryHex;
+          const phxTrim = outfitId === 'urban' ? '#12151c' : accentHex;
           const phxTex = createPhoenixTacticalBodyTexture(mat.map, phxSuit, phxTrim);
           if (phxTex) {
             mat.map = phxTex;
             mat.emissive.set('#ffffff');
             mat.emissiveMap = phxTex;
-            mat.emissiveIntensity = 0.14;
+            mat.emissiveIntensity = isCyber ? 0.26 : 0.16;
           }
           mat.alphaTest = 0;
           mat.transparent = false;
-          mat.roughness = 0.48;
-        } else if (mName.includes('tops_') || mName.includes('bottoms_') || mName.includes('accessory')) {
-          const useBlackSpecOps = (key === 'vita' || key === 'vivi' || isPhoenix) && outCfg?.id === 'urban';
+          mat.metalness = isRoyalGold ? 0.55 : 0.12;
+          mat.roughness = isRoyalGold ? 0.26 : 0.46;
+        } else if (mName.includes('tops_')) {
+          const useBlackSpecOps = (key === 'vita' || key === 'vivi' || isPhoenix) && outfitId === 'urban';
           const suitPrim = useBlackSpecOps ? '#232730' : primaryHex;
           const suitSec = useBlackSpecOps ? '#11151d' : secHex;
-          applyRecoloredClothingMat(mat, suitPrim, suitSec, 0.34, 0.78);
-          mat.roughness = (key === 'vita' || key === 'vivi') ? 0.38 : 0.48;
-          mat.metalness = (key === 'vita' || key === 'vivi') ? 0.18 : 0.06;
+          applyRecoloredClothingMat(mat, suitPrim, suitSec, 0.36, 0.82, accentHex, outfitId);
+          mat.roughness = isRoyalGold ? 0.22 : (isCyber ? 0.28 : ((key === 'vita' || key === 'vivi') ? 0.38 : 0.46));
+          mat.metalness = isRoyalGold ? 0.72 : (isCyber ? 0.42 : ((key === 'vita' || key === 'vivi') ? 0.20 : 0.08));
+        } else if (mName.includes('bottoms_')) {
+          const useBlackSpecOps = (key === 'vita' || key === 'vivi' || isPhoenix) && outfitId === 'urban';
+          const botPrim = useBlackSpecOps ? '#181c24' : (outfitId === 'crimson' || outfitId === 'royal_gold' ? vestHex : primaryHex);
+          const botSec = useBlackSpecOps ? '#0e1117' : secHex;
+          applyRecoloredClothingMat(mat, botPrim, botSec, 0.32, 0.78, accentHex, outfitId);
+          mat.roughness = isRoyalGold ? 0.26 : 0.46;
+          mat.metalness = isRoyalGold ? 0.52 : (isCyber ? 0.34 : 0.10);
+        } else if (mName.includes('accessory')) {
+          applyRecoloredClothingMat(mat, accentHex, primaryHex, 0.38, 0.85, accentHex, outfitId);
+          mat.roughness = isRoyalGold ? 0.20 : 0.34;
+          mat.metalness = isRoyalGold ? 0.80 : 0.30;
+          if (isCyber || outfitId === 'stealth_ops' || outfitId === 'crimson') {
+            mat.emissive.set(accentHex);
+            mat.emissiveIntensity = 0.45;
+          }
         } else if (mName.includes('shoes_')) {
-          const bootCol = ((key === 'vita' || key === 'vivi' || isPhoenix) && outCfg?.id === 'urban') ? '#14171e' : vestHex;
-          applyRecoloredClothingMat(mat, bootCol, secHex, 0.30, 0.70);
-          mat.roughness = 0.36;
-          mat.metalness = 0.24;
+          const bootCol = ((key === 'vita' || key === 'vivi' || isPhoenix) && outfitId === 'urban') ? '#14171e' : vestHex;
+          applyRecoloredClothingMat(mat, bootCol, accentHex, 0.30, 0.72, accentHex, outfitId);
+          mat.roughness = isRoyalGold ? 0.24 : 0.36;
+          mat.metalness = isRoyalGold ? 0.65 : 0.24;
         } else if (mName.includes('hair')) {
           if (isPhoenix) {
             // Pure platinum silver-white hair like reference Spec-Ops photo

@@ -357,9 +357,9 @@ export const OUTFITS = {
   jungle: {
     id: 'jungle',
     name: 'Biệt Kích Rừng Xanh',
-    primary: '#2d4a34',
-    secondary: '#1b2e20',
-    vest: '#243829',
+    primary: '#3f6e49',
+    secondary: '#1d3623',
+    vest: '#29472f',
     accent: '#4ade80',
     skinTone: '#d4a07a',
     cost: 400
@@ -367,29 +367,29 @@ export const OUTFITS = {
   arctic: {
     id: 'arctic',
     name: 'Bắc Cực Tuyết Trắng',
-    primary: '#cbd5e1',
-    secondary: '#64748b',
-    vest: '#475569',
-    accent: '#06b6d4',
+    primary: '#e8f0f8',
+    secondary: '#94a3b8',
+    vest: '#64748b',
+    accent: '#38bdf8',
     skinTone: '#e2b496',
     cost: 500
   },
   crimson: {
     id: 'crimson',
     name: 'Huyết Chiến Tinh Nhuệ',
-    primary: '#1f1f24',
+    primary: '#c81e1e',
     secondary: '#450a0a',
-    vest: '#7f1d1d',
-    accent: '#ef4444',
+    vest: '#1c1917',
+    accent: '#ff4d4f',
     skinTone: '#cfa07e',
     cost: 900
   },
   stealth_ops: {
     id: 'stealth_ops',
     name: 'Đặc Vụ Bóng Đêm',
-    primary: '#111318',
-    secondary: '#1e293b',
-    vest: '#090b10',
+    primary: '#1a222d',
+    secondary: '#090d14',
+    vest: '#0f172a',
     accent: '#10b981',
     skinTone: '#d4a07a',
     cost: 1100
@@ -397,20 +397,20 @@ export const OUTFITS = {
   cyber: {
     id: 'cyber',
     name: 'Chiến Binh Neon',
-    primary: '#181826',
-    secondary: '#2e1065',
+    primary: '#5b21b6',
+    secondary: '#0e7490',
     vest: '#1e1b4b',
-    accent: '#a855f7',
+    accent: '#22d3ee',
     skinTone: '#d9a786',
     cost: 1400
   },
   royal_gold: {
     id: 'royal_gold',
     name: 'Hoàng Gia Hắc Kim',
-    primary: '#1c1917',
-    secondary: '#422006',
-    vest: '#292524',
-    accent: '#facc15',
+    primary: '#eab308',
+    secondary: '#292524',
+    vest: '#78350f',
+    accent: '#fef08a',
     skinTone: '#d9a786',
     cost: 1800
   }
