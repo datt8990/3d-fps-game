@@ -176,6 +176,7 @@ export class TeamVoiceChat {
       this.ensureMic().then(() => this.applyMicGate(true));
     }
 
+    // Delay voice maintenance slightly so match startup & gameplay WebRTC never compete for CPU/ICE
     this.startMaintenanceLoop();
     this.startMeters();
   }
@@ -194,6 +195,7 @@ export class TeamVoiceChat {
     this.meterTimer = null;
 
     this.pttHeld = false;
+    this.setRelayCaptureActive(false);
     this.relayAccumulator = [];
     this.teammates.clear();
 
@@ -260,17 +262,38 @@ export class TeamVoiceChat {
 
     this.micGain.connect(this.destNode);
     this.micGain.connect(this.localAnalyser);
+    // Note: Do NOT attach deprecated ScriptProcessorNode while idle — it fires 24x/sec on the main JS render thread!
+    // Relay audio capture is attached strictly on-demand in setRelayCaptureActive(true) only while actively speaking.
+  }
 
-    // Lightweight relay audio capture node (only transmits when a teammate is in relay fallback mode)
-    if (typeof this.audioCtx.createScriptProcessor === 'function') {
-      this.relayProcessor = this.audioCtx.createScriptProcessor(2048, 1, 1);
-      this.silentSink = this.audioCtx.createGain();
-      this.silentSink.gain.value = 0;
-      this.micGain.connect(this.relayProcessor);
-      this.relayProcessor.connect(this.silentSink);
-      this.silentSink.connect(this.audioCtx.destination);
-      this.relayProcessor.onaudioprocess = (ev) => this.handleRelayCapture(ev.inputBuffer.getChannelData(0));
+  setRelayCaptureActive(on) {
+    if (!on) {
+      if (this.relayProcessor) {
+        try { this.micGain?.disconnect(this.relayProcessor); } catch {}
+        try { this.relayProcessor.disconnect(); } catch {}
+        this.relayProcessor.onaudioprocess = null;
+        this.relayProcessor = null;
+      }
+      if (this.silentSink) {
+        try { this.silentSink.disconnect(); } catch {}
+        this.silentSink = null;
+      }
+      this.relayAccumulator.length = 0;
+      return;
     }
+    if (this.relayProcessor || !this.audioCtx || !this.micGain || !this.micStream) return;
+    let needsRelay = false;
+    for (const p of this.peers.values()) {
+      if (p.mode !== 'rtc') { needsRelay = true; break; }
+    }
+    if (!needsRelay || typeof this.audioCtx.createScriptProcessor !== 'function') return;
+    this.relayProcessor = this.audioCtx.createScriptProcessor(2048, 1, 1);
+    this.silentSink = this.audioCtx.createGain();
+    this.silentSink.gain.value = 0;
+    this.micGain.connect(this.relayProcessor);
+    this.relayProcessor.connect(this.silentSink);
+    this.silentSink.connect(this.audioCtx.destination);
+    this.relayProcessor.onaudioprocess = (ev) => this.handleRelayCapture(ev.inputBuffer.getChannelData(0));
   }
 
   unlockAudioPlayback() {
@@ -322,6 +345,7 @@ export class TeamVoiceChat {
     if (!this.micGain || !this.audioCtx) return;
     const target = on && this.mode !== 'off' && this.micStream ? 1 : 0;
     this.micGain.gain.setTargetAtTime(target, this.audioCtx.currentTime, 0.015);
+    this.setRelayCaptureActive(target > 0);
     this.selfEl?.classList.toggle('talking', target > 0);
   }
 
@@ -420,18 +444,21 @@ export class TeamVoiceChat {
         const isOfferer = this.myClientId < mate.id;
         if (isOfferer && p.remoteReady) {
           const iceBad = p.pc && ['failed', 'closed', 'disconnected'].includes(p.pc.iceConnectionState);
-          const stalled = p.mode !== 'rtc' && now - p.lastOfferAt > WEBRTC_RETRY_INTERVAL_MS;
-          if ((!p.pc || iceBad || stalled) && now - p.lastOfferAt > 5000) {
+          const attempts = p.rtcAttempts || 0;
+          // Cap WebRTC voice retry attempts to 2 so strict NAT never triggers endless 14s ICE/STUN storms
+          if ((!p.pc || iceBad) && attempts < 2 && now - p.lastOfferAt > 8000) {
+            p.rtcAttempts = attempts + 1;
             this.startWebRtcOffer(p);
           }
-        } else if (!isOfferer && p.remoteReady && !p.pc && p.mode !== 'rtc' && now - p.sentReadyAt > 6000) {
+        } else if (!isOfferer && p.remoteReady && !p.pc && p.mode !== 'rtc' && (p.nudgeCount || 0) < 2 && now - p.sentReadyAt > 8000) {
           p.sentReadyAt = now;
+          p.nudgeCount = (p.nudgeCount || 0) + 1;
           this.sendSignal(mate.id, 'nudge');
         }
       }
 
       if (changed) this.renderPanel();
-    }, 1500);
+    }, 3000);
   }
 
   createPeerConnection(peerEntry, sessionId) {
@@ -764,28 +791,33 @@ export class TeamVoiceChat {
   // ---------------------------------------------------------------------------
   readLevel(analyser) {
     if (!analyser) return 0;
-    const buf = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(buf);
+    const len = analyser.frequencyBinCount;
+    if (!this._meterBuf || this._meterBuf.length !== len) {
+      this._meterBuf = new Uint8Array(len);
+    }
+    analyser.getByteFrequencyData(this._meterBuf);
     let sum = 0;
-    for (let i = 0; i < buf.length; i++) sum += buf[i];
-    return sum / buf.length;
+    for (let i = 0; i < len; i++) sum += this._meterBuf[i];
+    return sum / len;
   }
 
   startMeters() {
     clearInterval(this.meterTimer);
     this.meterTimer = setInterval(() => {
-      if (!this.listEl) return;
+      if (!this.listEl || this.mode === 'off') return;
+      if (this.peers.size === 0 && !this.micStream) return;
       for (const [pid, p] of this.peers.entries()) {
         const analyser = p.mode === 'rtc' ? p.analyser : p.relayAnalyser;
+        if (!analyser) continue;
         const speaking = this.readLevel(analyser) > 10;
         const row = this.listEl.querySelector(`[data-peer="${CSS.escape(pid)}"]`);
         row?.classList.toggle('talking', speaking);
       }
-      if (this.selfEl && this.micGain) {
+      if (this.selfEl && this.micGain && this.micStream) {
         const live = this.micGain.gain.value > 0.5 && this.readLevel(this.localAnalyser) > 10;
         this.selfEl.classList.toggle('talking', live);
       }
-    }, 120);
+    }, 260);
   }
 
   renderPanel(notice = '') {

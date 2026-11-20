@@ -18,7 +18,7 @@ import {
   createGrenadeMesh
 } from './models.js';
 import { soundEngine } from './audio.js';
-import { getStudioEnvMap } from './textures.js';
+import { getStudioEnvMap, configureGraphicsProfile } from './textures.js';
 import {
   triggerMuzzleFlash,
   updateMuzzleFlash,
@@ -47,7 +47,7 @@ export class FPSGameClient {
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: this.quality === 'high',
+      antialias: true,
       powerPreference: 'high-performance',
       stencil: false
     });
@@ -62,6 +62,7 @@ export class FPSGameClient {
     this.renderer.shadowMap.needsUpdate = true;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.24;
+    configureGraphicsProfile(this.renderer.capabilities.getMaxAnisotropy(), this.quality);
 
     this.scene = new THREE.Scene();
     this.scene.environment = getStudioEnvMap();
@@ -145,6 +146,9 @@ export class FPSGameClient {
     this.mapPingMarker = null;
     this.radioOpen = false;
     this.currentAimTarget = null;
+    this._adsSnapYawLeft = 0;
+    this._adsSnapPitchLeft = 0;
+    this._adsSnapTimeLeft = 0;
 
     this.fpRig = null;
     this.fpSignature = '';
@@ -188,8 +192,9 @@ export class FPSGameClient {
 
   _applyPixelRatio() {
     const dpr = window.devicePixelRatio || 1;
-    const baseCap = this.quality === 'low' ? 0.85 : (this.quality === 'medium' ? 1.0 : Math.min(dpr, 1.25));
-    const effective = Math.max(0.65, baseCap * (this._dynamicResScale || 1.0));
+    // Always keep crisp native resolution (never blurry!) while capping wasteful 2x-3x HiDPI oversampling
+    const baseCap = this.quality === 'low' ? 1.0 : (this.quality === 'medium' ? Math.min(dpr, 1.15) : Math.min(dpr, 1.35));
+    const effective = Math.max(0.90, baseCap * (this._dynamicResScale || 1.0));
     this.renderer.setPixelRatio(effective);
   }
 
@@ -205,6 +210,7 @@ export class FPSGameClient {
       this._botShadowBudgetDisabled = quality === 'low';
       this.renderer.shadowMap.enabled = quality !== 'low';
       this.renderer.shadowMap.needsUpdate = true;
+      configureGraphicsProfile(this.renderer.capabilities.getMaxAnisotropy(), quality);
       this._applyPixelRatio();
     }
     if (volume !== undefined) {
@@ -310,11 +316,17 @@ export class FPSGameClient {
         0.15,
         Math.min(1.0, Math.tan((this.camera.fov * Math.PI) / 360) / Math.tan((this.baseFov * Math.PI) / 360))
       );
-      if (this.adsActive && this.currentAimTarget && this.currentAimTarget.angleDev < 0.30) {
-        zoomScale *= 0.48; // Aim-assist target friction keeps crosshair securely stuck on target
+      if (this.adsActive && this.currentAimTarget && this.currentAimTarget.angleDev < 0.15) {
+        zoomScale *= 0.76; // Gentle crosshair steadying when sight is on enemy
       }
       const dx = e.movementX || 0;
       const dy = e.movementY || 0;
+      // Deliberate player mouse flick always overrides any remaining one-shot ADS nudge
+      if (this._adsSnapTimeLeft > 0 && Math.abs(dx) + Math.abs(dy) > 22) {
+        this._adsSnapTimeLeft = 0;
+        this._adsSnapYawLeft = 0;
+        this._adsSnapPitchLeft = 0;
+      }
       const pitchDelta = dy * this.sensitivity * zoomScale;
 
       this.local.yaw -= dx * this.sensitivity * zoomScale;
@@ -359,6 +371,9 @@ export class FPSGameClient {
         if (this.radioOpen) {
           this.radioOpen = false;
     this.currentAimTarget = null;
+    this._adsSnapYawLeft = 0;
+    this._adsSnapPitchLeft = 0;
+    this._adsSnapTimeLeft = 0;
           this.hud.toggleRadioMenu(false);
           return;
         }
@@ -808,6 +823,9 @@ export class FPSGameClient {
     this.mapPingMarker = null;
     this.radioOpen = false;
     this.currentAimTarget = null;
+    this._adsSnapYawLeft = 0;
+    this._adsSnapPitchLeft = 0;
+    this._adsSnapTimeLeft = 0;
     this.serverClockOffset = 0;
     this.displayedTimeLeftSec = undefined;
     this._lastRenderedTimeLeftSec = -1;
@@ -1012,30 +1030,48 @@ export class FPSGameClient {
 
   triggerAdsSnapAssist() {
     if (!this.active || this.local.dead || this.local.dropPhase !== 'ground') return;
-    // Nhạy bén vượt trội: góc quét rộng 0.68 rad (~39 độ), ghim trực tiếp 94% vào thân trên kẻ địch
-    const best = this.findBestAimAssistTarget(0.68, 120);
+    // Hỗ trợ ngắm 1 lần duy nhất khi vừa bật ADS: góc 0.32 rad (~18.3 độ), kéo 72% trong 70ms rồi trả toàn quyền cho người chơi
+    const best = this.findBestAimAssistTarget(0.32, 105);
     if (best) {
-      const snapWeight = 0.94;
-      this.local.yaw += best.yawDiff * snapWeight;
-      this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch + best.pitchDiff * snapWeight));
+      const snapWeight = 0.72;
+      this._adsSnapYawLeft = best.yawDiff * snapWeight;
+      this._adsSnapPitchLeft = best.pitchDiff * snapWeight;
+      this._adsSnapTimeLeft = 0.070;
       this.currentAimTarget = best;
+    } else {
+      this._adsSnapYawLeft = 0;
+      this._adsSnapPitchLeft = 0;
+      this._adsSnapTimeLeft = 0;
     }
   }
 
   updateAdsAimAssist(dt) {
     if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || !this.adsActive) {
       this.currentAimTarget = null;
+      this._adsSnapTimeLeft = 0;
+      this._adsSnapYawLeft = 0;
+      this._adsSnapPitchLeft = 0;
       return;
     }
-    // Góc tracking rộng 0.52 rad (~30 độ), lực từ tính (magnetism) bám dính cực nhạy theo mục tiêu
-    const best = this.findBestAimAssistTarget(0.52, 120);
-    this.currentAimTarget = best;
-    if (best) {
-      // Rotational magnetism: hỗ trợ bám chặt mục tiêu khi địch di chuyển hoặc khi quét tâm
-      const pullRate = Math.min(1.0, dt * 16.0) * 0.75;
-      this.local.yaw += best.yawDiff * pullRate;
-      this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch + best.pitchDiff * pullRate));
+
+    // Chỉ thực hiện nốt cú hỗ trợ 1 lần lúc mới bật ADS (~70ms đầu), KHÔNG tự động bám đuổi theo địch sau đó!
+    if (this._adsSnapTimeLeft > 0) {
+      const stepFrac = Math.min(1.0, dt / Math.max(0.016, this._adsSnapTimeLeft));
+      const dYaw = this._adsSnapYawLeft * stepFrac;
+      const dPitch = this._adsSnapPitchLeft * stepFrac;
+      this.local.yaw += dYaw;
+      this.local.pitch = Math.max(-1.50, Math.min(1.50, this.local.pitch + dPitch));
+      this._adsSnapYawLeft -= dYaw;
+      this._adsSnapPitchLeft -= dPitch;
+      this._adsSnapTimeLeft = Math.max(0, this._adsSnapTimeLeft - dt);
+      if (this._adsSnapTimeLeft <= 0) {
+        this._adsSnapYawLeft = 0;
+        this._adsSnapPitchLeft = 0;
+      }
     }
+
+    // Kiểm tra vùng hẹp (0.15 rad ~8.5 độ) để đầm tay nhẹ 24% khi tâm đặt trên địch, hoàn toàn không tự kéo tâm
+    this.currentAimTarget = this.findBestAimAssistTarget(0.15, 105);
   }
 
   tryFireWeapon(heavyMelee = false) {
@@ -1144,7 +1180,6 @@ export class FPSGameClient {
         if (this.active && !this.local.dead && this.local.weaponId === st.id && performance.now() >= this.local.reloadingEnd) {
           this.sniperZoomStage = prevStage;
           this.adsActive = true;
-          this.triggerAdsSnapAssist();
         }
       }, 950);
     }
@@ -1807,26 +1842,27 @@ export class FPSGameClient {
       this.fpsClockStart = now;
       this.hud.updateFpsAndPing(this.currentFps, this.net.pingMs, this.fpsCap);
 
-      // Adaptive Dynamic Resolution & Shadow Auto-Scaler so players NEVER drop to 15-20 FPS
-      if (this.currentFps < 38 && (this.fpsCap === 0 || this.fpsCap >= 45)) {
+      // Sharpness-First Auto-Performance: cut expensive shadows FIRST, never blur resolution!
+      if (this.currentFps < 42 && (this.fpsCap === 0 || this.fpsCap >= 50)) {
         this._lowFpsStreak++;
         this._highFpsStreak = 0;
         if (this._lowFpsStreak >= 2) {
           this._lowFpsStreak = 0;
-          this._botShadowBudgetDisabled = true;
-          if (this._dynamicResScale > 0.72) {
-            this._dynamicResScale = Math.max(0.70, Number((this._dynamicResScale - 0.12).toFixed(2)));
-            this._applyPixelRatio();
-          } else if (this.renderer.shadowMap.enabled && this.currentFps < 28) {
+          if (!this._botShadowBudgetDisabled) {
+            this._botShadowBudgetDisabled = true;
+          } else if (this.renderer.shadowMap.enabled) {
             this.renderer.shadowMap.enabled = false;
+          } else if (this._dynamicResScale > 0.90 && this.currentFps < 32) {
+            this._dynamicResScale = 0.90;
+            this._applyPixelRatio();
           }
         }
-      } else if (this.currentFps >= 58) {
+      } else if (this.currentFps >= 60) {
         this._lowFpsStreak = 0;
         this._highFpsStreak++;
         if (this._highFpsStreak >= 6 && this._dynamicResScale < 1.0) {
           this._highFpsStreak = 0;
-          this._dynamicResScale = Math.min(1.0, Number((this._dynamicResScale + 0.08).toFixed(2)));
+          this._dynamicResScale = 1.0;
           this._applyPixelRatio();
         }
       } else {

@@ -6,6 +6,45 @@ const materialCache = new Map();
 const skinTextureCache = new Map();
 let skyTextureCache = new Map();
 
+let _graphicsAnisotropy = 4;
+let _useMapBumpMaps = false;
+
+function tuneMapMaterial(mat) {
+  if (!mat) return mat;
+  if (mat._origBumpMap === undefined) {
+    mat._origBumpMap = mat.bumpMap || null;
+  }
+  if (mat.map) {
+    mat.map.anisotropy = _graphicsAnisotropy;
+    mat.map.needsUpdate = true;
+  }
+  const wantBump = _useMapBumpMaps ? mat._origBumpMap : null;
+  if (mat.bumpMap !== wantBump) {
+    mat.bumpMap = wantBump;
+    mat.needsUpdate = true;
+  }
+  // Cut expensive per-pixel cubemap IBL on static matte arena walls/floors while keeping crisp textures
+  if ('envMapIntensity' in mat) {
+    mat.envMapIntensity = _useMapBumpMaps ? 0.55 : 0.0;
+  }
+  return mat;
+}
+
+export function configureGraphicsProfile(maxGpuAniso = 8, quality = 'medium') {
+  const cap = Math.max(1, Math.min(maxGpuAniso || 4, quality === 'low' ? 4 : 8));
+  _graphicsAnisotropy = cap;
+  _useMapBumpMaps = quality === 'high';
+  for (const mat of materialCache.values()) {
+    tuneMapMaterial(mat);
+  }
+  for (const tex of skinTextureCache.values()) {
+    if (tex) {
+      tex.anisotropy = cap;
+      tex.needsUpdate = true;
+    }
+  }
+}
+
 function createCanvas(w = 512, h = 512) {
   const c = document.createElement('canvas');
   c.width = w;
@@ -623,6 +662,7 @@ export function getMapMaterial(matKey = 'concrete') {
       break;
     }
   }
+  tuneMapMaterial(mat);
   materialCache.set(matKey, mat);
   return mat;
 }
@@ -835,6 +875,7 @@ export function getWeaponSkinTexture(skinId = 'default') {
   addNoise(ctx, 512, 512, 0.045);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = _graphicsAnisotropy;
   skinTextureCache.set(skinId, tex);
   return tex;
 }

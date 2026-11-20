@@ -408,10 +408,8 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
 
   if (isOpenWorld) {
     const t = mapData.terrain;
-    const terrainMat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.92,
-      metalness: 0.04
+    const terrainMat = new THREE.MeshLambertMaterial({
+      vertexColors: true
     });
     const chunkCells = 30; // 30x10m = 300m per frustum-culled terrain sector (ultra smooth in 1.5km map)
     const rgb = [0, 0, 0];
@@ -483,11 +481,11 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       const dummy = new THREE.Object3D();
       const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 3.6, 6);
       trunkGeo.translate(0, 1.8, 0);
-      const trunkMat = new THREE.MeshStandardMaterial({ color: '#5c3c1e', roughness: 0.9 });
+      const trunkMat = new THREE.MeshLambertMaterial({ color: '#5c3c1e' });
 
       const leafGeo = new THREE.ConeGeometry(1.85, 5.2, 7);
       leafGeo.translate(0, 4.6, 0);
-      const leafMat = new THREE.MeshStandardMaterial({ color: '#166534', roughness: 0.85, metalness: 0.04 });
+      const leafMat = new THREE.MeshLambertMaterial({ color: '#166534' });
 
       const treesBySector = new Map();
       for (let i = 0; i < mapData.trees.length; i++) {
@@ -524,7 +522,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       const rockGeo = THREE.DodecahedronGeometry
         ? new THREE.DodecahedronGeometry(1.0, 0)
         : new THREE.BoxGeometry(1.6, 1.2, 1.6);
-      const rockMat = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.94, metalness: 0.06 });
+      const rockMat = new THREE.MeshLambertMaterial({ color: '#64748b' });
 
       const rocksBySector = new Map();
       for (let i = 0; i < mapData.rocks.length; i++) {
@@ -580,17 +578,17 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       const dummy = new THREE.Object3D();
       const trunkGeo = new THREE.CylinderGeometry(0.20, 0.34, 4.2, 8);
       trunkGeo.translate(0, 2.1, 0);
-      const trunkMat = new THREE.MeshStandardMaterial({ color: '#4a3219', roughness: 0.92 });
+      const trunkMat = new THREE.MeshLambertMaterial({ color: '#4a3219' });
       const trunksMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, mapData.trees.length);
 
       const canopyLowGeo = new THREE.ConeGeometry(2.35, 3.6, 9);
       canopyLowGeo.translate(0, 4.4, 0);
-      const canopyLowMat = new THREE.MeshStandardMaterial({ color: '#14532d', roughness: 0.85, metalness: 0.04 });
+      const canopyLowMat = new THREE.MeshLambertMaterial({ color: '#14532d' });
       const canopyLowMesh = new THREE.InstancedMesh(canopyLowGeo, canopyLowMat, mapData.trees.length);
 
       const canopyTopGeo = new THREE.ConeGeometry(1.65, 3.2, 9);
       canopyTopGeo.translate(0, 6.2, 0);
-      const canopyTopMat = new THREE.MeshStandardMaterial({ color: '#166534', roughness: 0.82, metalness: 0.05 });
+      const canopyTopMat = new THREE.MeshLambertMaterial({ color: '#166534' });
       const canopyTopMesh = new THREE.InstancedMesh(canopyTopGeo, canopyTopMat, mapData.trees.length);
 
       mapData.trees.forEach((tr, i) => {

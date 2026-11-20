@@ -507,16 +507,29 @@ export class NetworkClient {
     this.hostRelayInFlight = true;
     const activeRoom = this.hostRoom;
     const outgoing = this.relayOutbox.splice(0, this.relayOutbox.length);
+    const nowMs = Date.now();
+    const includeSummary = !this._lastHostSummaryAt || nowMs - this._lastHostSummaryAt >= 2500;
+    if (includeSummary) this._lastHostSummaryAt = nowMs;
 
     try {
-      const res = await this.apiCall(`/api/relay/${activeRoom.code}/host-sync`, 'POST', {
-        hostId: this.clientId,
-        outgoing,
-        roomSummary: activeRoom.getSummary()
-      });
+      const body = { hostId: this.clientId, outgoing };
+      if (includeSummary) body.roomSummary = activeRoom.getSummary();
+      const res = await this.apiCall(`/api/relay/${activeRoom.code}/host-sync`, 'POST', body);
 
-      if (this.hostRoom === activeRoom && Array.isArray(res?.packets)) {
-        for (const pkt of res.packets) {
+      if (this.hostRoom === activeRoom && Array.isArray(res?.packets) && res.packets.length > 0) {
+        // Coalesce burst `input` packets per remote player: only process the latest input per sender
+        const lastInputIdxByFrom = new Map();
+        for (let i = 0; i < res.packets.length; i++) {
+          const pkt = res.packets[i];
+          if (pkt?.payload?.type === 'input' && pkt.from) {
+            lastInputIdxByFrom.set(pkt.from, i);
+          }
+        }
+        for (let i = 0; i < res.packets.length; i++) {
+          const pkt = res.packets[i];
+          if (pkt?.payload?.type === 'input' && pkt.from && lastInputIdxByFrom.get(pkt.from) !== i) {
+            continue;
+          }
           this.handleRelayHostIncomingPacket(pkt?.from, pkt?.payload);
         }
       }
@@ -529,7 +542,8 @@ export class NetworkClient {
     } finally {
       this.hostRelayInFlight = false;
       if (this.hostRoom === activeRoom) {
-        this.scheduleHostRelay(this.relayOutbox.length ? 12 : null);
+        const hasCritical = this.relayOutbox.some((x) => x?.payload?.type && x.payload.type !== 'world_state');
+        this.scheduleHostRelay(hasCritical ? 14 : null);
       }
     }
   }
@@ -988,7 +1002,8 @@ export class NetworkClient {
       if (this.relayRoomCode !== code) return;
 
       if (!this.p2pDirectReady) {
-        this.pingMs = Math.max(8, Math.round(performance.now() - t0));
+        const sample = Math.max(8, Math.round(performance.now() - t0));
+        this.pingMs = this.pingMs ? Math.round(this.pingMs * 0.65 + sample * 0.35) : sample;
         this.emit('ping_updated', { pingMs: this.pingMs, onlineCount: this.onlineCount });
       }
 
@@ -1024,8 +1039,15 @@ export class NetworkClient {
 
       this.relayConsecutiveErrors = 0;
 
-      if (Array.isArray(res?.packets)) {
-        for (const msg of res.packets) {
+      if (Array.isArray(res?.packets) && res.packets.length > 0) {
+        // Coalesce burst `world_state` snapshots: only apply the latest world_state in the batch
+        let lastWorldIdx = -1;
+        for (let i = 0; i < res.packets.length; i++) {
+          if (res.packets[i]?.type === 'world_state') lastWorldIdx = i;
+        }
+        for (let i = 0; i < res.packets.length; i++) {
+          const msg = res.packets[i];
+          if (msg?.type === 'world_state' && i !== lastWorldIdx) continue;
           await this.handleClientIncomingP2PMessage(msg);
         }
       }
@@ -1038,7 +1060,8 @@ export class NetworkClient {
     } finally {
       this.clientRelayInFlight = false;
       if (this.relayRoomCode === code && !this.p2pDirectReady) {
-        this.scheduleClientRelay(retryDelayMs !== null ? retryDelayMs : (this.clientRelayOutbox.length ? 12 : null));
+        const hasCritical = this.clientRelayOutbox.some((x) => x?.type && x.type !== 'input');
+        this.scheduleClientRelay(retryDelayMs !== null ? retryDelayMs : (hasCritical ? 14 : null));
       }
     }
   }
