@@ -3806,6 +3806,8 @@ function hydrateGlbIntoRig(rig, loaded, archetypeKey, opCfg, outCfg, teamGlowCol
     rig.activeAnim = inst.activeAnim;
     rig.archetypeKey = archetypeKey;
     rig.shadowMeshes = inst.shadowMeshes || [];
+    rig.microDetailMeshes = inst.microDetailMeshes || [];
+    rig._microDetailVisible = true;
     rig.bodyRoot.add(inst.modelRoot);
     buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowColor);
     if (rig.castShadowEnabled !== undefined) {
@@ -3979,7 +3981,16 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
     if (rig.actions?.death) rig.actions.death.stop();
   }
 
-  const lod = state.lodLevel || 0; // 0: close (<35m) full detail | 1: mid (35-85m) fast | 2: far (>85m) ultra-light
+  const lod = state.lodLevel || 0; // 0: close (<22m) full detail | 1: mid (22-60m) fast | 2: far (>60m) ultra-light
+  if (rig.microDetailMeshes && rig.microDetailMeshes.length > 0) {
+    const showMicro = lod === 0 || Boolean(state.victoryPose);
+    if (rig._microDetailVisible !== showMicro) {
+      rig._microDetailVisible = showMicro;
+      for (let i = 0; i < rig.microDetailMeshes.length; i++) {
+        rig.microDetailMeshes[i].visible = showMicro;
+      }
+    }
+  }
   rig.weaponMount.visible = true;
   rig.nameplate.visible = lod < 2 && state.showNameplate !== false;
   rig.c4Pack.visible = Boolean(state.hasBomb);

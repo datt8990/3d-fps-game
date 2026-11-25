@@ -47,7 +47,7 @@ export class FPSGameClient {
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      antialias: this.quality !== 'low',
       powerPreference: 'high-performance',
       stencil: false
     });
@@ -196,9 +196,9 @@ export class FPSGameClient {
 
   _applyPixelRatio() {
     const dpr = window.devicePixelRatio || 1;
-    // Exact 1:1 native pixel sharpness on Low/Medium (eliminates wasted 1.32x HiDPI fillrate), up to 1.25 on High
-    const baseCap = this.quality === 'high' ? Math.min(dpr, 1.25) : 1.0;
-    const effective = Math.max(0.85, baseCap * (this._dynamicResScale || 1.0));
+    // Ultra-fast scaling for Low (weak PCs), crisp 1:1 native on Medium, up to 1.25 on High
+    const baseCap = this.quality === 'low' ? 0.85 : (this.quality === 'high' ? Math.min(dpr, 1.25) : 1.0);
+    const effective = Math.max(0.75, baseCap * (this._dynamicResScale || 1.0));
     this.renderer.setPixelRatio(effective);
   }
 
@@ -1863,8 +1863,8 @@ export class FPSGameClient {
             this._botShadowBudgetDisabled = true;
           } else if (this.renderer.shadowMap.enabled) {
             this.renderer.shadowMap.enabled = false;
-          } else if (this._dynamicResScale > 0.85 && this.currentFps < 34) {
-            this._dynamicResScale = 0.85;
+          } else if (this._dynamicResScale > 0.78 && this.currentFps < 34) {
+            this._dynamicResScale = Math.max(0.78, this._dynamicResScale - 0.10);
             this._applyPixelRatio();
           }
         }
@@ -2553,8 +2553,8 @@ export class FPSGameClient {
       if (shouldCastShadow) botShadowsUsed++;
       setRigShadowCast(ent.rig, shouldCastShadow);
 
-      // Distance-based animation LOD & frame-rate throttling (huge CPU savings with 10-50 bots!)
-      const lod = distSq < 1156 ? 0 : (distSq < 7225 ? 1 : 2); // <34m -> LOD 0 | 34-85m -> LOD 1 | >85m -> LOD 2
+      // Distance-based animation & micro-mesh LOD (huge CPU & GPU savings on weak PCs!)
+      const lod = distSq < 484 ? 0 : (distSq < 3600 ? 1 : 2); // <22m -> LOD 0 | 22-60m -> LOD 1 | >60m -> LOD 2
       ent.animAccumDt = (ent.animAccumDt || 0) + dt;
       const bucket = ent.animBucket || 0;
       const shouldAnimate = lod === 0 || (lod === 1 ? ((frameTick + bucket) & 1) === 0 : ((frameTick + bucket) & 3) === 0);
