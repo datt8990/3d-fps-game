@@ -89,18 +89,21 @@ app.get('/api/health', (_req, res) => {
 });
 
 // 2. Auth & Profile
-app.post('/api/auth', (req, res) => {
+app.post('/api/auth', async (req, res) => {
   const { username, password } = req.body || {};
   const result = gameDB.loginOrRegister(username, password);
   if (result.error) return res.status(400).json(result);
+  await gameDB.flushCloudKV();
   res.json(result);
 });
 
-app.get('/api/profile', (req, res) => {
+app.get('/api/profile', async (req, res) => {
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Phiên đăng nhập không hợp lệ.' });
   if (req.query.roomCode !== undefined) {
     user.currentRoomCode = req.query.roomCode || null;
+    gameDB.saveLocal();
+    await gameDB.flushCloudKV();
   }
   res.json({
     user: gameDB.sanitizeUser(user),
@@ -108,40 +111,48 @@ app.get('/api/profile', (req, res) => {
   });
 });
 
-// 3. Loadout & Armory Unlocks
-app.post('/api/loadout', (req, res) => {
+// 3. Loadout & Armory Unlocks (Atomic unlock+equip supported via optional weaponId!)
+app.post('/api/loadout', async (req, res) => {
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
   const result = gameDB.updateLoadout(user.id, req.body || {});
   if (result.error) return res.status(400).json(result);
+  await gameDB.flushCloudKV();
   onLoadoutUpdatedHook?.(user.id, result.user);
   res.json(result);
 });
 
-app.post('/api/unlock', (req, res) => {
+app.post('/api/unlock', async (req, res) => {
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
-  const { category, itemId, slot } = req.body || {};
-  const result = gameDB.unlockItem(user.id, category, itemId, slot);
+  const { category, itemId, slot, weaponId } = req.body || {};
+  const result = gameDB.unlockItem(user.id, category, itemId, slot, weaponId);
   if (result.error) return res.status(400).json(result);
+  await gameDB.flushCloudKV();
   onLoadoutUpdatedHook?.(user.id, result.user);
   res.json(result);
 });
 
 // 4. Friends, Requests, Player Profiles & Squad Room Invites
-app.get('/api/friends', (req, res) => {
+app.get('/api/friends', async (req, res) => {
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
   const liveCodes = getLiveRoomCodes();
   const sanitized = gameDB.sanitizeUser(user);
-  // Drop stale invites pointing to rooms that already closed
+  // Only drop stale invites older than 15s whose room is gone (never kill brand-new invites racing heartbeat!)
   let pendingInvite = sanitized.pendingInvite;
-  if (pendingInvite?.roomCode && !liveCodes.has(String(pendingInvite.roomCode).toUpperCase())) {
+  if (
+    pendingInvite?.roomCode &&
+    Date.now() - (pendingInvite.at || 0) > 15000 &&
+    !liveCodes.has(String(pendingInvite.roomCode).toUpperCase())
+  ) {
     gameDB.clearPendingInvite(user.id);
+    await gameDB.flushCloudKV();
     pendingInvite = null;
   }
   res.json({
     friendCode: user.friendCode,
+    profileBackup: sanitized.profileBackup,
     friends: gameDB.getFriendsStatus(user.id, liveCodes),
     incomingRequests: gameDB.getIncomingRequests(user.id),
     onlinePlayers: gameDB.searchPlayers(user.id, '', liveCodes),
@@ -149,11 +160,13 @@ app.get('/api/friends', (req, res) => {
   });
 });
 
-app.post('/api/friends/add', (req, res) => {
+app.post('/api/friends/add', async (req, res) => {
+  await gameDB.ensureCloudKV(true);
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
   const result = gameDB.addFriend(user.id, req.body?.query);
   if (result.error) return res.status(400).json(result);
+  await gameDB.flushCloudKV();
   const liveCodes = getLiveRoomCodes();
   res.json({
     ...result,
@@ -162,12 +175,14 @@ app.post('/api/friends/add', (req, res) => {
   });
 });
 
-app.post('/api/friends/respond', (req, res) => {
+app.post('/api/friends/respond', async (req, res) => {
+  await gameDB.ensureCloudKV(true);
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
   const { username, accept } = req.body || {};
   const result = gameDB.respondFriendRequest(user.id, username, accept !== false);
   if (result.error) return res.status(400).json(result);
+  await gameDB.flushCloudKV();
   const liveCodes = getLiveRoomCodes();
   res.json({
     ...result,
@@ -176,11 +191,13 @@ app.post('/api/friends/respond', (req, res) => {
   });
 });
 
-app.post('/api/friends/remove', (req, res) => {
+app.post('/api/friends/remove', async (req, res) => {
+  await gameDB.ensureCloudKV(true);
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
   const result = gameDB.removeFriend(user.id, req.body?.username);
   if (result.error) return res.status(400).json(result);
+  await gameDB.flushCloudKV();
   const liveCodes = getLiveRoomCodes();
   res.json({
     ...result,
@@ -189,21 +206,29 @@ app.post('/api/friends/remove', (req, res) => {
   });
 });
 
-app.post('/api/friends/invite', (req, res) => {
+app.post('/api/friends/invite', async (req, res) => {
+  await gameDB.ensureCloudKV(true);
   const user = resolveUser(req);
   if (!user) return res.status(401).json({ error: 'Chưa đăng nhập.' });
-  const { targetUsername, roomCode, modeName, mapName } = req.body || {};
+  const { targetUsername, roomCode, modeName, mapName, roomSummary } = req.body || {};
+  if (roomSummary?.code) {
+    gameDB.upsertCloudRoom(roomSummary, user.id);
+  }
   const result = gameDB.sendRoomInvite(user, targetUsername, roomCode, modeName, mapName);
   if (result.error) return res.status(400).json(result);
+  await gameDB.flushCloudKV();
   if (result.targetUserId && result.invite) {
     onSquadInviteHook?.(result.targetUserId, result.invite);
   }
-  res.json(result);
+  res.json({ ...result, user: gameDB.sanitizeUser(user) });
 });
 
-app.post('/api/friends/dismiss-invite', (req, res) => {
+app.post('/api/friends/dismiss-invite', async (req, res) => {
   const user = resolveUser(req);
-  if (user) gameDB.clearPendingInvite(user.id);
+  if (user) {
+    gameDB.clearPendingInvite(user.id);
+    await gameDB.flushCloudKV();
+  }
   res.json({ ok: true });
 });
 
@@ -240,18 +265,20 @@ app.get('/api/rooms', (_req, res) => {
   });
 });
 
-app.post('/api/rooms/heartbeat', (req, res) => {
+app.post('/api/rooms/heartbeat', async (req, res) => {
   const user = resolveUser(req);
   const summary = req.body?.room;
   if (!summary?.code) return res.status(400).json({ error: 'Thiếu mã phòng.' });
   const saved = gameDB.upsertCloudRoom(summary, user?.id);
+  await gameDB.flushCloudKV();
   res.json({ ok: true, room: saved });
 });
 
-app.post('/api/rooms/close', (req, res) => {
+app.post('/api/rooms/close', async (req, res) => {
   const user = resolveUser(req);
   const code = String(req.body?.code || '').replace(/^rm_/i, '').trim().toUpperCase();
   gameDB.removeCloudRoom(code, user?.id);
+  await gameDB.flushCloudKV();
   const q = relayQueues.get(code);
   if (q) {
     q.closed = true;

@@ -172,17 +172,28 @@ async function apiCall(path, method = 'GET', body = null) {
   if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
   if (state.profileBackup) headers['x-profile-backup'] = state.profileBackup;
 
-  const res = await fetch(path, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : null
-  });
-  const data = await res.json();
-  if (data?.user?.profileBackup) {
-    state.profileBackup = data.user.profileBackup;
-    localStorage.setItem('bs_profile_backup', data.user.profileBackup);
+  try {
+    const res = await fetch(path, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : null,
+      signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { error: 'Phản hồi máy chủ không hợp lệ.' }; }
+    const nextBackup = data?.user?.profileBackup || data?.profileBackup;
+    if (nextBackup) {
+      state.profileBackup = nextBackup;
+      localStorage.setItem('bs_profile_backup', nextBackup);
+    }
+    if (!res.ok && !data.error) {
+      data.error = `Lỗi kết nối máy chủ (${res.status}).`;
+    }
+    return data;
+  } catch (err) {
+    return { error: err?.name === 'TimeoutError' ? 'Máy chủ phản hồi chậm, vui lòng thử lại!' : 'Mất kết nối tới máy chủ.' };
   }
-  return data;
 }
 
 // ============================================================================
@@ -337,9 +348,23 @@ function refreshProfileUI() {
 function sync3DShowcase() {
   if (!state.user) return;
   const lo = state.user.loadout;
+  if (state.activeTab === 'armory') {
+    const wId = state.selectedArmoryWeapon;
+    const viewSkinId = state.previewWeaponSkins[wId] || lo.skins?.[wId] || 'default';
+    const viewAttachments = {
+      ...(lo.attachments?.[wId] || { optic: 'iron', muzzle: 'none', mag: 'standard' }),
+      ...(state.previewWeaponAttachments[wId] || {})
+    };
+    lobbyShowcase.updateWeapon({
+      weaponId: wId,
+      skinId: viewSkinId,
+      attachments: viewAttachments
+    });
+    return;
+  }
+
   const viewOperator = (state.activeTab === 'operators' && state.previewOperator) ? state.previewOperator : lo.operator;
   const viewOutfit = (state.activeTab === 'operators' && state.previewOutfit) ? state.previewOutfit : lo.outfit;
-
   lobbyShowcase.updateOperator({
     operator: viewOperator,
     outfit: viewOutfit,
@@ -347,18 +372,6 @@ function sync3DShowcase() {
     skinId: lo.skins?.[lo.primary] || 'default',
     attachments: lo.attachments?.[lo.primary] || {},
     username: state.user.username
-  });
-
-  const wId = state.selectedArmoryWeapon;
-  const viewSkinId = state.previewWeaponSkins[wId] || lo.skins?.[wId] || 'default';
-  const viewAttachments = {
-    ...(lo.attachments?.[wId] || { optic: 'iron', muzzle: 'none', mag: 'standard' }),
-    ...(state.previewWeaponAttachments[wId] || {})
-  };
-  lobbyShowcase.updateWeapon({
-    weaponId: wId,
-    skinId: viewSkinId,
-    attachments: viewAttachments
   });
 }
 
@@ -888,20 +901,45 @@ function renderArmoryTab() {
         renderArmoryTab();
       });
 
-      attBox.querySelector('#btn-confirm-attachment')?.addEventListener('click', async () => {
-        if (!selAtt) return;
+      attBox.querySelector('#btn-confirm-attachment')?.addEventListener('click', async (e) => {
+        if (!selAtt || !state.user) return;
+        const btn = e.currentTarget;
+        if (btn.dataset.busy === '1') return;
         if (curAtt[sel.slot] === sel.itemId) return showToast(`Đang lắp sẵn ${selAtt.name} trên ${gun.name}!`);
-        if (!u.unlocked.attachments.includes(selUnlockKey)) {
-          const un = await apiCall('/api/unlock', 'POST', { category: 'attachment', slot: sel.slot, itemId: sel.itemId });
-          if (un.error) return showToast(un.error);
-          state.user = un.user;
-        }
-        const eq = await apiCall('/api/loadout', 'POST', {
-          weaponAttachment: { weaponId: wId, slot: sel.slot, itemId: sel.itemId }
-        });
-        if (eq.user) {
+        btn.dataset.busy = '1';
+        btn.disabled = true;
+
+        const needsUnlock = !u.unlocked.attachments.includes(selUnlockKey);
+        if (!needsUnlock) {
+          // Optimistic instant equip (0ms UI lag on Vercel!)
+          if (!state.user.loadout.attachments[wId]) {
+            state.user.loadout.attachments[wId] = { optic: 'iron', muzzle: 'none', mag: 'standard' };
+          }
+          state.user.loadout.attachments[wId][sel.slot] = sel.itemId;
           if (state.previewWeaponAttachments[wId]) delete state.previewWeaponAttachments[wId][sel.slot];
-          updateUserData(eq.user, `Đã lắp ${selAtt.name} cho ${gun.name}!`);
+          updateUserData(state.user, `Đã lắp ${selAtt.name} cho ${gun.name}!`);
+          const eq = await apiCall('/api/loadout', 'POST', {
+            weaponAttachment: { weaponId: wId, slot: sel.slot, itemId: sel.itemId }
+          });
+          if (eq.error) showToast(eq.error);
+          else if (eq.user) {
+            state.user = eq.user;
+            net.updateUserContext(eq.user);
+          }
+          return;
+        }
+
+        btn.textContent = 'ĐANG MỞ KHÓA...';
+        const un = await apiCall('/api/unlock', 'POST', { category: 'attachment', slot: sel.slot, itemId: sel.itemId, weaponId: wId });
+        btn.dataset.busy = '0';
+        btn.disabled = false;
+        if (un.error) {
+          renderArmoryTab();
+          return showToast(un.error);
+        }
+        if (un.user) {
+          if (state.previewWeaponAttachments[wId]) delete state.previewWeaponAttachments[wId][sel.slot];
+          updateUserData(un.user, `Đã mua & lắp ${selAtt.name} cho ${gun.name}!`);
         }
       });
     }
@@ -968,19 +1006,43 @@ function renderArmoryTab() {
       renderArmoryTab();
     });
 
-    skinList.querySelector('#btn-confirm-skin')?.addEventListener('click', async () => {
+    skinList.querySelector('#btn-confirm-skin')?.addEventListener('click', async (e) => {
+      if (!state.user) return;
+      const btn = e.currentTarget;
+      if (btn.dataset.busy === '1') return;
       if (activeSkin === viewSkinId) return showToast(`Đang dùng sẵn skin ${viewSk.name}!`);
-      if (!u.unlocked.skins.includes(viewSkinId)) {
-        const un = await apiCall('/api/unlock', 'POST', { category: 'skin', itemId: viewSkinId });
-        if (un.error) return showToast(un.error);
-        state.user = un.user;
-      }
-      const eq = await apiCall('/api/loadout', 'POST', {
-        weaponSkin: { weaponId: wId, skinId: viewSkinId }
-      });
-      if (eq.user) {
+      btn.dataset.busy = '1';
+      btn.disabled = true;
+
+      const needsUnlock = !u.unlocked.skins.includes(viewSkinId);
+      if (!needsUnlock) {
+        // Optimistic instant apply (0ms UI lag on Vercel!)
+        if (!state.user.loadout.skins) state.user.loadout.skins = {};
+        state.user.loadout.skins[wId] = viewSkinId;
         delete state.previewWeaponSkins[wId];
-        updateUserData(eq.user, `Đã trang bị skin ${viewSk.name}!`);
+        updateUserData(state.user, `Đã trang bị skin ${viewSk.name}!`);
+        const eq = await apiCall('/api/loadout', 'POST', {
+          weaponSkin: { weaponId: wId, skinId: viewSkinId }
+        });
+        if (eq.error) showToast(eq.error);
+        else if (eq.user) {
+          state.user = eq.user;
+          net.updateUserContext(eq.user);
+        }
+        return;
+      }
+
+      btn.textContent = 'ĐANG MỞ KHÓA...';
+      const un = await apiCall('/api/unlock', 'POST', { category: 'skin', itemId: viewSkinId, weaponId: wId });
+      btn.dataset.busy = '0';
+      btn.disabled = false;
+      if (un.error) {
+        renderArmoryTab();
+        return showToast(un.error);
+      }
+      if (un.user) {
+        delete state.previewWeaponSkins[wId];
+        updateUserData(un.user, `Đã mua & trang bị skin ${viewSk.name}!`);
       }
     });
   }
@@ -1024,10 +1086,13 @@ function updateUserData(user, toastMsg = '') {
 // ============================================================================
 // 3. FRIENDS, REQUESTS, PLAYER PROFILES & SQUAD INVITE SYSTEM
 // ============================================================================
+let friendsFetchInFlight = false;
+let lastFriendsRenderSig = '';
+
 function startFriendsPolling() {
   if (friendsPollTimer) clearInterval(friendsPollTimer);
-  fetchFriendsStatus();
-  friendsPollTimer = setInterval(fetchFriendsStatus, 3500);
+  fetchFriendsStatus(true);
+  friendsPollTimer = setInterval(() => fetchFriendsStatus(false), 4500);
 }
 
 function updateFriendsNotifBadge() {
@@ -1042,21 +1107,34 @@ function updateFriendsNotifBadge() {
   }
 }
 
-async function fetchFriendsStatus() {
-  if (!state.token || fpsClient.active) return;
+async function fetchFriendsStatus(forceRender = false) {
+  if (!state.token || fpsClient.active || friendsFetchInFlight) return;
+  friendsFetchInFlight = true;
   try {
     const res = await apiCall('/api/friends');
+    if (res?.error) return;
     if (res.friends) state.friendsList = res.friends;
     if (res.incomingRequests) state.incomingRequests = res.incomingRequests;
     const searchVal = document.getElementById('add-friend-input')?.value?.trim() || '';
     if (!searchVal && res.onlinePlayers) state.onlinePlayers = res.onlinePlayers;
     updateFriendsNotifBadge();
-    renderFriendsDrawerContent();
+
+    // Only re-render Friends Drawer DOM when drawer is open AND data actually changed (prevents swallowed clicks!)
+    const drawerOpen = !document.getElementById('friends-drawer')?.classList.contains('hidden');
+    if (drawerOpen || forceRender) {
+      const sig = JSON.stringify([state.friendsList, state.incomingRequests, state.onlinePlayers, state.currentRoom?.code || '']);
+      if (forceRender || sig !== lastFriendsRenderSig) {
+        lastFriendsRenderSig = sig;
+        renderFriendsDrawerContent();
+      }
+    }
     if (res.pendingInvite && res.pendingInvite.id !== lastShownInviteId) {
       lastShownInviteId = res.pendingInvite.id;
       showSquadInvitePopup(res.pendingInvite);
     }
-  } catch {}
+  } catch {} finally {
+    friendsFetchInFlight = false;
+  }
 }
 
 async function sendSquadInviteSmart(targetUsername) {
@@ -1084,7 +1162,19 @@ async function sendSquadInviteSmart(targetUsername) {
     targetUsername,
     roomCode: state.currentRoom.code,
     modeName: state.currentRoom.modeConfig?.shortName || 'Đấu Đội',
-    mapName: state.currentRoom.mapName || 'Nhà Kho'
+    mapName: state.currentRoom.mapName || 'Nhà Kho',
+    roomSummary: {
+      code: state.currentRoom.code,
+      id: state.currentRoom.id || state.currentRoom.code,
+      name: state.currentRoom.name || `Phòng #${state.currentRoom.code}`,
+      mode: state.currentRoom.mode || 'tdm',
+      mapId: state.currentRoom.mapId || 'warehouse',
+      mapName: state.currentRoom.mapName || 'Nhà Kho',
+      humans: (state.currentRoom.players || []).filter((p) => !p.isBot).length || 1,
+      maxPlayers: state.currentRoom.maxPlayers || 10,
+      status: state.currentRoom.status || 'waiting',
+      hostName: state.user?.username || 'Chủ phòng'
+    }
   });
   if (res?.error) return showToast(res.error);
   if (res?.ok) showToast(`Đã gửi lời mời vào phòng #${state.currentRoom.code} tới ${targetUsername}!`);
@@ -2004,7 +2094,10 @@ function bindUIEvents() {
     const dr = document.getElementById('friends-drawer');
     if (!dr) return;
     dr.classList.toggle('hidden');
-    if (!dr.classList.contains('hidden')) fetchFriendsStatus();
+    if (!dr.classList.contains('hidden')) {
+      renderFriendsDrawerContent();
+      fetchFriendsStatus(true);
+    }
   });
   document.getElementById('btn-close-friends')?.addEventListener('click', () => {
     document.getElementById('friends-drawer')?.classList.add('hidden');
@@ -2012,8 +2105,11 @@ function bindUIEvents() {
   document.getElementById('add-friend-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const inp = document.getElementById('add-friend-input');
+    const submitBtn = e.currentTarget.querySelector('button[type="submit"]');
     if (!inp || !inp.value.trim()) return;
+    if (submitBtn) submitBtn.disabled = true;
     const res = await apiCall('/api/friends/add', 'POST', { query: inp.value.trim() });
+    if (submitBtn) submitBtn.disabled = false;
     if (res.error) return showToast(res.error);
     inp.value = '';
     const tag = document.getElementById('online-players-tag');
@@ -2025,7 +2121,7 @@ function bindUIEvents() {
     } else if (res.friendAdded) {
       showToast(`Đã trở thành bạn bè với ${res.friendAdded}!`);
     }
-    fetchFriendsStatus();
+    fetchFriendsStatus(true);
   });
 
   let playerSearchTimer = null;
@@ -2298,69 +2394,131 @@ function bindUIEvents() {
     input.value = '';
   });
 
-  // Operator & Outfit Confirm Buy/Equip Buttons (Preview-Before-Buy)
-  document.getElementById('btn-action-operator')?.addEventListener('click', async () => {
+  // Operator & Outfit Confirm Buy/Equip Buttons (Optimistic Instant Response + Clear Error Toasts!)
+  document.getElementById('btn-action-operator')?.addEventListener('click', async (e) => {
     if (!state.user) return;
+    const btn = e.currentTarget;
+    if (btn.dataset.busy === '1') return;
     const opId = state.previewOperator || state.user.loadout.operator;
     const op = OPERATORS[opId];
     if (!op) return;
     if (state.user.loadout.operator === opId && state.user.unlocked.operators.includes(opId)) {
       return showToast(`Bạn đang sử dụng quân nhân ${op.name}.`);
     }
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+
     if (!state.user.unlocked.operators.includes(opId)) {
+      btn.textContent = 'ĐANG MỞ KHÓA...';
       const res = await apiCall('/api/unlock', 'POST', { category: 'operator', itemId: opId });
-      if (res.error) return showToast(res.error);
+      btn.dataset.busy = '0';
+      btn.disabled = false;
+      if (res.error) {
+        renderOperatorsTab();
+        return showToast(res.error);
+      }
       if (res.user) {
         state.previewOperator = null;
         updateUserData(res.user, `Đã mở khóa & chọn quân nhân ${op.name}!`);
       }
       return;
     }
+
+    // Optimistic instant equip (0ms response even on slow Vercel live server!)
+    state.user.loadout.operator = opId;
+    state.previewOperator = null;
+    updateUserData(state.user, `Đã chọn quân nhân ${op.name}`);
+    btn.dataset.busy = '0';
+    btn.disabled = false;
     const res = await apiCall('/api/loadout', 'POST', { operator: opId });
-    if (res.user) {
-      state.previewOperator = null;
-      updateUserData(res.user, `Đã chọn quân nhân ${op.name}`);
+    if (res.error) showToast(res.error);
+    else if (res.user) {
+      state.user = res.user;
+      net.updateUserContext(res.user);
     }
   });
 
-  document.getElementById('btn-action-outfit')?.addEventListener('click', async () => {
+  document.getElementById('btn-action-outfit')?.addEventListener('click', async (e) => {
     if (!state.user) return;
+    const btn = e.currentTarget;
+    if (btn.dataset.busy === '1') return;
     const outId = state.previewOutfit || state.user.loadout.outfit;
     const out = OUTFITS[outId];
     if (!out) return;
     if (state.user.loadout.outfit === outId && state.user.unlocked.outfits.includes(outId)) {
       return showToast(`Bạn đang mặc trang phục ${out.name}.`);
     }
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+
     if (!state.user.unlocked.outfits.includes(outId)) {
+      btn.textContent = 'ĐANG MỞ KHÓA...';
       const res = await apiCall('/api/unlock', 'POST', { category: 'outfit', itemId: outId });
-      if (res.error) return showToast(res.error);
+      btn.dataset.busy = '0';
+      btn.disabled = false;
+      if (res.error) {
+        renderOperatorsTab();
+        return showToast(res.error);
+      }
       if (res.user) {
         state.previewOutfit = null;
         updateUserData(res.user, `Đã mở khóa & mặc ${out.name}!`);
       }
       return;
     }
+
+    // Optimistic instant equip
+    state.user.loadout.outfit = outId;
+    state.previewOutfit = null;
+    updateUserData(state.user, `Đã mặc trang phục ${out.name}`);
+    btn.dataset.busy = '0';
+    btn.disabled = false;
     const res = await apiCall('/api/loadout', 'POST', { outfit: outId });
-    if (res.user) {
-      state.previewOutfit = null;
-      updateUserData(res.user, `Đã mặc trang phục ${out.name}`);
+    if (res.error) showToast(res.error);
+    else if (res.user) {
+      state.user = res.user;
+      net.updateUserContext(res.user);
     }
   });
 
-  // Armory Unlock / Equip Button
-  document.getElementById('btn-equip-weapon')?.addEventListener('click', async () => {
+  // Armory Unlock / Equip Button (Optimistic Instant Response + Error Reporting)
+  document.getElementById('btn-equip-weapon')?.addEventListener('click', async (e) => {
     const wId = state.selectedArmoryWeapon;
     const gun = WEAPONS[wId];
     if (!gun || !state.user) return;
+    const btn = e.currentTarget;
+    if (btn.dataset.busy === '1') return;
     const unlocked = state.user.unlocked.weapons || [];
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+
     if (!unlocked.includes(wId)) {
+      btn.textContent = 'ĐANG MỞ KHÓA...';
       const un = await apiCall('/api/unlock', 'POST', { category: 'weapon', itemId: wId });
-      if (un.error) return showToast(un.error);
+      btn.dataset.busy = '0';
+      btn.disabled = false;
+      if (un.error) {
+        renderArmoryTab();
+        return showToast(un.error);
+      }
       if (un.user) return updateUserData(un.user, `Đã mở khóa & trang bị ${gun.name}!`);
+      return;
     }
+
     const payload = gun.category === 'primary' ? { primary: wId } : (gun.category === 'secondary' ? { secondary: wId } : { melee: wId });
+    if (gun.category === 'primary') state.user.loadout.primary = wId;
+    else if (gun.category === 'secondary') state.user.loadout.secondary = wId;
+    else state.user.loadout.melee = wId;
+    updateUserData(state.user, `Đã trang bị ${gun.name} vào Balo chiến đấu!`);
+    btn.dataset.busy = '0';
+    btn.disabled = false;
+
     const res = await apiCall('/api/loadout', 'POST', payload);
-    if (res.user) updateUserData(res.user, `Đã trang bị ${gun.name} vào Balo chiến đấu!`);
+    if (res.error) showToast(res.error);
+    else if (res.user) {
+      state.user = res.user;
+      net.updateUserContext(res.user);
+    }
   });
 
   // Settings Modal

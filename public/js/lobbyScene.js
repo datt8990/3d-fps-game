@@ -37,6 +37,8 @@ export class LobbyShowcase {
     this.operatorRig = null;
     this.weaponPreview = null;
     this.weaponPreviewMeta = null;
+    this._lastOperatorKey = '';
+    this._lastWeaponKey = '';
     this.previewRecoilZ = 0;
     this.previewRecoilPitch = 0;
     this.previewReloadEnd = 0;
@@ -180,7 +182,15 @@ export class LobbyShowcase {
   }
 
   updateOperator({ operator = 'vanguard', outfit = 'urban', primary = 'ak47', skinId = 'default', attachments = {}, username = 'Chiến Binh' }) {
+    const key = `${operator}|${outfit}|${primary}|${skinId}|${attachments?.optic || ''}|${attachments?.muzzle || ''}|${attachments?.mag || ''}|${username}`;
+    if (this._lastOperatorKey === key && this.operatorRig) {
+      this.operatorRig.group.visible = this.mode === 'operator';
+      return;
+    }
+    this._lastOperatorKey = key;
+
     if (this.operatorRig) {
+      this.operatorRig.disposed = true;
       this.stageGroup.remove(this.operatorRig.group);
     }
     this.operatorRig = createOperatorRig({
@@ -200,6 +210,13 @@ export class LobbyShowcase {
   }
 
   updateWeapon({ weaponId = 'ak47', skinId = 'default', attachments = {} }) {
+    const key = `${weaponId}|${skinId}|${attachments?.optic || ''}|${attachments?.muzzle || ''}|${attachments?.mag || ''}`;
+    if (this._lastWeaponKey === key && this.weaponPreview) {
+      this.weaponPreview.visible = this.mode === 'weapon';
+      return;
+    }
+    this._lastWeaponKey = key;
+
     this._clearPreviewTimers();
     this.previewReloadEnd = 0;
     this.previewRecoilZ = 0;

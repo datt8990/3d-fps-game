@@ -19,9 +19,13 @@ const DATA_DIR = IS_VERCEL ? path.join(os.tmpdir(), 'battle_strike_data') : path
 const DB_PATH = path.join(DATA_DIR, 'db_v2.json');
 const HMAC_SECRET = process.env.BS_HMAC_SECRET || 'battle_strike_v2_cloud_hmac_2026';
 
-// Optional Upstash / Vercel KV REST configuration (auto-activated if env vars exist)
-const KV_URL = process.env.KV_REST_API_URL || '';
-const KV_TOKEN = process.env.KV_REST_API_TOKEN || '';
+// Optional Upstash / Vercel KV REST configuration (supports both Vercel KV and Upstash Redis env names)
+const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '';
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
+
+function makeDeterministicAdminToken() {
+  return crypto.createHmac('sha256', HMAC_SECRET).update('usr_admin_root_token_v2').digest('hex').slice(0, 36);
+}
 
 const SEED_LEADERBOARD = [
   { id: 'rival_1', username: 'VN_DragonSniper', rp: 2740, level: 42, stats: { kills: 1420, deaths: 610, headshots: 680, wins: 96, matches: 132 } },
@@ -109,6 +113,8 @@ class GameDatabase {
       ]
     };
     this.kvLoaded = false;
+    this.lastKvFetchAt = 0;
+    this.kvDirty = false;
     this.loadLocal();
   }
 
@@ -155,8 +161,9 @@ class GameDatabase {
         friendCode: 'VN-8888',
         username: 'admin',
         passwordHash: pwHash,
-        token: crypto.randomBytes(18).toString('hex'),
+        token: makeDeterministicAdminToken(),
         createdAt: Date.now(),
+        updatedAt: 0,
         lastSeenAt: Date.now(),
         currentRoomCode: null,
         gp: 1000000000,
@@ -221,45 +228,93 @@ class GameDatabase {
   }
 
   saveLocal() {
+    this.kvDirty = true;
     try {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
       fs.writeFileSync(DB_PATH, JSON.stringify(this.db, null, 2), 'utf8');
     } catch {}
-    this.pushToCloudKV().catch(() => {});
   }
 
-  async ensureCloudKV() {
-    if (!KV_URL || !KV_TOKEN || this.kvLoaded) return;
+  mergeRemoteUser(existing, remote) {
+    if (!existing) return remote;
+    if (!remote) return existing;
+    const remoteNewer = (remote.updatedAt || 0) > (existing.updatedAt || 0);
+    const base = remoteNewer ? { ...existing, ...remote } : { ...remote, ...existing };
+    base.lastSeenAt = Math.max(existing.lastSeenAt || 0, remote.lastSeenAt || 0);
+    base.updatedAt = Math.max(existing.updatedAt || 0, remote.updatedAt || 0);
+    // Keep freshest pending invite & merge friend lists safely
+    const invA = existing.pendingInvite;
+    const invB = remote.pendingInvite;
+    if (invA && invB) base.pendingInvite = (invB.at || 0) >= (invA.at || 0) ? invB : invA;
+    else base.pendingInvite = invA || invB || null;
+    if (remoteNewer) {
+      base.friends = Array.isArray(remote.friends) ? remote.friends : (existing.friends || []);
+      base.friendRequests = Array.isArray(remote.friendRequests) ? remote.friendRequests : (existing.friendRequests || []);
+      base.sentFriendRequests = Array.isArray(remote.sentFriendRequests) ? remote.sentFriendRequests : (existing.sentFriendRequests || []);
+    } else {
+      // Preserve incoming requests/invites pushed onto remote instance while keeping newer loadout
+      const reqMap = new Map();
+      for (const r of [...(remote.friendRequests || []), ...(existing.friendRequests || [])]) {
+        const k = String(r?.from || r || '').toLowerCase();
+        if (k && !reqMap.has(k)) reqMap.set(k, r);
+      }
+      base.friendRequests = [...reqMap.values()].slice(0, 30);
+    }
+    return base;
+  }
+
+  async ensureCloudKV(force = false) {
+    if (!KV_URL || !KV_TOKEN) return;
+    const now = Date.now();
+    if (this.kvLoaded && !force && now - this.lastKvFetchAt < 2200) return;
     this.kvLoaded = true;
+    this.lastKvFetchAt = now;
     try {
       const res = await fetch(`${KV_URL}/get/bs_state_v2`, {
-        headers: { Authorization: `Bearer ${KV_TOKEN}` }
+        headers: { Authorization: `Bearer ${KV_TOKEN}` },
+        signal: AbortSignal.timeout(2500)
       });
       const json = await res.json();
       if (json?.result) {
         const parsed = typeof json.result === 'string' ? JSON.parse(json.result) : json.result;
         if (parsed?.users) {
-          this.db.users = { ...parsed.users, ...this.db.users };
-          this.db.p2pRooms = { ...(parsed.p2pRooms || {}), ...this.db.p2pRooms };
+          for (const [uid, remoteU] of Object.entries(parsed.users)) {
+            this.db.users[uid] = this.mergeRemoteUser(this.db.users[uid], remoteU);
+          }
+        }
+        if (parsed?.p2pRooms) {
+          for (const [code, r] of Object.entries(parsed.p2pRooms)) {
+            const cur = this.db.p2pRooms[code];
+            if (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0)) {
+              this.db.p2pRooms[code] = r;
+            }
+          }
+        }
+        if (Array.isArray(parsed?.globalChat) && parsed.globalChat.length > (this.db.globalChat?.length || 0)) {
+          this.db.globalChat = parsed.globalChat.slice(-40);
         }
       }
     } catch {}
   }
 
-  async pushToCloudKV() {
-    if (!KV_URL || !KV_TOKEN) return;
-    const compact = JSON.stringify({
-      users: this.db.users,
-      p2pRooms: this.db.p2pRooms,
-      globalChat: this.db.globalChat.slice(-25)
-    });
-    await fetch(`${KV_URL}/set/bs_state_v2`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'application/json' },
-      body: compact
-    });
+  async flushCloudKV() {
+    if (!KV_URL || !KV_TOKEN || !this.kvDirty) return;
+    this.kvDirty = false;
+    try {
+      const compact = JSON.stringify({
+        users: this.db.users,
+        p2pRooms: this.db.p2pRooms,
+        globalChat: this.db.globalChat.slice(-25)
+      });
+      await fetch(`${KV_URL}/set/bs_state_v2`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'application/json' },
+        body: compact,
+        signal: AbortSignal.timeout(2500)
+      });
+    } catch {}
   }
 
   // Cryptographically sign user snapshot so Vercel cold-starts restore accounts tamper-free with zero external DB!
@@ -270,6 +325,7 @@ class GameDatabase {
       username: user.username,
       passwordHash: user.passwordHash,
       token: user.token,
+      updatedAt: user.updatedAt || Date.now(),
       gp: user.gp,
       rp: user.rp,
       xp: user.xp,
@@ -296,12 +352,41 @@ class GameDatabase {
     try {
       const data = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8'));
       if (!data?.id || !data?.token) return null;
-      if (!this.db.users[data.id]) {
+      const existing = this.db.users[data.id];
+      if (!existing) {
         this.db.users[data.id] = {
           ...createDefaultAccount(data.username, data.passwordHash),
           ...data,
           lastSeenAt: Date.now()
         };
+      } else {
+        // CRITICAL FIX for Vercel Serverless cold starts (especially admin usr_admin_root!):
+        // Accept verified HMAC-signed token & newer loadout/friends snapshot even when the user ID already existed on this instance!
+        if (existing.token !== data.token && (data.updatedAt || 0) >= (existing.updatedAt || 0)) {
+          existing.token = data.token;
+        }
+        if ((data.updatedAt || 0) > (existing.updatedAt || 0)) {
+          existing.loadout = data.loadout || existing.loadout;
+          existing.unlocked = data.unlocked || existing.unlocked;
+          existing.gp = typeof data.gp === 'number' ? data.gp : existing.gp;
+          existing.rp = typeof data.rp === 'number' ? data.rp : existing.rp;
+          existing.xp = typeof data.xp === 'number' ? data.xp : existing.xp;
+          existing.level = typeof data.level === 'number' ? data.level : existing.level;
+          existing.stats = data.stats || existing.stats;
+          if (Array.isArray(data.friends)) {
+            const set = new Set([...(existing.friends || []), ...data.friends]);
+            existing.friends = [...set];
+          }
+          if (Array.isArray(data.sentFriendRequests)) {
+            const set = new Set([...(existing.sentFriendRequests || []), ...data.sentFriendRequests]);
+            existing.sentFriendRequests = [...set];
+          }
+          if (Array.isArray(data.history) && data.history.length >= (existing.history?.length || 0)) {
+            existing.history = data.history;
+          }
+          existing.updatedAt = data.updatedAt;
+        }
+        existing.lastSeenAt = Date.now();
       }
       return this.db.users[data.id];
     } catch {
@@ -402,11 +487,14 @@ class GameDatabase {
   }
 
   getUserByToken(token, signedBackup = '') {
-    if (signedBackup) {
-      this.hydrateFromSignedBackup(signedBackup);
-    }
+    const hydrated = signedBackup ? this.hydrateFromSignedBackup(signedBackup) : null;
     if (!token) return null;
-    const u = Object.values(this.db.users).find((item) => item.token === token) || null;
+    let u = Object.values(this.db.users).find((item) => item.token === token) || null;
+    if (!u && hydrated) {
+      // Verified HMAC-signed backup matches user even if another Lambda rotated token
+      u = hydrated;
+      u.token = token;
+    }
     if (u) {
       u.lastSeenAt = Date.now();
       this.ensureUserSchema(u);
@@ -455,11 +543,12 @@ class GameDatabase {
       }
     }
 
+    user.updatedAt = Date.now();
     this.saveLocal();
     return { user: this.sanitizeUser(user) };
   }
 
-  unlockItem(userId, category, itemId, slot = '') {
+  unlockItem(userId, category, itemId, slot = '', weaponId = '') {
     const user = this.ensureUserSchema(this.db.users[userId]);
     if (!user) return { error: 'Không tìm thấy tài khoản.' };
 
@@ -501,6 +590,9 @@ class GameDatabase {
         user.gp -= skin.cost;
         user.unlocked.skins.push(itemId);
       }
+      if (weaponId && WEAPONS[weaponId]) {
+        user.loadout.skins[weaponId] = itemId;
+      }
     } else if (category === 'attachment') {
       const att = ATTACHMENTS[slot]?.[itemId];
       if (!att) return { error: 'Phụ kiện không hợp lệ.' };
@@ -510,10 +602,17 @@ class GameDatabase {
         user.gp -= att.cost;
         user.unlocked.attachments.push(key);
       }
+      if (weaponId && WEAPONS[weaponId]) {
+        if (!user.loadout.attachments[weaponId]) {
+          user.loadout.attachments[weaponId] = { optic: 'iron', muzzle: 'none', mag: 'standard' };
+        }
+        user.loadout.attachments[weaponId][slot] = itemId;
+      }
     } else {
       return { error: 'Danh mục không hợp lệ.' };
     }
 
+    user.updatedAt = Date.now();
     this.saveLocal();
     return { user: this.sanitizeUser(user) };
   }
@@ -568,6 +667,8 @@ class GameDatabase {
       target.sentFriendRequests = target.sentFriendRequests.filter((f) => f.toLowerCase() !== uLow);
       if (!user.friends.some((f) => f.toLowerCase() === tLow)) user.friends.push(target.username);
       if (!target.friends.some((f) => f.toLowerCase() === uLow)) target.friends.push(user.username);
+      user.updatedAt = Date.now();
+      target.updatedAt = Date.now();
       this.saveLocal();
       return { user: this.sanitizeUser(user), friendAdded: target.username, acceptedImmediately: true };
     }
@@ -586,6 +687,8 @@ class GameDatabase {
       at: Date.now()
     });
     if (target.friendRequests.length > 30) target.friendRequests.length = 30;
+    user.updatedAt = Date.now();
+    target.updatedAt = Date.now();
     this.saveLocal();
     return { user: this.sanitizeUser(user), requestSentTo: target.username };
   }
@@ -606,7 +709,9 @@ class GameDatabase {
         if (!user.friends.some((f) => f.toLowerCase() === fLow)) user.friends.push(sender.username);
         if (!sender.friends.some((f) => f.toLowerCase() === uLow)) sender.friends.push(user.username);
       }
+      sender.updatedAt = Date.now();
     }
+    user.updatedAt = Date.now();
     this.saveLocal();
     return { ok: true, accepted: Boolean(accept), username: sender?.username || fromUsernameRaw, user: this.sanitizeUser(user) };
   }
@@ -623,7 +728,9 @@ class GameDatabase {
       this.ensureUserSchema(target);
       target.friends = (target.friends || []).filter((f) => f.toLowerCase() !== uLow);
       target.friendRequests = (target.friendRequests || []).filter((r) => String(r.from || r).toLowerCase() !== uLow);
+      target.updatedAt = Date.now();
     }
+    user.updatedAt = Date.now();
     this.saveLocal();
     return { ok: true, user: this.sanitizeUser(user) };
   }
