@@ -101,7 +101,9 @@ export const GAME_MODES = {
     id: 'tdm',
     name: 'Team Deathmatch',
     shortName: 'Đấu Đội 5v5',
-    icon: '⚔',
+    tag: '5V5',
+    accent: '#ff4d1c',
+    icon: 'tdm',
     description: 'Hai đội Alpha và Bravo đối đầu 5v5. Đội đạt 40 điểm hạ gục trước sẽ chiến thắng.',
     maxPlayers: 10,
     teamBased: true,
@@ -114,7 +116,9 @@ export const GAME_MODES = {
     id: 'ffa',
     name: 'Solo Deathmatch',
     shortName: 'Đấu Đơn Tự Do',
-    icon: '🎯',
+    tag: 'FFA 8P',
+    accent: '#00e5ff',
+    icon: 'ffa',
     description: 'Mỗi chiến binh chiến đấu độc lập. Hạ gục mọi mục tiêu để dẫn đầu bảng điểm.',
     maxPlayers: 8,
     teamBased: false,
@@ -127,7 +131,9 @@ export const GAME_MODES = {
     id: 'bomb',
     name: 'Đặt Bom (C4)',
     shortName: 'Đặt Bom 5v5',
-    icon: '💣',
+    tag: 'C4 ROUND',
+    accent: '#ff2a4b',
+    icon: 'bomb',
     description: 'Đội Bravo đặt bom C4 tại Khu A/B, Đội Alpha phòng thủ hoặc gỡ bom. Đấu theo hiệp (Chạm 4).',
     maxPlayers: 10,
     teamBased: true,
@@ -143,10 +149,12 @@ export const GAME_MODES = {
   },
   survival: {
     id: 'survival',
-    name: 'Sinh Tồn 50 Người (Battle Royale 1.5km)',
+    name: 'Sinh Tồn 50 Người',
     shortName: 'Sinh Tồn BR 50',
-    icon: '🪂',
-    description: 'Đảo 1.5km×1.5km tối ưu 60+ FPS siêu mượt! 50 chiến binh nhảy dù C-130, nhặt súng chính & súng phụ, giáp, balo & loot hòm xác!',
+    tag: 'BR 50 • 1.5KM',
+    accent: '#22c55e',
+    icon: 'survival',
+    description: 'Đảo 1.5km×1.5km địa hình mở. 50 chiến binh nhảy dù C-130, nhặt vũ khí, giáp, balo và loot hòm xác.',
     maxPlayers: 50,
     teamBased: false,
     scoreLimit: 1,
@@ -161,7 +169,9 @@ export const GAME_MODES = {
     id: 'ranked',
     name: 'Đấu Rank 5v5',
     shortName: 'Xếp Hạng 5v5',
-    icon: '🏆',
+    tag: 'RANKED RP',
+    accent: '#f5c542',
+    icon: 'ranked',
     description: 'Thi đấu cạnh tranh tính điểm Rank (RP). Khẳng định đẳng cấp vươn tới Huyền Thoại.',
     maxPlayers: 10,
     teamBased: true,
@@ -174,7 +184,9 @@ export const GAME_MODES = {
     id: 'practice',
     name: 'Trường Bắn Thử Súng',
     shortName: 'Phòng Tập 3D',
-    icon: '🔫',
+    tag: 'TRAINING',
+    accent: '#94a3b8',
+    icon: 'practice',
     description: 'Thử nghiệm kho vũ khí, độ giật, lựu đạn và luyện phản xạ headshot cùng mục tiêu AI.',
     maxPlayers: 6,
     teamBased: false,
@@ -204,8 +216,8 @@ export const OPERATORS = {
     id: 'ghost',
     name: 'GHOST',
     role: 'Bóng Ma Trinh Sát',
-    perkLabel: '+4% Tốc độ di chuyển cơ động',
-    desc: 'Chuyên gia đột kích tốc độ cao với trang bị gọn nhẹ, đảo cánh và áp sát mục tiêu cực nhanh.',
+    perkLabel: '+4% Tốc độ di chuyển & +4% Thay đạn',
+    desc: 'Sát thủ trinh sát tốc độ cao khoác áo khoác cổ cao đen tuyền, đôi mắt đỏ sắc lạnh, giáp ngực tác chiến gọn nhẹ và bộ đàm liên lạc tầm xa.',
     speedMult: 1.04,
     maxArmor: 90,
     reloadBonus: 0.04,
@@ -2076,12 +2088,12 @@ export const WEAPON_SKINS = {
 };
 
 export const RADIO_COMMANDS = [
-  { key: '1', text: '⚡ Tấn công Khu A ngay!' },
-  { key: '2', text: '⚡ Tập hợp đánh Khu B!' },
-  { key: '3', text: '⚠ Phát hiện kẻ địch phía trước!' },
-  { key: '4', text: '🛡 Cần đồng đội chi viện!' },
-  { key: '5', text: '🎯 Giữ vững vị trí phòng thủ!' },
-  { key: '6', text: '🔥 Bắn đỉnh lắm đồng đội!' }
+  { key: '1', text: '[A] Tấn công Khu A ngay!' },
+  { key: '2', text: '[B] Tập hợp đánh Khu B!' },
+  { key: '3', text: '[!] Phát hiện kẻ địch phía trước!' },
+  { key: '4', text: '[+] Cần đồng đội chi viện!' },
+  { key: '5', text: '[#] Giữ vững vị trí phòng thủ!' },
+  { key: '6', text: '[OK] Bắn đỉnh lắm đồng đội!' }
 ];
 
 export const RANK_TIERS = [
@@ -2091,7 +2103,7 @@ export const RANK_TIERS = [
   { id: 'platinum', name: 'Bạch Kim', minRp: 1600, maxRp: 1899, color: '#2dd4bf', icon: 'IV' },
   { id: 'diamond', name: 'Kim Cương', minRp: 1900, maxRp: 2199, color: '#38bdf8', icon: 'V' },
   { id: 'master', name: 'Cao Thủ', minRp: 2200, maxRp: 2599, color: '#c084fc', icon: 'VI' },
-  { id: 'legend', name: 'Huyền Thoại', minRp: 2600, maxRp: 99999, color: '#f43f5e', icon: '★' }
+  { id: 'legend', name: 'Huyền Thoại', minRp: 2600, maxRp: 99999, color: '#f43f5e', icon: 'VII' }
 ];
 
 export function getRankByRp(rp = 1200) {

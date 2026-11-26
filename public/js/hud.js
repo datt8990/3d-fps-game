@@ -319,7 +319,7 @@ export class MatchHUD {
     if (this.hitDmgEl) {
       this.hitDmgEl.textContent = hitZone === 'shield'
         ? 'KHIÊN BẢO VỆ'
-        : (isHead ? `⌖ -${damage}` : `-${damage}`);
+        : (isHead ? `HS -${damage}` : `-${damage}`);
       this.hitDmgEl.classList.remove('hidden');
       this.hitDmgEl.classList.toggle('crit', isHead || killed);
     }
@@ -334,12 +334,12 @@ export class MatchHUD {
   showKillStreak(streak = 1, isHeadshot = false, isFirstBlood = false, victimName = '') {
     if (!this.streakBannerEl) return;
     let title = 'HẠ GỤC MỤC TIÊU';
-    if (isFirstBlood) title = '⚡ CHIẾN CÔNG ĐẦU (FIRST BLOOD)';
-    if (streak === 2) title = '🔥🔥 DOUBLE KILL!';
-    else if (streak === 3) title = '🔥🔥🔥 TRIPLE KILL!';
-    else if (streak === 4) title = '💀 QUADRA KILL!';
-    else if (streak >= 5) title = '👑 HUYỀN THOẠI HỦY DIỆT (RAMPAGE)!';
-    else if (isHeadshot && !isFirstBlood) title = '⌖ ONE-SHOT HEADSHOT!';
+    if (isFirstBlood) title = 'CHIẾN CÔNG ĐẦU • FIRST BLOOD';
+    if (streak === 2) title = 'DOUBLE KILL';
+    else if (streak === 3) title = 'TRIPLE KILL';
+    else if (streak === 4) title = 'QUADRA KILL';
+    else if (streak >= 5) title = 'RAMPAGE • HỦY DIỆT';
+    else if (isHeadshot && !isFirstBlood) title = 'HEADSHOT CHÍ MẠNG';
 
     this.streakBannerEl.innerHTML = `
       <div class="streak-main">${title}</div>
@@ -370,10 +370,10 @@ export class MatchHUD {
     if (!this.killFeedEl) return;
     const item = document.createElement('div');
     item.className = 'killfeed-item';
-    const wName = WEAPONS[weaponId]?.name || (weaponId === 'grenade' ? '💣 LỰU ĐẠN' : (weaponId === 'storm' ? '☣ BO ĐỘC' : '💣 C4'));
+    const wName = WEAPONS[weaponId]?.name || (weaponId === 'grenade' ? 'FRAG' : (weaponId === 'storm' ? 'BO ĐỘC' : 'C4'));
     const kClass = killerTeam === 'alpha' ? 'team-alpha-txt' : (killerTeam === 'bravo' ? 'team-bravo-txt' : '');
     const vClass = victimTeam === 'alpha' ? 'team-alpha-txt' : (victimTeam === 'bravo' ? 'team-bravo-txt' : '');
-    const hsBadge = headshot ? '<span class="kf-hs">⌖ HS</span>' : '';
+    const hsBadge = headshot ? '<span class="kf-hs">HS</span>' : '';
 
     item.innerHTML = `
       <span class="kf-name ${kClass}">${this.escape(killerName)}</span>
@@ -398,7 +398,7 @@ export class MatchHUD {
     if (bomb.planted) {
       this.bombBannerEl?.classList.remove('hidden');
       if (this.bombBannerEl) {
-        this.bombBannerEl.textContent = `⚠ BOM C4 ĐÃ ĐẶT TẠI KHU ${bomb.siteId} — PHÁT NỔ SAU ${bomb.bombLeftSec.toFixed(1)}s`;
+        this.bombBannerEl.textContent = `CẢNH BÁO • BOM C4 ĐÃ ĐẶT TẠI KHU ${bomb.siteId} — PHÁT NỔ SAU ${bomb.bombLeftSec.toFixed(1)}s`;
       }
     } else {
       this.bombBannerEl?.classList.add('hidden');
@@ -488,11 +488,11 @@ export class MatchHUD {
 
     if (this.dropBannerEl) {
       if (info.phase === 'plane') {
-        this.dropBannerEl.textContent = `✈ MÁY BAY C-130 (${alt}m) — Nhấn [F] hoặc [SPACE] NHẢY DÙ • [M] Xem Bản Đồ 5km`;
+        this.dropBannerEl.textContent = `C-130 VẬN TẢI (${alt}m) — Nhấn [F] hoặc [SPACE] NHẢY DÙ • [M] Bản Đồ`;
       } else if (info.phase === 'skydive') {
-        this.dropBannerEl.textContent = `🪂 RƠI TỰ DO (${alt}m • ${vy} m/s) — [SPACE] Mở Dù Sớm (Tự bung ở 55m)`;
+        this.dropBannerEl.textContent = `RƠI TỰ DO (${alt}m • ${vy} m/s) — [SPACE] Mở Dù Sớm (Tự bung ở 55m)`;
       } else {
-        this.dropBannerEl.textContent = `🪂 ĐANG LƯỢN DÙ (${alt}m • ${vy} m/s) — [W] Tới • [S] Hãm Rơi Chậm • [A/D] Lượn`;
+        this.dropBannerEl.textContent = `ĐANG LƯỢN DÙ (${alt}m • ${vy} m/s) — [W] Tới • [S] Hãm Rơi Chậm • [A/D] Lượn`;
       }
     }
 
@@ -550,7 +550,7 @@ export class MatchHUD {
     let hint = '';
     if (crate.kind === 'deathbox') {
       const count = crate.items?.length || 0;
-      hint = `⚰ HÒM XÁC ${crate.ownerName || ''} (${count} món) — Nhấn [E] hoặc [Tab] để nhặt toàn bộ đồ!`;
+      hint = `[HÒM XÁC] ${crate.ownerName || ''} (${count} món) — Nhấn [E] hoặc [Tab] để nhặt đồ`;
     } else if (crate.kind === 'weapon' && crate.weaponId) {
       const s1Empty = !weaponsState?.[1]?.id;
       const s2Empty = !weaponsState?.[2]?.id;
@@ -561,7 +561,7 @@ export class MatchHUD {
         ? `Nhấn [E] ĐỔI súng [${targetSlot}] hoặc [Tab] Balo để lấy ${label}`
         : `Tiến sát để NHẶT ${label} vào [${targetSlot}] • [Tab] Mở Balo`;
     } else if (crate.label) {
-      hint = `📦 ${crate.label} — Nhấn [E] nhặt hoặc [Tab] mở Balo`;
+      hint = `[VẬT PHẨM] ${crate.label} — Nhấn [E] nhặt hoặc [Tab] mở Balo`;
     }
     if (hint) {
       if (this.interactHintEl.textContent !== hint) this.interactHintEl.textContent = hint;
@@ -586,12 +586,12 @@ export class MatchHUD {
     const quickFirstAid = (meds.firstaid || 0) + (meds.medkit || 0);
 
     this.survivalGearEl.innerHTML = `
-      <span class="gear-pill ${g.helmetTier ? 't' + g.helmetTier : ''}">🪖 Mũ Lv.${g.helmetTier || 0}</span>
-      <span class="gear-pill ${g.vestTier ? 't' + g.vestTier : ''}">🦺 Giáp Lv.${g.vestTier || 0}</span>
-      <span class="gear-pill ${g.bagTier ? 't' + g.bagTier : ''}">🎒 Balo Lv.${g.bagTier || 0} (${wt}/${cap})</span>
-      <span class="gear-pill med"><kbd>7</kbd> Băng ×${quickBand}</span>
-      <span class="gear-pill med"><kbd>8</kbd> Y Tế ×${quickFirstAid}</span>
-      <span class="gear-pill hint"><kbd>=</kbd> Auto Run • <kbd>Tab</kbd>/<kbd>I</kbd> Balo • <kbd>M</kbd> Bản Đồ</span>
+      <span class="gear-pill ${g.helmetTier ? 't' + g.helmetTier : ''}">MŨ LV.${g.helmetTier || 0}</span>
+      <span class="gear-pill ${g.vestTier ? 't' + g.vestTier : ''}">GIÁP LV.${g.vestTier || 0}</span>
+      <span class="gear-pill ${g.bagTier ? 't' + g.bagTier : ''}">BALO LV.${g.bagTier || 0} (${wt}/${cap})</span>
+      <span class="gear-pill med"><kbd>7</kbd> BĂNG ×${quickBand}</span>
+      <span class="gear-pill med"><kbd>8</kbd> Y TẾ ×${quickFirstAid}</span>
+      <span class="gear-pill hint"><kbd>=</kbd> AUTO RUN • <kbd>TAB</kbd> BALO • <kbd>M</kbd> BẢN ĐỒ</span>
     `;
   }
 
@@ -614,7 +614,7 @@ export class MatchHUD {
     const vicCards = [];
     for (const c of nearbyCrates) {
       if (c.kind === 'deathbox') {
-        vicCards.push(`<div class="inv-group-title">⚰ Hòm Xác: ${this.escape(c.ownerName || 'Kẻ Địch')} (${c.items?.length || 0})</div>`);
+        vicCards.push(`<div class="inv-group-title">HÒM XÁC: ${this.escape(c.ownerName || 'Kẻ Địch')} (${c.items?.length || 0})</div>`);
         for (const it of c.items || []) {
           vicCards.push(`
             <div class="inv-row">
@@ -626,7 +626,7 @@ export class MatchHUD {
       } else {
         vicCards.push(`
           <div class="inv-row">
-            <span>📦 ${this.escape(c.label || c.weaponId || c.kind)}</span>
+            <span><b class="inv-tag">LOOT</b> ${this.escape(c.label || c.weaponId || c.kind)}</span>
             <button class="inv-btn pick" data-loot="${c.id}" data-item="">Nhặt</button>
           </div>
         `);
@@ -641,7 +641,7 @@ export class MatchHUD {
       const mCfg = BR_MEDS[mId];
       bagCards.push(`
         <div class="inv-row">
-          <span>✚ ${this.escape(mCfg?.name || mId)} ×<strong>${qty}</strong></span>
+          <span><b class="inv-tag med">MED</b> ${this.escape(mCfg?.name || mId)} ×<strong>${qty}</strong></span>
           <div class="inv-acts">
             <button class="inv-btn use" data-use="${mId}">Dùng</button>
             <button class="inv-btn drop" data-drop="med" data-key="${mId}" data-qty="1">Vứt 1</button>
@@ -652,7 +652,7 @@ export class MatchHUD {
     if ((bag.frag_grenade || 0) > 0) {
       bagCards.push(`
         <div class="inv-row">
-          <span>💣 Lựu Đạn Nổ ×<strong>${bag.frag_grenade}</strong></span>
+          <span><b class="inv-tag frag">FRAG</b> Lựu Đạn Nổ ×<strong>${bag.frag_grenade}</strong></span>
           <div class="inv-acts">
             <button class="inv-btn drop" data-drop="grenade" data-key="frag" data-qty="1">Vứt 1</button>
           </div>
@@ -665,7 +665,7 @@ export class MatchHUD {
       const step = aCfg?.dropStep || 30;
       bagCards.push(`
         <div class="inv-row">
-          <span>🔸 ${this.escape(aCfg?.name || aType)} ×<strong>${qty}</strong></span>
+          <span><b class="inv-tag ammo">AMMO</b> ${this.escape(aCfg?.name || aType)} ×<strong>${qty}</strong></span>
           <div class="inv-acts">
             <button class="inv-btn drop" data-drop="ammo" data-key="${aType}" data-qty="${Math.min(qty, step)}">Vứt ${Math.min(qty, step)}</button>
             <button class="inv-btn drop" data-drop="ammo" data-key="${aType}" data-qty="${qty}">Hết</button>
@@ -689,15 +689,15 @@ export class MatchHUD {
         ${s2 ? `<button class="inv-btn drop" data-drop="weapon" data-key="2">Vứt Súng</button>` : ''}
       </div>
       <div class="inv-row">
-        <span><strong>🪖 Mũ:</strong> ${gear.helmetTier ? `${BR_HELMETS[gear.helmetTier]?.name} (${gear.helmetArmor} AP)` : '<em>Chưa có</em>'}</span>
+        <span><strong>[MŨ] Bảo Hộ:</strong> ${gear.helmetTier ? `${BR_HELMETS[gear.helmetTier]?.name} (${gear.helmetArmor} AP)` : '<em>Chưa có</em>'}</span>
         ${gear.helmetTier ? `<button class="inv-btn drop" data-drop="helmet" data-key="helmet">Vứt</button>` : ''}
       </div>
       <div class="inv-row">
-        <span><strong>🦺 Giáp:</strong> ${gear.vestTier ? `${BR_VESTS[gear.vestTier]?.name} (${Math.round(local.armor)} AP)` : '<em>Chưa có</em>'}</span>
+        <span><strong>[GIÁP] Chống Đạn:</strong> ${gear.vestTier ? `${BR_VESTS[gear.vestTier]?.name} (${Math.round(local.armor)} AP)` : '<em>Chưa có</em>'}</span>
         ${gear.vestTier ? `<button class="inv-btn drop" data-drop="vest" data-key="vest">Vứt</button>` : ''}
       </div>
       <div class="inv-row">
-        <span><strong>🎒 Balo:</strong> ${BR_BACKPACKS[bag.tier || 0]?.name}</span>
+        <span><strong>[BALO] Tải Trọng:</strong> ${BR_BACKPACKS[bag.tier || 0]?.name}</span>
       </div>
     `);
     eqEl.innerHTML = eqCards.join('');

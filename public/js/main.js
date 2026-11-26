@@ -65,6 +65,108 @@ function escapeHtml(str) {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Bespoke Tactical Vector Emblems (Zero Emojis — Unified AAA FPS Iconography)
+const MODE_SVG = {
+  tdm: `<svg class="mode-emblem-svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+    <path d="M10 12l28 24M38 12L10 36" opacity="0.35"/>
+    <path d="M24 6l14 6v11c0 9-6 15-14 19-8-4-14-10-14-19V12l14-6z"/>
+    <path d="M18 20l6-5 6 5M18 27l6-5 6 5"/>
+  </svg>`,
+  ffa: `<svg class="mode-emblem-svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true">
+    <circle cx="24" cy="24" r="14"/>
+    <circle cx="24" cy="24" r="5"/>
+    <path d="M24 4v9M24 35v9M4 24h9M35 24h9"/>
+    <path d="M11 11l4 4M37 11l-4 4M11 37l4-4M37 37l-4-4" opacity="0.45"/>
+  </svg>`,
+  bomb: `<svg class="mode-emblem-svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true">
+    <rect x="8" y="13" width="32" height="24" rx="1"/>
+    <rect x="13" y="18" width="14" height="8"/>
+    <path d="M16 22h8M32 19h3M32 23h3M32 27h3M13 31h14"/>
+    <path d="M17 13V9h14v4"/>
+    <circle cx="35" cy="10" r="2.2" fill="currentColor" stroke="none"/>
+  </svg>`,
+  survival: `<svg class="mode-emblem-svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true">
+    <path d="M8 22c0-9 7.2-15 16-15s16 6 16 15H8z"/>
+    <path d="M14 22l10 16 10-16M24 7v31"/>
+    <circle cx="24" cy="39" r="2.5" fill="currentColor" stroke="none"/>
+    <path d="M6 42h36" opacity="0.4"/>
+  </svg>`,
+  ranked: `<svg class="mode-emblem-svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true">
+    <polygon points="24,5 39,14 39,34 24,43 9,34 9,14"/>
+    <polygon points="24,13 32,18 32,30 24,35 16,30 16,18" opacity="0.45"/>
+    <path d="M18 26l6-7 6 7M20 31l4-4 4 4"/>
+  </svg>`,
+  practice: `<svg class="mode-emblem-svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+    <circle cx="24" cy="24" r="15"/>
+    <circle cx="24" cy="24" r="9"/>
+    <circle cx="24" cy="24" r="2.5" fill="currentColor" stroke="none"/>
+  </svg>`
+};
+
+const MAP_VISUAL_META = {
+  warehouse: {
+    sizeTag: 'CQC ARENA',
+    accent: '#f97316',
+    svg: `<svg viewBox="0 0 120 64" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+      <rect x="8" y="8" width="104" height="48" opacity="0.35"/>
+      <rect x="20" y="16" width="22" height="12" fill="currentColor" fill-opacity="0.16"/>
+      <rect x="78" y="16" width="22" height="12" fill="currentColor" fill-opacity="0.16"/>
+      <rect x="49" y="24" width="22" height="16" fill="currentColor" fill-opacity="0.24"/>
+      <rect x="20" y="38" width="18" height="10" fill="currentColor" fill-opacity="0.16"/>
+      <rect x="82" y="38" width="18" height="10" fill="currentColor" fill-opacity="0.16"/>
+      <path d="M12 32h96" stroke-dasharray="3 3" opacity="0.45"/>
+    </svg>`
+  },
+  military_base: {
+    sizeTag: 'TACTICAL BASE',
+    accent: '#eab308',
+    svg: `<svg viewBox="0 0 120 64" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+      <rect x="8" y="8" width="104" height="48" opacity="0.35"/>
+      <polygon points="22,18 46,18 46,44 22,44" fill="currentColor" fill-opacity="0.18"/>
+      <polygon points="74,18 98,18 98,44 74,44" fill="currentColor" fill-opacity="0.18"/>
+      <circle cx="60" cy="32" r="9" fill="currentColor" fill-opacity="0.2"/>
+      <path d="M46 32h5M69 32h5M60 12v11M60 41v11" opacity="0.6"/>
+    </svg>`
+  },
+  urban_city: {
+    sizeTag: 'URBAN C4',
+    accent: '#00e5ff',
+    svg: `<svg viewBox="0 0 120 64" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+      <rect x="8" y="8" width="104" height="48" opacity="0.35"/>
+      <rect x="16" y="14" width="24" height="18" fill="currentColor" fill-opacity="0.2"/>
+      <rect x="48" y="12" width="24" height="14" fill="currentColor" fill-opacity="0.16"/>
+      <rect x="80" y="14" width="24" height="20" fill="currentColor" fill-opacity="0.2"/>
+      <rect x="18" y="38" width="28" height="12" fill="currentColor" fill-opacity="0.16"/>
+      <rect x="54" y="34" width="18" height="16" fill="currentColor" fill-opacity="0.22"/>
+      <rect x="80" y="40" width="22" height="10" fill="currentColor" fill-opacity="0.16"/>
+    </svg>`
+  },
+  jungle: {
+    sizeTag: 'JUNGLE OPS',
+    accent: '#22c55e',
+    svg: `<svg viewBox="0 0 120 64" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+      <path d="M12 48 Q35 20 60 32 T108 16" stroke-width="2" opacity="0.65"/>
+      <circle cx="30" cy="24" r="8" fill="currentColor" fill-opacity="0.16"/>
+      <circle cx="60" cy="32" r="11" fill="currentColor" fill-opacity="0.22"/>
+      <circle cx="90" cy="40" r="8" fill="currentColor" fill-opacity="0.16"/>
+      <path d="M22 46l8-8 8 8M82 22l7-7 7 7" opacity="0.6"/>
+    </svg>`
+  },
+  br_island: {
+    sizeTag: '1.5KM • BR 50',
+    accent: '#34d399',
+    svg: `<svg viewBox="0 0 120 64" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+      <path d="M20 44 C14 26 30 12 58 12 C86 12 106 22 102 40 C98 54 70 54 48 52 C32 50 24 52 20 44 Z" fill="currentColor" fill-opacity="0.16"/>
+      <path d="M28 34 Q58 26 94 36" stroke-dasharray="3 2" opacity="0.7"/>
+      <circle cx="62" cy="30" r="14" stroke-dasharray="4 3" opacity="0.8"/>
+      <circle cx="62" cy="30" r="3" fill="currentColor" stroke="none"/>
+    </svg>`
+  }
+};
+
+const ICON_USER_SVG = '<svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+const ICON_CLOSE_SVG = '<svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
 async function apiCall(path, method = 'GET', body = null) {
   const headers = { 'Content-Type': 'application/json' };
   if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
@@ -163,11 +265,71 @@ function refreshProfileUI() {
   const summaryEl = document.getElementById('home-loadout-summary');
   if (summaryEl) {
     summaryEl.innerHTML = `
-      <span>Quân nhân: <strong style="color:#38bdf8">${op.name}</strong> (${out.name})</span>
+      <span>Quân nhân: <strong style="color:#38bdf8">${escapeHtml(op.name)}</strong> (${escapeHtml(out.name)})</span>
       <span>•</span>
-      <span>Súng chính: <strong style="color:#f97316">${pri.name}</strong> [${skin.name}]</span>
+      <span>Súng chính: <strong style="color:#f97316">${escapeHtml(pri.name)}</strong> [${escapeHtml(skin.name)}]</span>
       <span>•</span>
-      <span>Phụ: <strong>${sec.name}</strong> & <strong>${mel.name}</strong></span>
+      <span>Phụ: <strong>${escapeHtml(sec.name)}</strong> &amp; <strong>${escapeHtml(mel.name)}</strong></span>
+    `;
+  }
+
+  // Top-Left Operator Combat Dossier Card
+  const dossierBody = document.getElementById('home-dossier-body');
+  if (dossierBody) {
+    const st = u.stats || {};
+    const kd = (st.deaths || 0) > 0 ? ((st.kills || 0) / st.deaths).toFixed(2) : String(st.kills || 0);
+    const winRate = (st.matches || 0) > 0 ? Math.round(((st.wins || 0) / st.matches) * 100) : 0;
+    const hsRate = (st.kills || 0) > 0 ? Math.round(((st.headshots || 0) / st.kills) * 100) : 0;
+    const rColor = u.rank?.color || '#f5c542';
+    dossierBody.innerHTML = `
+      <div class="dossier-head">
+        <div class="dossier-rank-crest" style="border-color:${rColor};color:${rColor};">${escapeHtml(u.rank?.icon || 'II')}</div>
+        <div style="min-width:0;flex:1;">
+          <div class="dossier-callsign">${escapeHtml(u.username)}</div>
+          <div class="dossier-rank-sub" style="color:${rColor};">${escapeHtml(u.rank?.name || 'Bạc Đoàn')} • ${u.rp || 1200} RP • Cấp ${u.level || 1}</div>
+        </div>
+      </div>
+      <div class="dossier-kpis">
+        <div class="dossier-kpi"><strong style="color:var(--cyan);">${kd}</strong><span>K/D Ratio</span></div>
+        <div class="dossier-kpi"><strong style="color:var(--emerald);">${winRate}%</strong><span>Tỉ Lệ Thắng</span></div>
+        <div class="dossier-kpi"><strong style="color:var(--gold);">${hsRate}%</strong><span>Headshot</span></div>
+      </div>
+    `;
+  }
+
+  // Top-Right Active Loadout & Weapon Quick-Inspect Card
+  const arsenalBody = document.getElementById('home-arsenal-body');
+  if (arsenalBody) {
+    const eff = getEffectiveWeaponStats(pri.id, u.loadout.attachments?.[pri.id] || {}, op.id);
+    const dmgPct = Math.min(100, Math.round(((eff.damage * (eff.pellets || 1)) / 120) * 100));
+    const rpmPct = Math.min(100, Math.round((eff.rpm / 1000) * 100));
+    const ctrlPct = Math.max(45, Math.min(98, Math.round(100 - eff.recoilPitch * 1650)));
+    arsenalBody.innerHTML = `
+      <div class="aq-primary-box">
+        <div class="aq-kicker">
+          <span>SÚNG CHÍNH ĐANG TRANG BỊ</span>
+          <span style="color:${skin.rarityColor || '#38bdf8'};">${escapeHtml(skin.name)}</span>
+        </div>
+        <div class="aq-gun-name">${escapeHtml(pri.name)}</div>
+        <div class="aq-bars">
+          <div class="aq-bar-item">
+            <span>DMG ${eff.damage * (eff.pellets || 1)}</span>
+            <div class="aq-bar-track"><div class="aq-bar-fill" style="width:${dmgPct}%"></div></div>
+          </div>
+          <div class="aq-bar-item">
+            <span>RPM ${eff.rpm}</span>
+            <div class="aq-bar-track"><div class="aq-bar-fill" style="width:${rpmPct}%"></div></div>
+          </div>
+          <div class="aq-bar-item">
+            <span>CTRL ${ctrlPct}%</span>
+            <div class="aq-bar-track"><div class="aq-bar-fill" style="width:${ctrlPct}%"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="aq-sub-row">
+        <div class="aq-sub-chip"><span>SÚNG PHỤ</span><strong>${escapeHtml(sec.name)}</strong></div>
+        <div class="aq-sub-chip"><span>QUÂN NHÂN</span><strong>${escapeHtml(op.name)}</strong></div>
+      </div>
     `;
   }
 }
@@ -214,7 +376,7 @@ function populateStaticSelects() {
     if (!sel) continue;
     sel.innerHTML = Object.values(GAME_MODES)
       .filter((m) => !m.isPractice)
-      .map((m) => `<option value="${m.id}">${m.icon || ''} ${m.shortName} (${m.name})</option>`)
+      .map((m) => `<option value="${m.id}">${m.shortName} (${m.name})</option>`)
       .join('');
   }
 }
@@ -230,7 +392,9 @@ function switchTab(tabId) {
     b.classList.toggle('active', b.dataset.tab === tabId);
   });
   document.querySelectorAll('.tab-view').forEach((sec) => {
-    sec.classList.toggle('hidden', sec.id !== `tab-${tabId}`);
+    const isTarget = sec.id === `tab-${tabId}`;
+    sec.classList.toggle('hidden', !isTarget);
+    sec.classList.toggle('active', isTarget);
   });
 
   if (tabId === 'armory') {
@@ -255,36 +419,143 @@ function switchTab(tabId) {
   }
 }
 
-function renderQuickModes() {
-  const container = document.getElementById('quick-mode-list');
-  if (!container) return;
-  container.innerHTML = Object.values(GAME_MODES)
-    .filter((m) => !m.isPractice)
-    .map((m) => `
-      <div class="mode-card ${state.selectedQuickMode === m.id ? 'selected' : ''}" data-mode="${m.id}">
-        <div class="mode-card-title">
-          <span>${m.icon || '⚡'} ${m.name}</span>
-          <span style="color:#38bdf8;font-size:11.5px;">${m.shortName}</span>
-        </div>
-        <div class="mode-card-desc">${m.description}</div>
-      </div>
-    `).join('');
+function getModeSpecLine(m) {
+  if (!m) return '';
+  if (m.id === 'survival') return `${m.maxPlayers} Chiến binh • Nhảy dù C-130`;
+  if (m.roundBased) return `${m.maxPlayers}P • Chạm ${m.scoreLimit} hiệp`;
+  return `${m.maxPlayers}P • Mục tiêu ${m.scoreLimit} hạ gục`;
+}
 
-  container.querySelectorAll('.mode-card').forEach((card) => {
+function renderActiveModeTrigger() {
+  const mode = GAME_MODES[state.selectedQuickMode] || GAME_MODES.tdm;
+  const mapObj = MAP_LIST.find((x) => x.id === state.selectedQuickMap) || MAP_LIST[0];
+  const trigger = document.getElementById('btn-open-mode-modal');
+  const emblemEl = document.getElementById('active-mode-emblem');
+  const tagEl = document.getElementById('active-mode-tag');
+  const nameEl = document.getElementById('active-mode-name');
+  const subEl = document.getElementById('active-map-line');
+  const summaryEl = document.getElementById('mode-modal-summary');
+
+  if (trigger) trigger.style.setProperty('--mode-accent', mode.accent || '#ff4d1c');
+  if (emblemEl) emblemEl.innerHTML = MODE_SVG[mode.icon] || MODE_SVG.tdm;
+  if (tagEl) tagEl.textContent = mode.tag || mode.shortName;
+  if (nameEl) nameEl.textContent = mode.name.toUpperCase();
+  if (subEl) subEl.textContent = `${mapObj?.name || 'Nhà Kho'} • ${getModeSpecLine(mode)}`;
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <span class="mms-badge" style="border-color:${mode.accent || '#ff4d1c'};color:${mode.accent || '#ff4d1c'};">${mode.tag || mode.shortName}</span>
+      <strong>${escapeHtml(mode.name)}</strong>
+      <span class="muted">•</span>
+      <span style="color:var(--cyan);font-weight:700;">${escapeHtml(mapObj?.name || 'Nhà Kho')}</span>
+    `;
+  }
+}
+
+function renderModeMapCards() {
+  const container = document.getElementById('mode-map-cards');
+  const hintEl = document.getElementById('mode-map-hint');
+  if (!container) return;
+  const isSurvival = state.selectedQuickMode === 'survival';
+  if (hintEl) {
+    hintEl.textContent = isSurvival
+      ? 'Chế độ Sinh Tồn 50 Người triển khai trên bản đồ mở Đảo Sinh Tồn 1.5km'
+      : 'Chọn bản đồ chiến thuật 3D (hoặc chọn Đảo Sinh Tồn để chuyển sang BR 50)';
+  }
+
+  container.innerHTML = MAP_LIST.map((m, idx) => {
+    const meta = MAP_VISUAL_META[m.id] || MAP_VISUAL_META.warehouse;
+    const selected = state.selectedQuickMap === m.id;
+    const isBrMap = m.id === 'br_island';
+    const dimMismatch = isSurvival && !isBrMap;
+    return `
+      <button type="button" class="map-tile ${selected ? 'selected' : ''} ${dimMismatch ? 'dimmed' : ''}" data-map="${m.id}" style="--map-accent:${meta.accent};--stagger:${idx};">
+        <div class="map-tile-art">${meta.svg}</div>
+        <div class="map-tile-info">
+          <div class="map-tile-head">
+            <span class="map-tile-size">${meta.sizeTag}</span>
+            ${selected ? '<span class="tile-active-dot">ĐÃ CHỌN</span>' : ''}
+          </div>
+          <div class="map-tile-name">${escapeHtml(m.name)}</div>
+          <div class="map-tile-sub">${escapeHtml(m.subtitle)}</div>
+        </div>
+      </button>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.map-tile').forEach((card) => {
     card.addEventListener('click', () => {
-      state.selectedQuickMode = card.dataset.mode;
+      const mapId = card.dataset.map;
+      state.selectedQuickMap = mapId;
       const mapSelect = document.getElementById('quick-map-select');
-      if (card.dataset.mode === 'survival') {
-        state.selectedQuickMap = 'br_island';
-        if (mapSelect) mapSelect.value = 'br_island';
-      } else if (state.selectedQuickMap === 'br_island') {
-        state.selectedQuickMap = 'warehouse';
-        if (mapSelect) mapSelect.value = 'warehouse';
+      if (mapSelect) mapSelect.value = mapId;
+      if (mapId === 'br_island' && state.selectedQuickMode !== 'survival') {
+        state.selectedQuickMode = 'survival';
+      } else if (mapId !== 'br_island' && state.selectedQuickMode === 'survival') {
+        state.selectedQuickMode = 'tdm';
       }
-      soundEngine.playUiTone(740, 0.05);
+      soundEngine.playUiTone(820, 0.05);
       renderQuickModes();
     });
   });
+}
+
+function renderQuickModes() {
+  const container = document.getElementById('quick-mode-list');
+  if (container) {
+    container.innerHTML = Object.values(GAME_MODES)
+      .filter((m) => !m.isPractice)
+      .map((m, idx) => {
+        const selected = state.selectedQuickMode === m.id;
+        return `
+          <button type="button" class="mode-tile ${selected ? 'selected' : ''}" data-mode="${m.id}" style="--mode-accent:${m.accent || '#ff4d1c'};--stagger:${idx};">
+            <div class="mode-tile-banner">
+              <div class="mode-tile-top">
+                <span class="mode-tile-tag">${escapeHtml(m.tag || m.shortName)}</span>
+                ${selected ? '<span class="tile-active-stamp">ĐANG CHỌN</span>' : ''}
+              </div>
+              <div class="mode-tile-emblem">${MODE_SVG[m.icon] || MODE_SVG.tdm}</div>
+            </div>
+            <div class="mode-tile-body">
+              <div class="mode-tile-title">${escapeHtml(m.name)}</div>
+              <div class="mode-tile-short">${escapeHtml(m.shortName)}</div>
+              <div class="mode-tile-desc">${escapeHtml(m.description)}</div>
+              <div class="mode-tile-spec">${escapeHtml(getModeSpecLine(m))}</div>
+            </div>
+          </button>
+        `;
+      }).join('');
+
+    container.querySelectorAll('.mode-tile').forEach((card) => {
+      card.addEventListener('click', () => {
+        state.selectedQuickMode = card.dataset.mode;
+        const mapSelect = document.getElementById('quick-map-select');
+        if (card.dataset.mode === 'survival') {
+          state.selectedQuickMap = 'br_island';
+          if (mapSelect) mapSelect.value = 'br_island';
+        } else if (state.selectedQuickMap === 'br_island') {
+          state.selectedQuickMap = 'warehouse';
+          if (mapSelect) mapSelect.value = 'warehouse';
+        }
+        soundEngine.playUiTone(740, 0.05);
+        renderQuickModes();
+      });
+    });
+  }
+  renderModeMapCards();
+  renderActiveModeTrigger();
+}
+
+function openModeSelectorModal() {
+  const modal = document.getElementById('mode-selector-modal');
+  if (!modal) return;
+  renderQuickModes();
+  modal.classList.remove('hidden');
+  soundEngine.playUiTone(760, 0.05);
+}
+
+function closeModeSelectorModal() {
+  document.getElementById('mode-selector-modal')?.classList.add('hidden');
 }
 
 function renderOperatorsTab() {
@@ -319,7 +590,7 @@ function renderOperatorsTab() {
           <div>
             <div style="font-weight:700;">${op.name}</div>
             <div class="muted">${op.role}</div>
-            <div style="font-size:11px;color:#38bdf8;margin-top:2px;">★ ${op.perkLabel}</div>
+            <div style="font-size:11px;color:#38bdf8;margin-top:2px;">PERK: ${op.perkLabel}</div>
           </div>
           ${badge}
         </button>
@@ -404,22 +675,22 @@ function renderOperatorsTab() {
   const btnActionOp = document.getElementById('btn-action-operator');
   if (btnActionOp) {
     if (!opUnlocked) {
-      btnActionOp.textContent = `🔓 MUA & CHỌN ${currentOp.name} (${currentOp.unlockCost} GP)`;
+      btnActionOp.textContent = `MUA & CHỌN ${currentOp.name} (${currentOp.unlockCost} GP)`;
     } else if (opEquipped) {
-      btnActionOp.textContent = `✓ ĐANG DÙNG ${currentOp.name}`;
+      btnActionOp.textContent = `ĐANG DÙNG ${currentOp.name}`;
     } else {
-      btnActionOp.textContent = `✓ CHỌN QUÂN NHÂN ${currentOp.name}`;
+      btnActionOp.textContent = `CHỌN QUÂN NHÂN ${currentOp.name}`;
     }
   }
 
   const btnActionOut = document.getElementById('btn-action-outfit');
   if (btnActionOut) {
     if (!outUnlocked) {
-      btnActionOut.textContent = `🔓 MUA & MẶC ${currentOut.name} (${currentOut.cost} GP)`;
+      btnActionOut.textContent = `MUA & MẶC ${currentOut.name} (${currentOut.cost} GP)`;
     } else if (outEquipped) {
-      btnActionOut.textContent = `✓ ĐANG MẶC ${currentOut.name}`;
+      btnActionOut.textContent = `ĐANG MẶC ${currentOut.name}`;
     } else {
-      btnActionOut.textContent = `👕 MẶC ${currentOut.name}`;
+      btnActionOut.textContent = `MẶC ${currentOut.name}`;
     }
   }
 }
@@ -495,9 +766,9 @@ function renderArmoryTab() {
     const isUnlocked = unlockedWeapons.includes(wId);
     const alreadyEquipped = u.loadout.primary === wId || u.loadout.secondary === wId || (u.loadout.melee || 'knife') === wId;
     if (!isUnlocked) {
-      equipBtn.textContent = `🔓 MỞ KHÓA & TRANG BỊ ${gun.name} (${gun.unlockCost} GP)`;
+      equipBtn.textContent = `MỞ KHÓA & TRANG BỊ ${gun.name} (${gun.unlockCost} GP)`;
     } else if (alreadyEquipped) {
-      equipBtn.textContent = `✓ ĐANG TRANG BỊ ${gun.name} TRONG BALO`;
+      equipBtn.textContent = `ĐANG TRANG BỊ ${gun.name} TRONG BALO`;
     } else {
       equipBtn.textContent = `TRANG BỊ ${gun.name} VÀO BALO`;
     }
@@ -559,8 +830,8 @@ function renderArmoryTab() {
       const hasAttPreviewDiff = slots.some((s) => viewAtt[s.key] !== curAtt[s.key]);
 
       const actionLabel = !selUnlocked
-        ? `🔓 MUA & LẮP ${selAtt.name} (${selAtt.cost} GP)`
-        : (selEquipped ? `✓ ĐANG LẮP ${selAtt.name}` : `🔧 LẮP ${selAtt.name}`);
+        ? `MUA & LẮP ${selAtt.name} (${selAtt.cost} GP)`
+        : (selEquipped ? `ĐANG LẮP ${selAtt.name}` : `LẮP ${selAtt.name}`);
 
       attBox.innerHTML = `
         <div class="preview-action-bar">
@@ -646,8 +917,8 @@ function renderArmoryTab() {
     const viewSkEquipped = activeSkin === viewSkinId;
 
     const skinActionText = !viewSkUnlocked
-      ? `🔓 MUA & ÁP DỤNG ${viewSk.name} (${viewSk.cost} GP)`
-      : (viewSkEquipped ? `✓ ĐANG DÙNG ${viewSk.name}` : `🎨 ÁP DỤNG SKIN ${viewSk.name}`);
+      ? `MUA & ÁP DỤNG ${viewSk.name} (${viewSk.cost} GP)`
+      : (viewSkEquipped ? `ĐANG DÙNG ${viewSk.name}` : `ÁP DỤNG SKIN ${viewSk.name}`);
 
     skinList.innerHTML = `
       <div class="preview-action-bar">
@@ -816,7 +1087,7 @@ async function sendSquadInviteSmart(targetUsername) {
     mapName: state.currentRoom.mapName || 'Nhà Kho'
   });
   if (res?.error) return showToast(res.error);
-  if (res?.ok) showToast(`⚡ Đã gửi lời mời vào phòng #${state.currentRoom.code} tới ${targetUsername}!`);
+  if (res?.ok) showToast(`Đã gửi lời mời vào phòng #${state.currentRoom.code} tới ${targetUsername}!`);
 }
 
 async function openPlayerProfile(identifier) {
@@ -842,31 +1113,31 @@ async function openPlayerProfile(identifier) {
     const priName = WEAPONS[p.loadout?.primary]?.name || 'AK-47';
     const secName = WEAPONS[p.loadout?.secondary]?.name || 'Desert Eagle';
     const statusText = p.isRivalBot
-      ? '<span class="muted">🤖 Chiến Binh AI Huyền Thoại</span>'
+      ? '<span class="muted">BOT • Chiến Binh AI Huyền Thoại</span>'
       : (p.online
         ? `<span style="color:#4ade80;font-weight:700;">● Đang Online ${p.roomCode ? `• Phòng #${escapeHtml(p.roomCode)}` : '• Sảnh Chính'}</span>`
         : '<span class="muted">○ Ngoại tuyến</span>');
 
     const actionHtml = [];
     if (p.relationship === 'self') {
-      actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-copy-code" data-code="${escapeHtml(p.friendCode)}">📋 Copy Mã Kết Bạn (${escapeHtml(p.friendCode)})</button>`);
+      actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-copy-code" data-code="${escapeHtml(p.friendCode)}">Copy Mã Kết Bạn (${escapeHtml(p.friendCode)})</button>`);
     } else if (!p.isRivalBot) {
       if (p.relationship === 'none') {
-        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-add-friend" data-user="${escapeHtml(p.username)}">👤+ Gửi Lời Mời Kết Bạn</button>`);
+        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-add-friend" data-user="${escapeHtml(p.username)}">+ Gửi Lời Mời Kết Bạn</button>`);
       } else if (p.relationship === 'outgoing_request') {
-        actionHtml.push(`<button class="btn-secondary btn-sm" disabled>⏳ Đã Gửi Lời Mời Kết Bạn</button>`);
+        actionHtml.push(`<button class="btn-secondary btn-sm" disabled>Đã Gửi Lời Mời Kết Bạn</button>`);
       } else if (p.relationship === 'incoming_request') {
-        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-accept-req" data-user="${escapeHtml(p.username)}">✓ Chấp Nhận Kết Bạn</button>`);
-        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-decline-req" data-user="${escapeHtml(p.username)}">✕ Từ Chối</button>`);
+        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-accept-req" data-user="${escapeHtml(p.username)}">Chấp Nhận Kết Bạn</button>`);
+        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-decline-req" data-user="${escapeHtml(p.username)}">Từ Chối</button>`);
       } else if (p.relationship === 'friend') {
-        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-remove-friend" data-user="${escapeHtml(p.username)}" style="color:#fca5a5;">✕ Xóa Bạn</button>`);
+        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-remove-friend" data-user="${escapeHtml(p.username)}" style="color:#fca5a5;">Xóa Bạn</button>`);
       }
 
       if (p.online) {
-        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-invite-squad" data-user="${escapeHtml(p.username)}">⚔ Mời Đấu Chung</button>`);
+        actionHtml.push(`<button class="btn-primary btn-sm" id="prof-invite-squad" data-user="${escapeHtml(p.username)}">Mời Đấu Chung</button>`);
       }
       if (p.roomCode && p.roomCode !== state.currentRoom?.code) {
-        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-join-room" data-room="${escapeHtml(p.roomCode)}">▶ Vào Phòng #${escapeHtml(p.roomCode)}</button>`);
+        actionHtml.push(`<button class="btn-secondary btn-sm" id="prof-join-room" data-room="${escapeHtml(p.roomCode)}">Vào Phòng #${escapeHtml(p.roomCode)}</button>`);
       }
     }
 
@@ -888,7 +1159,7 @@ async function openPlayerProfile(identifier) {
       <div class="profile-hero">
         <div style="display:flex;align-items:center;gap:12px;">
           <div class="profile-avatar-badge" style="border-color:${p.rank?.color || '#38bdf8'};">
-            ${escapeHtml(p.rank?.icon || '★')}
+            ${escapeHtml(p.rank?.icon || 'II')}
           </div>
           <div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1012,8 +1283,8 @@ function renderIncomingRequests() {
         <div class="muted" style="font-size:11px;">${escapeHtml(r.rank?.name || 'Bạc')} • Cấp ${r.level || 1}</div>
       </div>
       <div class="row-gap">
-        <button class="btn-primary btn-xs" data-accept-req="${escapeHtml(r.from)}">✓ Đồng Ý</button>
-        <button class="btn-secondary btn-xs" data-decline-req="${escapeHtml(r.from)}">✕</button>
+        <button class="btn-primary btn-xs" data-accept-req="${escapeHtml(r.from)}">Đồng Ý</button>
+        <button class="btn-secondary btn-xs" data-decline-req="${escapeHtml(r.from)}" aria-label="Từ chối">${ICON_CLOSE_SVG}</button>
       </div>
     </div>
   `).join('');
@@ -1053,7 +1324,7 @@ function renderFriendsList() {
       ? `<span style="color:#4ade80;font-size:11px;">● Online ${f.roomCode ? `(Phòng #${escapeHtml(f.roomCode)})` : ''}</span>`
       : `<span class="muted" style="font-size:11px;">○ Ngoại tuyến</span>`;
 
-    const actionBtns = [`<button class="btn-secondary btn-xs" data-open-profile="${escapeHtml(f.username)}" title="Xem Hồ Sơ">👤</button>`];
+    const actionBtns = [`<button class="btn-secondary btn-xs" data-open-profile="${escapeHtml(f.username)}" title="Xem Hồ Sơ">${ICON_USER_SVG}</button>`];
     if (f.roomCode && f.roomCode !== state.currentRoom?.code) {
       actionBtns.push(`<button class="btn-primary btn-xs" data-join-friend="${escapeHtml(f.roomCode)}">Vào Chung</button>`);
     }
@@ -1097,9 +1368,9 @@ function renderOnlinePlayersList() {
   }
   box.innerHTML = list.map((p) => {
     let relBtn = `<button class="btn-primary btn-xs" data-quick-add="${escapeHtml(p.username)}">+ Kết Bạn</button>`;
-    if (p.relationship === 'friend') relBtn = '<span class="muted" style="font-size:11px;">✓ Bạn bè</span>';
-    else if (p.relationship === 'outgoing_request') relBtn = '<span class="muted" style="font-size:11px;">⏳ Đã gửi</span>';
-    else if (p.relationship === 'incoming_request') relBtn = `<button class="btn-primary btn-xs" data-accept-req="${escapeHtml(p.username)}">✓ Đồng Ý</button>`;
+    if (p.relationship === 'friend') relBtn = '<span class="muted" style="font-size:11px;">Bạn bè</span>';
+    else if (p.relationship === 'outgoing_request') relBtn = '<span class="muted" style="font-size:11px;">Đã gửi</span>';
+    else if (p.relationship === 'incoming_request') relBtn = `<button class="btn-primary btn-xs" data-accept-req="${escapeHtml(p.username)}">Đồng Ý</button>`;
     return `
       <div class="roster-slot">
         <div>
@@ -1109,7 +1380,7 @@ function renderOnlinePlayersList() {
           </div>
         </div>
         <div class="row-gap">
-          <button class="btn-secondary btn-xs" data-open-profile="${escapeHtml(p.username)}" title="Xem Hồ Sơ">👤</button>
+          <button class="btn-secondary btn-xs" data-open-profile="${escapeHtml(p.username)}" title="Xem Hồ Sơ">${ICON_USER_SVG}</button>
           ${relBtn}
         </div>
       </div>
@@ -1243,7 +1514,7 @@ function renderWaitingRoom(room) {
   }
   if (startBtn) {
     startBtn.disabled = !isHost;
-    startBtn.textContent = isHost ? '⚡ BẮT ĐẦU TRẬN ĐẤU' : 'Đang chờ Chủ phòng bắt đầu...';
+    startBtn.textContent = isHost ? 'BẮT ĐẦU TRẬN ĐẤU' : 'Đang chờ Chủ phòng bắt đầu...';
   }
 
   const alphaContainer = document.getElementById('room-team-alpha');
@@ -1256,12 +1527,12 @@ function renderWaitingRoom(room) {
       <div class="roster-slot">
         <div>
           <strong class="profile-name-link" data-open-profile="${escapeHtml(p.name)}">${escapeHtml(p.name)}</strong>
-          ${p.id === room.hostId ? '<span style="color:#facc15;font-size:11px;"> ★ Chủ phòng</span>' : ''}
+          ${p.id === room.hostId ? '<span class="host-tag">HOST</span>' : ''}
           <div class="muted">${OPERATORS[p.operator]?.name || 'VANGUARD'} • ${WEAPONS[p.primary]?.name || 'AK-47'}</div>
         </div>
         <div class="row-gap">
           <span class="mode-pill">${p.rank?.name || 'Bạc'}</span>
-          ${canKick ? `<button class="btn-secondary btn-xs" data-kick-id="${escapeHtml(p.id)}" title="Mời khỏi phòng" style="color:#fca5a5;">✕</button>` : ''}
+          ${canKick ? `<button class="btn-secondary btn-xs" data-kick-id="${escapeHtml(p.id)}" title="Mời khỏi phòng" style="color:#fca5a5;">${ICON_CLOSE_SVG}</button>` : ''}
         </div>
       </div>
     `;
@@ -1587,11 +1858,11 @@ function bindNetworkEvents() {
 
   net.on('bomb_planted', (msg) => {
     soundEngine.playBombBeep(true);
-    hud.showRoundBanner(`⚠ ${msg.planterName} ĐÃ ĐẶT BOM C4 TẠI KHU ${msg.siteId}!`, 'bravo');
+    hud.showRoundBanner(`${msg.planterName} ĐÃ ĐẶT BOM C4 TẠI KHU ${msg.siteId}!`, 'bravo');
   });
   net.on('bomb_defused', (msg) => {
     soundEngine.playFanfare(true);
-    hud.showRoundBanner(`🛡 ${msg.defuserName} ĐÃ GỠ BOM C4 THÀNH CÔNG!`, 'alpha');
+    hud.showRoundBanner(`${msg.defuserName} ĐÃ GỠ BOM C4 THÀNH CÔNG!`, 'alpha');
   });
   net.on('bomb_exploded', () => soundEngine.playExplosion(0));
   net.on('round_ended', (msg) => hud.showRoundBanner(msg.reasonText, msg.winnerTeam));
@@ -1632,12 +1903,16 @@ function showPostMatchModal(msg) {
   soundEngine.playFanfare(won);
 
   const badge = document.getElementById('pm-outcome-badge');
-  badge.textContent = msg.winnerTeam === 'draw' ? 'HÒA TRẬN' : (won ? 'CHIẾN THẮNG VINH QUANG' : 'KẾT THÚC TRẬN ĐẤU');
+  badge.textContent = msg.winnerTeam === 'draw'
+    ? 'HÒA TRẬN'
+    : (won
+      ? (msg.mode === 'survival' ? 'TOP 1 — CHIẾN THẮNG SINH TỒN' : 'CHIẾN THẮNG VINH QUANG')
+      : 'KẾT THÚC TRẬN ĐẤU');
   badge.className = `pm-badge ${won ? 'win' : 'loss'}`;
 
   document.getElementById('pm-subtitle').textContent = msg.winnerTeam
     ? `ALPHA ${msg.alphaScore}  —  ${msg.bravoScore} BRAVO (${msg.mapName})`
-    : `Bản đồ: ${msg.mapName}`;
+    : (msg.mode === 'survival' && won ? `Người sống sót cuối cùng • ${msg.mapName}` : `Bản đồ: ${msg.mapName}`);
 
   const myReward = msg.rewardsByPlayer?.[net.clientId];
   const rewardEl = document.getElementById('pm-rewards-row');
@@ -1649,7 +1924,7 @@ function showPostMatchModal(msg) {
 
   const mvpEl = document.getElementById('pm-mvp-box');
   if (mvpEl && msg.mvp) {
-    mvpEl.innerHTML = `★ MVP TRẬN ĐẤU: <strong>${escapeHtml(msg.mvp.name)}</strong> (${msg.mvp.kills} Hạ gục • ${msg.mvp.score} Điểm)`;
+    mvpEl.innerHTML = `MVP TRẬN ĐẤU: <strong>${escapeHtml(msg.mvp.name)}</strong> (${msg.mvp.kills} Hạ gục • ${msg.mvp.score} Điểm)`;
   }
 
   const tbody = document.getElementById('pm-scoreboard-body');
@@ -1746,9 +2021,9 @@ function bindUIEvents() {
     if (res.friends) state.friendsList = res.friends;
     if (res.incomingRequests) state.incomingRequests = res.incomingRequests;
     if (res.requestSentTo) {
-      showToast(`📩 Đã gửi lời mời kết bạn tới ${res.requestSentTo}!`);
+      showToast(`Đã gửi lời mời kết bạn tới ${res.requestSentTo}!`);
     } else if (res.friendAdded) {
-      showToast(`✓ Đã trở thành bạn bè với ${res.friendAdded}!`);
+      showToast(`Đã trở thành bạn bè với ${res.friendAdded}!`);
     }
     fetchFriendsStatus();
   });
@@ -1801,9 +2076,57 @@ function bindUIEvents() {
     showToast('Đã copy Link mời bạn bè! Hãy gửi qua Zalo / Discord / Messenger.');
   });
 
+  // Home Quick-Navigation Buttons (Dossier & Armed Loadout Cards)
+  document.getElementById('btn-home-open-profile')?.addEventListener('click', () => {
+    if (state.user?.username) openPlayerProfile(state.user.username);
+  });
+  document.getElementById('btn-home-go-ranked')?.addEventListener('click', () => switchTab('ranked'));
+  document.getElementById('btn-home-go-armory')?.addEventListener('click', () => switchTab('armory'));
+  document.getElementById('btn-home-go-operators')?.addEventListener('click', () => switchTab('operators'));
+
+  // Mode & Map Selector Popup Modal + Controls Popup Modal
+  document.getElementById('btn-open-mode-modal')?.addEventListener('click', openModeSelectorModal);
+  document.getElementById('btn-close-mode-modal')?.addEventListener('click', closeModeSelectorModal);
+  document.getElementById('btn-confirm-mode-modal')?.addEventListener('click', () => {
+    soundEngine.playUiTone(880, 0.05);
+    closeModeSelectorModal();
+  });
+  document.getElementById('btn-mode-modal-play')?.addEventListener('click', () => {
+    closeModeSelectorModal();
+    soundEngine.ensureContext();
+    net.send({
+      type: 'queue_join',
+      mode: state.selectedQuickMode,
+      mapId: state.selectedQuickMap
+    });
+  });
+  document.getElementById('mode-selector-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeModeSelectorModal();
+  });
+
+  document.getElementById('btn-open-controls-modal')?.addEventListener('click', () => {
+    soundEngine.playUiTone(720, 0.05);
+    document.getElementById('controls-modal')?.classList.remove('hidden');
+  });
+  document.getElementById('btn-close-controls-modal')?.addEventListener('click', () => {
+    document.getElementById('controls-modal')?.classList.add('hidden');
+  });
+  document.getElementById('btn-ok-controls-modal')?.addEventListener('click', () => {
+    document.getElementById('controls-modal')?.classList.add('hidden');
+  });
+  document.getElementById('controls-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) document.getElementById('controls-modal')?.classList.add('hidden');
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    document.getElementById('mode-selector-modal')?.classList.add('hidden');
+    document.getElementById('controls-modal')?.classList.add('hidden');
+  });
+
   // Quick Play, Practice Range & Go Rooms
   document.getElementById('quick-map-select')?.addEventListener('change', (e) => {
     state.selectedQuickMap = e.target.value;
+    renderActiveModeTrigger();
   });
   document.getElementById('btn-quick-play')?.addEventListener('click', () => {
     soundEngine.ensureContext();

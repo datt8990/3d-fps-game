@@ -534,6 +534,402 @@ function makeWallConcreteTextures(baseHex = '#64748b', stripeColor = null) {
   return { map, bumpMap };
 }
 
+function makeRoofTileTextures(baseHex = '#9a3b26', darkHex = '#6c2516') {
+  const c = createCanvas(512, 512);
+  const ctx = c.getContext('2d');
+  const b = createCanvas(512, 512);
+  const bctx = b.getContext('2d');
+
+  ctx.fillStyle = baseHex;
+  ctx.fillRect(0, 0, 512, 512);
+  bctx.fillStyle = '#707070';
+  bctx.fillRect(0, 0, 512, 512);
+
+  const tileW = 32;
+  const tileH = 42;
+  for (let row = 0; row < 14; row++) {
+    const y = row * tileH;
+    const shift = (row % 2) * (tileW * 0.5);
+    for (let x = -tileW; x < 544; x += tileW) {
+      const tx = x + shift;
+      const shade = ((row * 7 + Math.floor(x / tileW) * 13) & 7) / 7;
+      const g = ctx.createLinearGradient(tx, y, tx + tileW, y);
+      g.addColorStop(0, darkHex);
+      g.addColorStop(0.35, baseHex);
+      g.addColorStop(0.68, shade > 0.65 ? '#b44d34' : '#a8442c');
+      g.addColorStop(1, darkHex);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(tx, y);
+      ctx.lineTo(tx + tileW, y);
+      ctx.lineTo(tx + tileW, y + tileH - 6);
+      ctx.quadraticCurveTo(tx + tileW * 0.5, y + tileH + 5, tx, y + tileH - 6);
+      ctx.closePath();
+      ctx.fill();
+
+      // Overlap drop shadow under scalloped lip
+      ctx.fillStyle = 'rgba(15, 10, 8, 0.38)';
+      ctx.fillRect(tx, y + tileH - 6, tileW, 6);
+
+      // Subtle weathered lichen/moss spot on ~12% of tiles
+      if ((row * 17 + Math.floor(x / tileW) * 31) % 9 === 0) {
+        ctx.fillStyle = 'rgba(72, 92, 52, 0.22)';
+        ctx.beginPath();
+        ctx.arc(tx + tileW * 0.55, y + tileH * 0.55, 8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const bg = bctx.createLinearGradient(tx, y, tx + tileW, y);
+      bg.addColorStop(0, '#383838');
+      bg.addColorStop(0.5, '#d8d8d8');
+      bg.addColorStop(1, '#383838');
+      bctx.fillStyle = bg;
+      bctx.fillRect(tx, y, tileW, tileH - 4);
+      bctx.fillStyle = '#202020';
+      bctx.fillRect(tx, y + tileH - 4, tileW, 4);
+    }
+  }
+  addNoise(ctx, 512, 512, 0.08);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  return { map, bumpMap };
+}
+
+function makeRoofMetalTextures() {
+  const c = createCanvas(512, 512);
+  const ctx = c.getContext('2d');
+  const b = createCanvas(512, 512);
+  const bctx = b.getContext('2d');
+
+  ctx.fillStyle = '#5a6573';
+  ctx.fillRect(0, 0, 512, 512);
+  bctx.fillStyle = '#808080';
+  bctx.fillRect(0, 0, 512, 512);
+
+  // Corrugated galvanized metal ribs
+  for (let x = 0; x < 512; x += 16) {
+    const g = ctx.createLinearGradient(x, 0, x + 16, 0);
+    g.addColorStop(0, '#3f4854');
+    g.addColorStop(0.42, '#7c8896');
+    g.addColorStop(0.7, '#64707e');
+    g.addColorStop(1, '#39414c');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, 0, 16, 512);
+
+    bctx.fillStyle = '#383838';
+    bctx.fillRect(x, 0, 5, 512);
+    bctx.fillStyle = '#dcdcdc';
+    bctx.fillRect(x + 5, 0, 6, 512);
+    bctx.fillStyle = '#606060';
+    bctx.fillRect(x + 11, 0, 5, 512);
+  }
+  // Horizontal sheet overlap seams + weathered rust streaks
+  for (let y = 128; y < 512; y += 128) {
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.42)';
+    ctx.fillRect(0, y, 512, 4);
+    bctx.fillStyle = '#252525';
+    bctx.fillRect(0, y, 512, 4);
+  }
+  for (let i = 0; i < 28; i++) {
+    const rx = (i * 89) % 512;
+    const ry = (i * 137) % 440;
+    const rg = ctx.createLinearGradient(rx, ry, rx, ry + 70);
+    rg.addColorStop(0, 'rgba(138, 66, 32, 0.34)');
+    rg.addColorStop(1, 'rgba(138, 66, 32, 0)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(rx, ry, 10 + (i % 14), 70);
+  }
+  addNoise(ctx, 512, 512, 0.06);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  return { map, bumpMap };
+}
+
+function makeWoodPlankTextures(baseHex = '#7c5838') {
+  const c = createCanvas(512, 512);
+  const ctx = c.getContext('2d');
+  const b = createCanvas(512, 512);
+  const bctx = b.getContext('2d');
+
+  ctx.fillStyle = baseHex;
+  ctx.fillRect(0, 0, 512, 512);
+  bctx.fillStyle = '#808080';
+  bctx.fillRect(0, 0, 512, 512);
+
+  const plankH = 32;
+  for (let row = 0; row < 16; row++) {
+    const y = row * plankH;
+    const tone = ((row * 37) % 11) - 5;
+    ctx.fillStyle = tone > 0 ? `rgba(255, 224, 180, ${tone * 0.014})` : `rgba(24, 14, 6, ${-tone * 0.02})`;
+    ctx.fillRect(0, y, 512, plankH - 2);
+    // Fine horizontal wood grain fibers
+    for (let fy = y + 3; fy < y + plankH - 3; fy += 4) {
+      ctx.fillStyle = fy % 8 === 0 ? 'rgba(42, 24, 10, 0.14)' : 'rgba(255, 232, 198, 0.05)';
+      ctx.fillRect(0, fy, 512, 1.5);
+    }
+    // Plank groove seam
+    ctx.fillStyle = 'rgba(22, 12, 6, 0.65)';
+    ctx.fillRect(0, y + plankH - 2, 512, 2);
+    bctx.fillStyle = '#242424';
+    bctx.fillRect(0, y + plankH - 2, 512, 2);
+    // Vertical butt joint + nail heads
+    const jx = ((row * 173 + 64) % 440) + 36;
+    ctx.fillRect(jx, y, 2, plankH);
+    bctx.fillRect(jx, y, 2, plankH);
+    ctx.fillStyle = '#1f1612';
+    ctx.fillRect(jx - 8, y + 8, 3, 3);
+    ctx.fillRect(jx - 8, y + plankH - 11, 3, 3);
+    ctx.fillRect(jx + 7, y + 8, 3, 3);
+    ctx.fillRect(jx + 7, y + plankH - 11, 3, 3);
+  }
+  addNoise(ctx, 512, 512, 0.07);
+  addNoise(bctx, 512, 512, 0.08);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  return { map, bumpMap };
+}
+
+function makeStuccoHouseTextures(baseHex = '#cfc3aa') {
+  const c = createCanvas(512, 512);
+  const ctx = c.getContext('2d');
+  const b = createCanvas(512, 512);
+  const bctx = b.getContext('2d');
+
+  ctx.fillStyle = baseHex;
+  ctx.fillRect(0, 0, 512, 512);
+  bctx.fillStyle = '#828282';
+  bctx.fillRect(0, 0, 512, 512);
+
+  // Mottled weathered plaster blotches
+  for (let i = 0; i < 65; i++) {
+    const rx = (i * 97) % 512;
+    const ry = (i * 151) % 512;
+    const rr = 18 + (i % 34);
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(110, 96, 74, 0.11)' : 'rgba(255, 250, 238, 0.10)';
+    ctx.beginPath(); ctx.arc(rx, ry, rr, 0, Math.PI * 2); ctx.fill();
+  }
+  // Exposed aged brick patch peeking through weathered plaster
+  for (const [px, py] of [[86, 330], [340, 140]]) {
+    ctx.fillStyle = '#8b4a36';
+    ctx.fillRect(px, py, 74, 46);
+    bctx.fillStyle = '#525252';
+    bctx.fillRect(px, py, 74, 46);
+    ctx.fillStyle = 'rgba(40, 20, 14, 0.45)';
+    for (let by = py; by < py + 46; by += 11) {
+      ctx.fillRect(px, by, 74, 2);
+      const sh = ((by / 11) | 0) % 2 ? 0 : 12;
+      for (let bx = px + sh; bx < px + 74; bx += 24) ctx.fillRect(bx, by, 2, 11);
+    }
+  }
+  // Subtle damp rain-streak & ground splash grime
+  const botAo = ctx.createLinearGradient(0, 390, 0, 512);
+  botAo.addColorStop(0, 'rgba(48, 42, 32, 0)');
+  botAo.addColorStop(1, 'rgba(48, 42, 32, 0.46)');
+  ctx.fillStyle = botAo;
+  ctx.fillRect(0, 390, 512, 122);
+
+  addNoise(ctx, 512, 512, 0.08);
+  addNoise(bctx, 512, 512, 0.10);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  return { map, bumpMap };
+}
+
+function makeTreeBarkTexture() {
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#5a422d';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Vertical organic bark ridges & deep fissures
+  for (let i = 0; i < 64; i++) {
+    const x = (i * 19) % 256;
+    const w = 3 + (i % 6);
+    ctx.fillStyle = i % 3 === 0 ? 'rgba(28, 18, 10, 0.55)' : (i % 3 === 1 ? 'rgba(116, 92, 68, 0.35)' : 'rgba(62, 46, 30, 0.45)');
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.bezierCurveTo(x + ((i % 2 ? 1 : -1) * 5), 85, x - ((i % 2 ? 1 : -1) * 4), 170, x, 256);
+    ctx.lineTo(x + w, 256);
+    ctx.bezierCurveTo(x + w - ((i % 2 ? 1 : -1) * 4), 170, x + w + ((i % 2 ? 1 : -1) * 5), 85, x + w, 0);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Subtle green lichen / moss specks
+  for (let i = 0; i < 24; i++) {
+    ctx.fillStyle = 'rgba(84, 112, 62, 0.24)';
+    ctx.beginPath();
+    ctx.ellipse((i * 47) % 256, (i * 83) % 256, 6 + (i % 6), 10 + (i % 8), 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  addNoise(ctx, 256, 256, 0.11);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 3);
+  map.colorSpace = THREE.SRGBColorSpace;
+  return map;
+}
+
+function makeFoliageTexture(isPine = false) {
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = isPine ? '#1c4228' : '#25522c';
+  ctx.fillRect(0, 0, 256, 256);
+
+  if (isPine) {
+    // Layered spiky conifer needle clusters
+    for (let i = 0; i < 260; i++) {
+      const cx = (i * 73) % 256;
+      const cy = (i * 113) % 256;
+      const ang = ((i * 29) % 360) * (Math.PI / 180);
+      const len = 10 + (i % 12);
+      ctx.strokeStyle = i % 4 === 0 ? '#112a19' : (i % 4 === 1 ? '#2b5e36' : (i % 4 === 2 ? '#3d7440' : '#204a2c'));
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(ang) * len, cy + Math.sin(ang) * len);
+      ctx.stroke();
+    }
+  } else {
+    // Lush overlapping broadleaf foliage puffs with sunlit dapples
+    for (let i = 0; i < 220; i++) {
+      const cx = (i * 67 + 13) % 256;
+      const cy = (i * 107 + 29) % 256;
+      const rx = 7 + (i % 9);
+      const ry = 4 + (i % 5);
+      const ang = ((i * 41) % 360) * (Math.PI / 180);
+      ctx.fillStyle = i % 5 === 0 ? '#14331b' : (i % 5 === 1 ? '#295d31' : (i % 5 === 2 ? '#3b783b' : (i % 5 === 3 ? '#4c8c42' : '#1f4926')));
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, ang, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  addNoise(ctx, 256, 256, 0.08);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 2);
+  map.colorSpace = THREE.SRGBColorSpace;
+  return map;
+}
+
+function makeNaturalRockTexture() {
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#6c7378';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Geological rock strata bands & fracture crevices
+  for (let y = 0; y < 256; y += 14) {
+    ctx.fillStyle = y % 28 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(18, 22, 28, 0.16)';
+    ctx.fillRect(0, y, 256, 8);
+  }
+  ctx.strokeStyle = 'rgba(15, 18, 22, 0.45)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 24; i++) {
+    const sx = (i * 53) % 256;
+    const sy = (i * 97) % 256;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx + ((i % 2 ? 1 : -1) * 34), sy + 18);
+    ctx.lineTo(sx + ((i % 2 ? 1 : -1) * 52), sy + 42);
+    ctx.stroke();
+  }
+  for (let i = 0; i < 45; i++) {
+    ctx.fillStyle = i % 3 === 0 ? 'rgba(92, 108, 68, 0.22)' : 'rgba(210, 214, 220, 0.10)';
+    ctx.beginPath();
+    ctx.arc((i * 71) % 256, (i * 119) % 256, 6 + (i % 12), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  addNoise(ctx, 256, 256, 0.13);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.repeat.set(2, 2);
+  map.colorSpace = THREE.SRGBColorSpace;
+  return map;
+}
+
+function makeSandbagBurlapTexture() {
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ab9264';
+  ctx.fillRect(0, 0, 256, 256);
+  // Cross-hatched woven jute burlap threads
+  for (let i = 0; i < 256; i += 6) {
+    ctx.fillStyle = 'rgba(72, 54, 30, 0.18)';
+    ctx.fillRect(0, i, 256, 2);
+    ctx.fillRect(i, 0, 2, 256);
+    ctx.fillStyle = 'rgba(240, 222, 185, 0.10)';
+    ctx.fillRect(0, i + 2, 256, 1);
+  }
+  // Seam shadow near bag edges
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, 'rgba(42, 30, 16, 0.32)');
+  grad.addColorStop(0.18, 'rgba(0,0,0,0)');
+  grad.addColorStop(0.82, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(42, 30, 16, 0.34)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+  addNoise(ctx, 256, 256, 0.09);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  return map;
+}
+
+let _terrainDetailTex = null;
+export function getTerrainDetailTexture() {
+  if (_terrainDetailTex) return _terrainDetailTex;
+  const c = createCanvas(256, 256);
+  const ctx = c.getContext('2d');
+  // Neutral-bright base so multiplying by vertexColors preserves natural terrain hues while adding crisp organic grass/soil grain!
+  ctx.fillStyle = '#e8e8e6';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 380; i++) {
+    const x = (i * 59) % 256;
+    const y = (i * 103) % 256;
+    ctx.fillStyle = i % 3 === 0 ? 'rgba(165, 170, 155, 0.38)' : (i % 3 === 1 ? 'rgba(255, 255, 250, 0.30)' : 'rgba(135, 140, 125, 0.25)');
+    ctx.fillRect(x, y, 2 + (i % 5), 2 + ((i * 3) % 4));
+  }
+  for (let i = 0; i < 32; i++) {
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(180, 185, 175, 0.16)' : 'rgba(250, 252, 245, 0.14)';
+    ctx.beginPath();
+    ctx.arc((i * 83) % 256, (i * 127) % 256, 12 + (i % 18), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  addNoise(ctx, 256, 256, 0.07);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(96, 96);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = _graphicsAnisotropy;
+  _terrainDetailTex = tex;
+  return tex;
+}
+
 export function getSkyDomeTexture(theme = 'industrial') {
   if (skyTextureCache.has(theme)) return skyTextureCache.get(theme);
   const c = createCanvas(1024, 512);
@@ -631,8 +1027,58 @@ export function getMapMaterial(matKey = 'concrete') {
       break;
     }
     case 'sandbag': {
-      const t = makeWallConcreteTextures('#a68b5b');
-      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.05, roughness: 0.92, metalness: 0.02 });
+      const map = makeSandbagBurlapTexture();
+      mat = new THREE.MeshStandardMaterial({ map, roughness: 0.94, metalness: 0.02 });
+      break;
+    }
+    case 'roof_tile': {
+      const t = makeRoofTileTextures('#9e3e27', '#6a2415');
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.05, roughness: 0.80, metalness: 0.05 });
+      break;
+    }
+    case 'roof_metal': {
+      const t = makeRoofMetalTextures();
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.52, metalness: 0.48 });
+      break;
+    }
+    case 'wood_plank': {
+      const t = makeWoodPlankTextures('#7c5838');
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.84, metalness: 0.04 });
+      break;
+    }
+    case 'stucco_house': {
+      const t = makeStuccoHouseTextures('#d2c5ab');
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.88, metalness: 0.03 });
+      break;
+    }
+    case 'stucco_sage': {
+      const t = makeStuccoHouseTextures('#b7c2b0');
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.88, metalness: 0.03 });
+      break;
+    }
+    case 'tree_bark': {
+      const map = makeTreeBarkTexture();
+      mat = new THREE.MeshLambertMaterial({ map, vertexColors: true });
+      break;
+    }
+    case 'tree_foliage_pine': {
+      const map = makeFoliageTexture(true);
+      mat = new THREE.MeshLambertMaterial({ map, vertexColors: true });
+      break;
+    }
+    case 'tree_foliage_leaf': {
+      const map = makeFoliageTexture(false);
+      mat = new THREE.MeshLambertMaterial({ map, vertexColors: true });
+      break;
+    }
+    case 'tree_foliage_palm': {
+      const map = makeFoliageTexture(false);
+      mat = new THREE.MeshLambertMaterial({ map, vertexColors: true, side: THREE.DoubleSide });
+      break;
+    }
+    case 'rock_natural': {
+      const map = makeNaturalRockTexture();
+      mat = new THREE.MeshLambertMaterial({ map, vertexColors: true });
       break;
     }
     case 'metal_deck':

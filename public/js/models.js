@@ -3341,6 +3341,7 @@ function aimBoneSegmentWorld(bone, childBone, desiredWorldDir, blend = 1.0) {
 }
 
 function clearTacticalMounts(rig) {
+  if (rig) rig.ghostCloakPanels = null;
   if (!rig?.tacticalMounts?.length) return;
   for (const tm of rig.tacticalMounts) {
     if (tm.node?.parent) tm.node.parent.remove(tm.node);
@@ -3542,8 +3543,8 @@ function buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowC
     return;
   }
 
-  // Female Bikini Mode & Summer outfits: wear ONLY Bikini (zero vests, holsters, sunglasses, berets, or visors)
-  if (isSwimwear) return;
+  // Female Bikini Mode & Summer outfits: apply ONLY to female operators (never strip male Ghost/Titan/Vanguard gear!)
+  if (isSwimwear && opCfg?.gender === 'female') return;
 
   // 2. PHOENIX (NỮ): Platinum Spec-Ops Operator matching reference (Plate Carrier + White ID Badge + Cyan Chemlights + Cheek Bandage + Holster & Dual Thigh Straps)
   if (opId === 'phoenix') {
@@ -3737,18 +3738,47 @@ function buildOperatorTacticalMounts(rig, archetypeKey, opCfg, outCfg, teamGlowC
     shades.add(bridge);
     attachBoneTrackedGear(rig, 'head', shades, new THREE.Vector3(0, 0.068, -0.125));
   } else if (opId === 'ghost') {
-    // Recon Tactical Plate Carrier + Radio Whip Antenna + Lower-Face Stealth Mask
-    const ghostVest = makePlateCarrierVest('#1e293b', '#38bdf8', -0.155, 0.135, 0.25, false);
-    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.006, 0.26, 8), new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.4 }));
-    ant.position.set(-0.095, 0.19, 0.145);
-    ghostVest.add(ant);
-    attachBoneTrackedGear(rig, 'spine', ghostVest, new THREE.Vector3(0, -0.015, 0));
+    // Real Studio GLB (GhostMale.glb — high-collar dark jacket, sharp black hair & crimson eyes)
+    // Fitted with sleek low-profile Spec-Ops Recon Plate Carrier, Radio Whip Antenna & Drop-Leg Holster (zero face clutter!)
+    const isDefault = !outCfg || outCfg.id === 'urban' || outCfg.isSwimwear;
+    const vestMain = isDefault ? '#161b24' : (outCfg.vest || '#181e28');
+    const vestAccent = isDefault ? '#ef4444' : (outCfg.accent || '#ef4444');
+    const matteMat = new THREE.MeshStandardMaterial({ color: '#11151d', roughness: 0.62, metalness: 0.24 });
+    const steelMat = new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.34, metalness: 0.72 });
 
-    const mask = new THREE.Group();
-    const maskShell = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.072, 0.072, 12), new THREE.MeshStandardMaterial({ color: '#18181b', roughness: 0.72 }));
-    maskShell.scale.set(0.95, 1, 1.08);
-    mask.add(maskShell);
-    attachBoneTrackedGear(rig, 'head', mask, new THREE.Vector3(0, 0.012, -0.052));
+    // Slim fitted Spec-Ops Chest Rig + Triple Mag Pouches + Back PRC-152 Radio & Whip Antenna
+    const ghostVest = makePlateCarrierVest(vestMain, vestAccent, -0.150, 0.115, 0.22, false);
+    const radioBox = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.088, 0.030), matteMat);
+    radioBox.position.set(-0.088, -0.02, 0.132);
+    const whip = new THREE.Mesh(new THREE.CylinderGeometry(0.0024, 0.0038, 0.26, 6), steelMat);
+    whip.position.set(-0.095, 0.15, 0.134);
+    whip.rotation.z = 0.08;
+    ghostVest.add(radioBox, whip);
+    attachBoneTrackedGear(rig, 'spine', ghostVest, new THREE.Vector3(0, -0.03, 0));
+
+    // Left Wrist Tactical Recon Watch
+    if (rig.bones.lowerArmL) {
+      const watch = new THREE.Group();
+      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.035, 0.018, 12), matteMat);
+      strap.rotation.z = Math.PI / 2;
+      const dial = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.010, 0.020), new THREE.MeshStandardMaterial({ color: vestAccent, emissive: vestAccent, emissiveIntensity: 1.1 }));
+      dial.position.set(0, 0.034, 0);
+      watch.add(strap, dial);
+      attachBoneTrackedGear(rig, 'lowerArmL', watch, new THREE.Vector3(-0.19, 0, 0));
+    }
+
+    // Right Thigh Drop-Leg Tactical Pistol Holster
+    if (rig.bones.upperLegR) {
+      const thighRig = new THREE.Group();
+      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.068, 0.018, 12), matteMat);
+      const holster = new THREE.Mesh(new THREE.BoxGeometry(0.030, 0.125, 0.064), matteMat);
+      holster.position.set(0.076, -0.012, 0.002);
+      const grip = new THREE.Mesh(new THREE.BoxGeometry(0.020, 0.042, 0.024), steelMat);
+      grip.position.set(0.076, 0.048, -0.016);
+      grip.rotation.x = 0.24;
+      thighRig.add(strap, holster, grip);
+      attachBoneTrackedGear(rig, 'upperLegR', thighRig, new THREE.Vector3(0, -0.15, 0));
+    }
   } else if (opId === 'titan') {
     // Heavy Juggernaut Ballistic Reactor Chest + Massive Shoulder Pauldrons
     const heavyMat = new THREE.MeshStandardMaterial({ color: '#334155', metalness: 0.72, roughness: 0.24 });
@@ -3949,34 +3979,113 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
     rig.shieldMesh.visible = false;
     rig.nameplate.visible = false;
     rig.c4Pack.visible = false;
-    rig.deathProgress = Math.min(1, rig.deathProgress + clampedDt * 4.5);
+    rig.weaponMount.visible = false;
 
-    if (rig.mixer) {
-      if (rig.actions.death) {
-        if (!rig.isDeadState) {
-          rig.isDeadState = true;
-          transitionGlbAnimation(rig, 'death', 0.12, 1.1);
-        }
-        rig.mixer.update(clampedDt);
-        rig.weaponMount.visible = false;
-        return;
+    if (!rig.isDeadState) {
+      rig.isDeadState = true;
+      rig._deathPoseSettled = false;
+      rig.deathProgress = 0;
+      // Natural variety: ~72% collapse flat onto back, ~28% pitch forward face-down, with subtle side sprawl
+      rig.deathFallDir = Math.random() < 0.72 ? -1 : 1;
+      rig.deathRoll = (Math.random() - 0.5) * 0.34;
+      rig.deathHeadTilt = (Math.random() < 0.5 ? -1 : 1) * (0.28 + Math.random() * 0.25);
+      if (rig.mixer && rig.actions?.death) {
+        rig.actions.death.setLoop?.(THREE.LoopOnce, 1);
+        rig.actions.death.clampWhenFinished = true;
+        transitionGlbAnimation(rig, 'death', 0.12, 1.05);
+      } else if (rig.mixer && rig.actions?.idle) {
+        // Snap smoothly out of mid-stride running legs so lying body rests naturally
+        transitionGlbAnimation(rig, 'idle', 0.14, 0.25);
       }
-      rig.mixer.update(0);
     }
 
-    // Fallback collapse for Mixamo rigs without embedded Death clip
-    const ease = 1 - Math.pow(1 - rig.deathProgress, 2);
-    rig.bodyRoot.rotation.x = -ease * (Math.PI * 0.46);
-    rig.bodyRoot.position.y = ease * 0.12;
-    rig.weaponMount.visible = false;
+    if (rig.mixer && rig.actions?.death) {
+      rig.mixer.update(clampedDt);
+      rig.deathProgress = Math.min(1, rig.deathProgress + clampedDt * 2.2);
+      return;
+    }
+
+    if (rig._deathPoseSettled) return;
+
+    rig.deathProgress = Math.min(1, rig.deathProgress + clampedDt * 2.35);
+    const p = rig.deathProgress;
+
+    // Gravity-accelerated collapse (0..0.82) + subtle ground-impact settle rebound (0.82..1.0)
+    const fall = p < 0.82
+      ? Math.pow(p / 0.82, 2.0)
+      : 1.0 - Math.sin(((p - 0.82) / 0.18) * Math.PI) * 0.045;
+
+    if (rig.mixer) {
+      rig.mixer.update(clampedDt * Math.max(0, 1 - p * 1.4));
+    }
+
+    rig.bodyRoot.rotation.x = (rig.deathFallDir || -1) * fall * (Math.PI * 0.485);
+    rig.bodyRoot.rotation.y = fall * (rig.deathRoll || 0) * 0.45;
+    rig.bodyRoot.rotation.z = fall * (rig.deathRoll || 0);
+    // Keep torso/shoulders cleanly resting on the floor surface (zero sinking beneath ground)
+    rig.bodyRoot.position.y = fall * 0.13;
+
+    // Relax arms out to the sides & tilt head naturally as they hit the ground
+    const bones = rig.bones;
+    if (bones && rig.modelRoot) {
+      if (rig.restArmQuats) {
+        for (const k in rig.restArmQuats) {
+          if (bones[k]) bones[k].quaternion.copy(rig.restArmQuats[k]);
+        }
+      }
+      rig.group.updateMatrixWorld(true);
+      const bodyWorldQ = _q5;
+      rig.bodyRoot.getWorldQuaternion(bodyWorldQ);
+
+      const splay = fall;
+      if (bones.upperArmR && bones.lowerArmR) {
+        _v3.set(0.62 + splay * 0.22, -0.75 + splay * 0.15, -0.10 * (rig.deathFallDir || -1)).applyQuaternion(bodyWorldQ);
+        aimBoneSegmentWorld(bones.upperArmR, bones.lowerArmR, _v3, splay);
+      }
+      if (bones.upperArmL && bones.lowerArmL) {
+        _v3.set(-0.62 - splay * 0.22, -0.75 + splay * 0.15, -0.10 * (rig.deathFallDir || -1)).applyQuaternion(bodyWorldQ);
+        aimBoneSegmentWorld(bones.upperArmL, bones.lowerArmL, _v3, splay);
+      }
+      if (bones.head) {
+        if (!rig.mixer && rig.restHeadQuat) bones.head.quaternion.copy(rig.restHeadQuat);
+        const worldUp = _v0.copy(UP_VEC).applyQuaternion(bodyWorldQ).normalize();
+        _q1.setFromAxisAngle(worldUp, (rig.deathHeadTilt || 0.35) * splay);
+        bones.head.getWorldQuaternion(_q2);
+        _q4.multiplyQuaternions(_q1, _q2);
+        if (bones.head.parent) {
+          bones.head.parent.getWorldQuaternion(_q3).invert();
+          _q4.premultiply(_q3);
+        }
+        bones.head.quaternion.copy(_q4);
+      }
+      // Keep bone-tracked tactical gear (vest, NVG, holsters) attached to the falling/lying torso!
+      if (rig.tacticalMounts?.length) {
+        const bodyInvQ = _q3.copy(bodyWorldQ).invert();
+        for (let i = 0; i < rig.tacticalMounts.length; i++) {
+          const tm = rig.tacticalMounts[i];
+          if (!tm.bone) continue;
+          tm.bone.getWorldPosition(_v0);
+          rig.bodyRoot.worldToLocal(_v0);
+          tm.bone.getWorldQuaternion(_q2);
+          _q2.premultiply(bodyInvQ);
+          _q0.multiplyQuaternions(_q2, tm.restBoneInvQ);
+          _v1.copy(tm.offsetFromBone).applyQuaternion(_q0).add(_v0);
+          tm.node.position.copy(_v1);
+          tm.node.quaternion.copy(_q0);
+        }
+      }
+    }
+
+    if (p >= 1) rig._deathPoseSettled = true;
     return;
   }
 
   if (rig.isDeadState || rig.deathProgress > 0) {
     rig.isDeadState = false;
+    rig._deathPoseSettled = false;
     rig.deathProgress = 0;
-    rig.bodyRoot.rotation.x = 0;
-    rig.bodyRoot.position.y = 0;
+    rig.bodyRoot.rotation.set(0, 0, 0);
+    rig.bodyRoot.position.set(0, 0, 0);
     rig.weaponMount.visible = true;
     if (rig.actions?.death) rig.actions.death.stop();
   }
@@ -4149,6 +4258,15 @@ export function animateOperatorRig(rig, state, dt, timeSec = 0) {
       _v1.copy(tm.offsetFromBone).applyQuaternion(_q0).add(_v0);
       tm.node.position.copy(_v1);
       tm.node.quaternion.copy(_q0);
+    }
+  }
+
+  // Smooth wind & movement billow for Phantom Recon Ghost's split sniper cloak tails
+  if (rig.ghostCloakPanels?.length) {
+    const runLift = Math.min(0.42, speed * 0.075);
+    for (let i = 0; i < rig.ghostCloakPanels.length; i++) {
+      const cp = rig.ghostCloakPanels[i];
+      cp.pivot.rotation.x = cp.basePitch + runLift + Math.sin(timeSec * (2.6 + speed * 0.9) + cp.phase) * (0.045 + speed * 0.015);
     }
   }
 }

@@ -477,6 +477,11 @@ export class GameRoomCore {
       this.syncBotsForMatch();
     }
 
+    this._tickLiving = null;
+    if (this.status === 'playing') {
+      this.checkMatchOrRoundWinConditions(Date.now());
+    }
+
     this.broadcastRoomLobby();
     this.onListChangedFn();
   }
@@ -589,6 +594,8 @@ export class GameRoomCore {
       this.fillBots = true;
       this.syncBotsForMatch();
     }
+    this.initialCombatantsCount = this.combatants.size;
+    this._tickLiving = null;
 
     const now = Date.now();
     this.status = 'playing';
@@ -2142,11 +2149,13 @@ export class GameRoomCore {
   }
 
   handleKill(attacker, victim, weaponId, isHeadshot, now) {
+    if (!victim || victim.dead) return;
     victim.dead = true;
     victim.hp = 0;
     victim.deaths += 1;
     victim.currentStreak = 0;
     victim.reloadingUntil = 0;
+    this._tickLiving = null;
 
     if (victim.hasBomb && this.mode === 'bomb' && !this.bombState.planted) {
       this.dropBombFromPlayer(victim);
@@ -2424,6 +2433,9 @@ export class GameRoomCore {
         this.tickBombMode(dt, now);
       } else if (this.mode === 'survival') {
         this.tickSurvivalMode(dt, now);
+        this._tickLiving = null;
+        this.checkMatchOrRoundWinConditions(now);
+        if (this.status !== 'playing') return;
       }
 
       if (now >= this.matchEndsAt && this.mode !== 'bomb') {
@@ -2791,8 +2803,12 @@ export class GameRoomCore {
         this.finishBombRound('alpha', 'Đội Bravo đã bị tiêu diệt trước khi đặt bom!', now);
       }
     } else if (this.mode === 'survival') {
-      const alive = this.getLivingCombatants();
-      if (alive.length <= 1 && this.combatants.size >= 2) {
+      const alive = [];
+      for (const p of this.combatants.values()) {
+        if (!p.dead) alive.push(p);
+      }
+      const hadOpponents = this.combatants.size >= 2 || (this.initialCombatantsCount || 0) >= 2;
+      if (alive.length <= 1 && hadOpponents) {
         if (alive[0]) alive[0].score += 300;
         this.endMatch('last_survivor');
       }
@@ -2802,6 +2818,7 @@ export class GameRoomCore {
   async endMatch(reason = 'completed') {
     if (this.status !== 'playing') return;
     this.status = 'waiting';
+    this._tickLiving = null;
     this.stopMatchLoop();
 
     let winnerTeam = null;
@@ -2809,7 +2826,10 @@ export class GameRoomCore {
     if (this.modeConfig.teamBased) {
       winnerTeam = this.alphaScore > this.bravoScore ? 'alpha' : (this.bravoScore > this.alphaScore ? 'bravo' : 'draw');
     } else if (this.mode === 'survival') {
-      const alive = this.getLivingCombatants();
+      const alive = [];
+      for (const p of this.combatants.values()) {
+        if (!p.dead) alive.push(p);
+      }
       const top = alive[0] || [...this.combatants.values()].sort((a, b) => b.kills - a.kills)[0];
       winnerPlayerId = top?.id || null;
     } else {

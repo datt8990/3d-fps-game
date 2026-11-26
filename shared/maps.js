@@ -328,6 +328,22 @@ function buildMilitaryBaseMap() {
     { x: -19, z: 32 }, { x: -10, z: 33.5 }, { x: 0, z: 33.5 }, { x: 10, z: 33.5 }
   ];
 
+  // Perimeter Desert Date Palms & Sandstone Boulders (clear of spawns & combat lanes)
+  const trees = [
+    { x: -36.5, y: 0, z: -34.0, scale: 1.15, kind: 'palm' },
+    { x: 36.5, y: 0, z: -34.0, scale: 1.22, kind: 'palm' },
+    { x: -36.5, y: 0, z: 34.0, scale: 1.20, kind: 'palm' },
+    { x: 36.5, y: 0, z: 34.0, scale: 1.12, kind: 'palm' },
+    { x: -36.5, y: 0, z: -15.5, scale: 1.05, kind: 'palm' },
+    { x: 36.5, y: 0, z: 15.5, scale: 1.08, kind: 'palm' }
+  ];
+  const rocks = [
+    { x: -36.0, y: 0, z: -24.0, s: 1.6, ry: 1.1 },
+    { x: 36.0, y: 0, z: 24.0, s: 1.5, ry: 1.0 },
+    { x: -36.5, y: 0, z: 24.0, s: 1.4, ry: 0.9 },
+    { x: 36.5, y: 0, z: -24.0, s: 1.5, ry: 1.0 }
+  ];
+
   return {
     id: 'military_base',
     name: 'Căn Cứ Quân Sự',
@@ -339,6 +355,8 @@ function buildMilitaryBaseMap() {
     floorMat: 'sand_tactical',
     bounds: { halfW, halfD },
     blocks,
+    trees,
+    rocks,
     bombSites: [
       { id: 'A', x: 25.5, y: 0, z: 0.5, radius: 4.8, label: 'KHU A (Sân Trực Thăng)' },
       { id: 'B', x: -25.5, y: 0, z: 0, radius: 4.8, label: 'KHU B (Kho Vũ Khí)' }
@@ -447,6 +465,18 @@ function buildUrbanCityMap() {
     { x: -17, z: 34.5 }, { x: -1.5, z: 34.5 }, { x: 13, z: 34.5 }
   ];
 
+  // Roadside Urban Broadleaf Trees in safe boulevard corners (clear of all spawns, lanes & buildings)
+  const trees = [
+    { x: -37.5, y: 0, z: -34.0, scale: 1.08, kind: 'oak' },
+    { x: 37.5, y: 0, z: -34.0, scale: 1.05, kind: 'oak' },
+    { x: -37.5, y: 0, z: 34.0, scale: 1.10, kind: 'oak' },
+    { x: 37.5, y: 0, z: 34.0, scale: 1.04, kind: 'oak' },
+    { x: -37.5, y: 0, z: -15.5, scale: 0.96, kind: 'oak' },
+    { x: 37.5, y: 0, z: 15.5, scale: 0.98, kind: 'oak' },
+    { x: -7.5, y: 0, z: -36.5, scale: 0.92, kind: 'oak' },
+    { x: 7.5, y: 0, z: 36.5, scale: 0.92, kind: 'oak' }
+  ];
+
   return {
     id: 'urban_city',
     name: 'Thành Phố Chiến Sự',
@@ -458,6 +488,7 @@ function buildUrbanCityMap() {
     floorMat: 'asphalt_city',
     bounds: { halfW, halfD },
     blocks,
+    trees,
     bombSites: [
       { id: 'A', x: 23.5, y: 0, z: 0, radius: 4.6, label: 'KHU A (Ga Tàu Điện)' },
       { id: 'B', x: -23.5, y: 0, z: 0, radius: 4.6, label: 'KHU B (Ngõ Khu Phố)' }
@@ -575,10 +606,12 @@ function buildBrIslandMap() {
   });
 
   const blocks = [];
+  const structures = [];
   const lootSpawns = [];
   const trees = [];
   const rocks = [];
   const ffa = [];
+  let houseSeq = 0;
 
   const pushLoot = (x, y, z) => {
     lootSpawns.push({ x: Number(x.toFixed(1)), y: Number(y.toFixed(2)), z: Number(z.toFixed(1)) });
@@ -586,12 +619,16 @@ function buildBrIslandMap() {
 
   // Helper: Walkable Multi-Room / Multi-Floor House with Open Doorways, Sniper Windows & Stairs
   function addHouse(cx, cz, floors = 2, w = 12, d = 10, wallMat = 'building_brick') {
+    const idx = houseSeq++;
     const fy = Number(terrain.heightAt(cx, cz).toFixed(2));
     const t = 0.55;
     const fh = 3.6;
     const hw = w * 0.5;
     const hd = d * 0.5;
     const doorW = 2.6;
+    const resolvedMat = wallMat === 'crate_wood'
+      ? 'wood_plank'
+      : (wallMat === 'building_brick' && idx % 3 === 1 ? 'stucco_house' : (wallMat === 'city_wall' && idx % 2 === 0 ? 'stucco_sage' : wallMat));
 
     // Foundation Plinth anchored below terrain slope so zero gaps appear on gentle hills
     blocks.push({ x: cx, y: fy - 2.6, z: cz, w: w + 0.6, h: 2.6, d: d + 0.6, mat: 'concrete' });
@@ -603,15 +640,15 @@ function buildBrIslandMap() {
       // Front & Back walls with centered 2.6m doors (ground floor) or windows (2nd floor)
       for (const zSide of [-1, 1]) {
         const wz = cz + zSide * (hd - t * 0.5);
-        blocks.push({ x: cx - (doorW * 0.5 + sideSegW * 0.5), y: y0, z: wz, w: sideSegW, h: fh, d: t, mat: wallMat });
-        blocks.push({ x: cx + (doorW * 0.5 + sideSegW * 0.5), y: y0, z: wz, w: sideSegW, h: fh, d: t, mat: wallMat });
+        blocks.push({ x: cx - (doorW * 0.5 + sideSegW * 0.5), y: y0, z: wz, w: sideSegW, h: fh, d: t, mat: resolvedMat });
+        blocks.push({ x: cx + (doorW * 0.5 + sideSegW * 0.5), y: y0, z: wz, w: sideSegW, h: fh, d: t, mat: resolvedMat });
         if (fl === 0) {
           // Over-doorway lintel (walkthrough clearance 2.5m)
-          blocks.push({ x: cx, y: y0 + 2.55, z: wz, w: doorW, h: fh - 2.55, d: t, mat: wallMat });
+          blocks.push({ x: cx, y: y0 + 2.55, z: wz, w: doorW, h: fh - 2.55, d: t, mat: resolvedMat });
         } else {
           // 2nd Floor shootable balcony/window sill + top lintel
-          blocks.push({ x: cx, y: y0, z: wz, w: doorW, h: 1.05, d: t, mat: wallMat });
-          blocks.push({ x: cx, y: y0 + 2.35, z: wz, w: doorW, h: fh - 2.35, d: t, mat: wallMat });
+          blocks.push({ x: cx, y: y0, z: wz, w: doorW, h: 1.05, d: t, mat: resolvedMat });
+          blocks.push({ x: cx, y: y0 + 2.35, z: wz, w: doorW, h: fh - 2.35, d: t, mat: resolvedMat });
         }
       }
 
@@ -619,10 +656,10 @@ function buildBrIslandMap() {
       const sideSegD = (d - 3.0) * 0.5;
       for (const xSide of [-1, 1]) {
         const wx = cx + xSide * (hw - t * 0.5);
-        blocks.push({ x: wx, y: y0, z: cz - (1.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: wallMat });
-        blocks.push({ x: wx, y: y0, z: cz + (1.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: wallMat });
-        blocks.push({ x: wx, y: y0, z: cz, w: t, h: 1.02, d: 3.0, mat: wallMat });
-        blocks.push({ x: wx, y: y0 + 2.35, z: cz, w: t, h: fh - 2.35, d: 3.0, mat: wallMat });
+        blocks.push({ x: wx, y: y0, z: cz - (1.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
+        blocks.push({ x: wx, y: y0, z: cz + (1.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
+        blocks.push({ x: wx, y: y0, z: cz, w: t, h: 1.02, d: 3.0, mat: resolvedMat });
+        blocks.push({ x: wx, y: y0 + 2.35, z: cz, w: t, h: fh - 2.35, d: 3.0, mat: resolvedMat });
       }
 
       // Interior tactical cover crate/table
@@ -633,16 +670,23 @@ function buildBrIslandMap() {
       if (fl === 0 && floors > 1) {
         // Interior Staircase up to Floor 2 along East inner wall (leaves clear headroom!)
         const stairX = cx + hw - 1.55;
-        blocks.push(...makeStairs(stairX, cz, 1.5, d - 3.6, fh, 'north', 'concrete', 10, y0));
+        blocks.push(...makeStairs(stairX, cz, 1.5, d - 3.6, fh, 'north', 'wood_plank', 10, y0));
         // Floor 2 Deck split cleanly leaving the stairwell bay open on East side
         const deckW = w - 2.6;
-        blocks.push({ x: cx - 1.3, y: y0 + fh - 0.22, z: cz, w: deckW, h: 0.22, d: d - 0.6, mat: 'concrete' });
+        blocks.push({ x: cx - 1.3, y: y0 + fh - 0.22, z: cz, w: deckW, h: 0.22, d: d - 0.6, mat: 'wood_plank' });
       }
     }
 
-    // Sloped / Flat Protective Overhanging Roof
+    // Sloped / Flat Protective Overhanging Roof (collider ceiling)
     const roofY = fy + floors * fh;
-    blocks.push({ x: cx, y: roofY, z: cz, w: w + 0.8, h: 0.35, d: d + 0.8, mat: wallMat === 'building_glass' ? 'metal_dark' : 'warehouse_wall' });
+    const isModernFlat = resolvedMat === 'building_glass' || resolvedMat === 'bunker_concrete';
+    blocks.push({ x: cx, y: roofY, z: cz, w: w + 0.8, h: 0.35, d: d + 0.8, mat: isModernFlat ? 'metal_dark' : 'roof_metal' });
+    structures.push({
+      type: 'house',
+      cx, cz, fy, floors, w, d, fh, doorW,
+      wallMat: resolvedMat,
+      roofStyle: isModernFlat ? 'flat' : (resolvedMat === 'military_wall' || resolvedMat === 'warehouse_wall' ? 'metal' : 'tile')
+    });
     ffa.push({ x: cx, y: fy, z: cz + hd + 2.5, yaw: 0 });
   }
 
@@ -657,12 +701,12 @@ function buildBrIslandMap() {
     // 4 vertical corner stilts to roof
     for (const sx of [-1, 1]) {
       for (const szd of [-1, 1]) {
-        blocks.push({ x: cx + sx * (hs - 0.28), y: fy, z: cz + szd * (hs - 0.28), w: 0.48, h: 6.2, d: 0.48, mat: 'crate_wood' });
+        blocks.push({ x: cx + sx * (hs - 0.28), y: fy, z: cz + szd * (hs - 0.28), w: 0.48, h: 6.2, d: 0.48, mat: 'wood_plank' });
       }
     }
     // Elevated Watchtower Platform + Ramp Stairs on South approach
-    blocks.push({ x: cx, y: deckY - 0.25, z: cz, w: sz, h: 0.25, d: sz, mat: 'crate_wood' });
-    blocks.push(...makeStairs(cx, cz + hs + 3.0, 2.0, 5.8, 3.4, 'north', 'crate_wood', 9, fy));
+    blocks.push({ x: cx, y: deckY - 0.25, z: cz, w: sz, h: 0.25, d: sz, mat: 'wood_plank' });
+    blocks.push(...makeStairs(cx, cz + hs + 3.0, 2.0, 5.8, 3.4, 'north', 'wood_plank', 9, fy));
 
     // Waist-high wooden parapets (leave south stair entrance gap)
     blocks.push({ x: cx, y: deckY, z: cz - hs + 0.18, w: sz - 0.2, h: 1.0, d: 0.26, mat: 'sandbag' });
@@ -670,7 +714,8 @@ function buildBrIslandMap() {
     blocks.push({ x: cx + hs - 0.18, y: deckY, z: cz, w: 0.26, h: 1.0, d: sz - 0.2, mat: 'sandbag' });
 
     // Canopy Roof
-    blocks.push({ x: cx, y: fy + 6.2, z: cz, w: sz + 0.9, h: 0.32, d: sz + 0.9, mat: 'crate_wood' });
+    blocks.push({ x: cx, y: fy + 6.2, z: cz, w: sz + 0.9, h: 0.32, d: sz + 0.9, mat: 'roof_metal' });
+    structures.push({ type: 'watchtower', cx, cz, fy, sz, deckY });
     pushLoot(cx, deckY, cz);
     pushLoot(cx - 1.1, fy, cz);
   }
@@ -683,13 +728,14 @@ function buildBrIslandMap() {
     const h = 3.1;
     const t = 0.35;
     blocks.push({ x: cx, y: fy - 1.8, z: cz, w: w + 0.5, h: 1.8, d: d + 0.5, mat: 'concrete' });
-    blocks.push({ x: cx, y: fy, z: cz - d * 0.5 + t * 0.5, w, h, d: t, mat: 'crate_wood' });
-    blocks.push({ x: cx - w * 0.5 + t * 0.5, y: fy, z: cz, w: t, h, d, mat: 'crate_wood' });
-    blocks.push({ x: cx + w * 0.5 - t * 0.5, y: fy, z: cz, w: t, h, d, mat: 'crate_wood' });
+    blocks.push({ x: cx, y: fy, z: cz - d * 0.5 + t * 0.5, w, h, d: t, mat: 'wood_plank' });
+    blocks.push({ x: cx - w * 0.5 + t * 0.5, y: fy, z: cz, w: t, h, d, mat: 'wood_plank' });
+    blocks.push({ x: cx + w * 0.5 - t * 0.5, y: fy, z: cz, w: t, h, d, mat: 'wood_plank' });
     // Front door gap
-    blocks.push({ x: cx - 1.85, y: fy, z: cz + d * 0.5 - t * 0.5, w: 1.7, h, d: t, mat: 'crate_wood' });
-    blocks.push({ x: cx + 1.85, y: fy, z: cz + d * 0.5 - t * 0.5, w: 1.7, h, d: t, mat: 'crate_wood' });
-    blocks.push({ x: cx, y: fy + h, z: cz, w: w + 0.6, h: 0.26, d: d + 0.6, mat: 'warehouse_wall' });
+    blocks.push({ x: cx - 1.85, y: fy, z: cz + d * 0.5 - t * 0.5, w: 1.7, h, d: t, mat: 'wood_plank' });
+    blocks.push({ x: cx + 1.85, y: fy, z: cz + d * 0.5 - t * 0.5, w: 1.7, h, d: t, mat: 'wood_plank' });
+    blocks.push({ x: cx, y: fy + h, z: cz, w: w + 0.6, h: 0.26, d: d + 0.6, mat: 'roof_metal' });
+    structures.push({ type: 'shack', cx, cz, fy, w, d, h });
     pushLoot(cx, fy, cz);
   }
 
@@ -699,9 +745,10 @@ function buildBrIslandMap() {
     blocks.push({ x: cx, y: fy - 2.0, z: cz, w: w + 1, h: 2.0, d: d + 1, mat: 'concrete' });
     blocks.push({ x: cx - w * 0.5 + 0.4, y: fy, z: cz, w: 0.8, h: 7.4, d, mat: 'warehouse_wall' });
     blocks.push({ x: cx + w * 0.5 - 0.4, y: fy, z: cz, w: 0.8, h: 7.4, d, mat: 'warehouse_wall' });
-    blocks.push({ x: cx, y: fy + 7.4, z: cz, w: w + 1.2, h: 0.65, d: d + 1, mat: 'metal_dark' });
+    blocks.push({ x: cx, y: fy + 7.4, z: cz, w: w + 1.2, h: 0.65, d: d + 1, mat: 'roof_metal' });
     blocks.push({ x: cx - 3.5, y: fy, z: cz - 4, w: 2.4, h: 2.0, d: 2.4, mat: 'crate_metal' });
     blocks.push({ x: cx + 3.5, y: fy, z: cz + 4, w: 2.6, h: 2.3, d: 5.5, mat: 'container_green' });
+    structures.push({ type: 'hangar', cx, cz, fy, w, d, h: 7.4 });
     pushLoot(cx, fy, cz - 7);
     pushLoot(cx, fy, cz);
     pushLoot(cx, fy, cz + 7);
@@ -775,6 +822,7 @@ function buildBrIslandMap() {
     if (deckY - endBY > 0.5) {
       blocks.push(...makeStairs(bx, bz, bridgeW * 0.85, 7, Math.max(0.7, (deckY - endBY) * 0.45), dirBtoA, 'concrete', 4, endBY - 0.2));
     }
+    structures.push({ type: 'bridge', ax, az, bx, bz, bridgeW, deckY });
   }
 
   // Build 4 Strategic Bridges across Main & North Rivers
@@ -873,7 +921,8 @@ function buildBrIslandMap() {
     if (terrain.flatMask[gi] > 40 || terrain.roadMask[gi] > 40) continue;
 
     const scale = 0.85 + hash01(i, 5, 11) * 0.75;
-    trees.push({ x: Number(tx.toFixed(1)), y: Number(h.toFixed(2)), z: Number(tz.toFixed(1)), scale: Number(scale.toFixed(2)) });
+    const kind = (h > 27 || hash01(i, 17, 505) > 0.48) ? 'pine' : 'oak';
+    trees.push({ x: Number(tx.toFixed(1)), y: Number(h.toFixed(2)), z: Number(tz.toFixed(1)), scale: Number(scale.toFixed(2)), kind });
     blocks.push({ x: Number(tx.toFixed(1)), y: Number((h - 0.5).toFixed(2)), z: Number(tz.toFixed(1)), w: 0.72, h: 4.5, d: 0.72, noVisual: true });
   }
 
@@ -938,6 +987,7 @@ function buildBrIslandMap() {
     bounds: { halfW, halfD },
     terrain,
     namedPlaces,
+    structures,
     trees,
     rocks,
     blocks,
@@ -1012,19 +1062,19 @@ function buildJungleMap() {
     { x: 10.5, y: 0, z: 0, w: 1.8, h: 1.6, d: 1.8, mat: 'crate_wood' }
   ];
 
-  // Instanced Tropical Jungle Trees & Natural Mossy Boulders (Zero blocking of lanes/spawns)
+  // Instanced Tropical Jungle Broadleaf Trees & Arching Palms (Zero blocking of lanes/spawns)
   const trees = [
-    { x: -32, y: 0, z: -32, scale: 1.35 }, { x: -24, y: 0, z: -33, scale: 1.15 },
-    { x: 24, y: 0, z: -33, scale: 1.25 }, { x: 32, y: 0, z: -32, scale: 1.40 },
-    { x: -32, y: 0, z: 32, scale: 1.35 }, { x: -24, y: 0, z: 33, scale: 1.20 },
-    { x: 24, y: 0, z: 33, scale: 1.25 }, { x: 32, y: 0, z: 32, scale: 1.38 },
-    { x: -32, y: 0, z: -16, scale: 1.25 }, { x: -32, y: 0, z: 16, scale: 1.25 },
-    { x: 33, y: 0, z: -22, scale: 1.20 }, { x: 33, y: 0, z: 22, scale: 1.20 },
-    { x: -18, y: 0, z: -20, scale: 1.10 }, { x: 18, y: 0, z: -20, scale: 1.12 },
-    { x: -18, y: 0, z: 20, scale: 1.10 }, { x: 18, y: 0, z: 20, scale: 1.12 },
-    { x: -8, y: 0, z: -33, scale: 1.05 }, { x: 8, y: 0, z: -33, scale: 1.05 },
-    { x: -8, y: 0, z: 33, scale: 1.05 }, { x: 8, y: 0, z: 33, scale: 1.05 },
-    { x: -33, y: 0, z: 0, scale: 1.30 }, { x: 33, y: 0, z: 0, scale: 1.30 }
+    { x: -32, y: 0, z: -32, scale: 1.35, kind: 'oak' }, { x: -24, y: 0, z: -33, scale: 1.15, kind: 'palm' },
+    { x: 24, y: 0, z: -33, scale: 1.25, kind: 'palm' }, { x: 32, y: 0, z: -32, scale: 1.40, kind: 'oak' },
+    { x: -32, y: 0, z: 32, scale: 1.35, kind: 'oak' }, { x: -24, y: 0, z: 33, scale: 1.20, kind: 'palm' },
+    { x: 24, y: 0, z: 33, scale: 1.25, kind: 'palm' }, { x: 32, y: 0, z: 32, scale: 1.38, kind: 'oak' },
+    { x: -32, y: 0, z: -16, scale: 1.25, kind: 'oak' }, { x: -32, y: 0, z: 16, scale: 1.25, kind: 'palm' },
+    { x: 33, y: 0, z: -22, scale: 1.20, kind: 'palm' }, { x: 33, y: 0, z: 22, scale: 1.20, kind: 'oak' },
+    { x: -18, y: 0, z: -20, scale: 1.10, kind: 'palm' }, { x: 18, y: 0, z: -20, scale: 1.12, kind: 'oak' },
+    { x: -18, y: 0, z: 20, scale: 1.10, kind: 'oak' }, { x: 18, y: 0, z: 20, scale: 1.12, kind: 'palm' },
+    { x: -8, y: 0, z: -33, scale: 1.05, kind: 'palm' }, { x: 8, y: 0, z: -33, scale: 1.05, kind: 'oak' },
+    { x: -8, y: 0, z: 33, scale: 1.05, kind: 'oak' }, { x: 8, y: 0, z: 33, scale: 1.05, kind: 'palm' },
+    { x: -33, y: 0, z: 0, scale: 1.30, kind: 'oak' }, { x: 33, y: 0, z: 0, scale: 1.30, kind: 'oak' }
   ];
 
   const rocks = [

@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FPS ONLINE – BATTLE STRIKE v2.0 | 3D Multiplayer Tactical Shooter</title>
+  <title>BATTLE STRIKE 2.0 — Tactical 3D Multiplayer FPS</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=Chakra+Petch:wght@600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=Chakra+Petch:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles/main.css" />
   <script src="/vendor/peerjs/peerjs.min.js"></script>
   <script type="importmap">
@@ -26,34 +26,50 @@
   <!-- Toast & Squad Invite Popup -->
   <div id="toast-container"></div>
   <div id="invite-popup" class="invite-popup glass-panel hidden">
-    <div class="invite-title">⚡ LỜI MỜI TỔ ĐỘI CHIẾN ĐẤU</div>
+    <div class="invite-title">
+      <svg class="ui-ico" aria-hidden="true" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      LỜI MỜI TỔ ĐỘI CHIẾN ĐẤU
+    </div>
     <div id="invite-desc" class="invite-desc">Chiến binh mời bạn vào phòng đấu!</div>
-    <div class="row-gap" style="margin-top:8px;">
+    <div class="row-gap" style="margin-top:10px;">
       <button id="btn-accept-invite" class="btn-primary btn-sm">Tham Gia Ngay</button>
       <button id="btn-decline-invite" class="btn-secondary btn-sm">Bỏ Qua</button>
     </div>
   </div>
 
   <!-- ===================================================================== -->
-  <!-- 1. AUTH / CALLSIGN MODAL                                              -->
+  <!-- 1. AUTH / CALLSIGN DEPLOYMENT SCREEN                                  -->
   <!-- ===================================================================== -->
-  <div id="auth-overlay" class="modal-backdrop">
+  <div id="auth-overlay" class="modal-backdrop auth-backdrop">
     <div class="auth-card glass-panel">
-      <div class="brand-emblem">⚡ FPS ONLINE • V2.0 CLOUD & LOCAL</div>
+      <div class="auth-top-meta">
+        <span class="brand-emblem">
+          <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+          SPEC-OPS // V2.0 UPLINK
+        </span>
+        <span class="auth-status-tag"><span class="dot-online"></span> SERVER LIVE</span>
+      </div>
       <h1 class="auth-title">BATTLE STRIKE</h1>
-      <p class="auth-sub">Đấu Trường Bắn Súng Góc Nhìn Thứ Nhất 3D • Ghép Trận Cùng Bạn Bè</p>
+      <p class="auth-sub">Đấu Trường Bắn Súng Chiến Thuật 3D • 5v5 • Đặt Bom C4 • Sinh Tồn 50 Người</p>
       <form id="auth-form">
-        <label class="field-label">Tên Chiến Binh (Callsign)</label>
-        <input id="auth-username" type="text" maxlength="18" placeholder="VD: SoiDem_VN, XaThu_99..." required />
-        <label class="field-label">Mật Khẩu Bảo Vệ Tài Khoản <span class="muted">(Tùy chọn)</span></label>
-        <input id="auth-password" type="password" maxlength="32" placeholder="Để trống nếu muốn vào chơi nhanh" />
+        <label class="field-label" for="auth-username">Mật Danh Chiến Binh (Callsign)</label>
+        <input id="auth-username" type="text" maxlength="18" placeholder="VD: SoiDem_VN, XaThu_99..." required autocomplete="username" />
+        <label class="field-label" for="auth-password">Mật Khẩu Bảo Vệ <span class="muted">(Tùy chọn)</span></label>
+        <input id="auth-password" type="password" maxlength="32" placeholder="Để trống nếu muốn triển khai nhanh" autocomplete="current-password" />
         <div id="auth-error" class="error-banner hidden"></div>
-        <button type="submit" class="btn-primary btn-xl full-w pulse-glow" style="margin-top:14px;">
-          ▶ VÀO CHIẾN TRƯỜNG NGAY
+        <button type="submit" class="btn-primary btn-xl full-w pulse-glow" style="margin-top:16px;">
+          <svg class="ui-ico" aria-hidden="true" viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" fill="currentColor" stroke="none"/></svg>
+          TRIỂN KHAI VÀO CHIẾN TRƯỜNG
         </button>
       </form>
       <div class="auth-features">
-        <span>50 Vũ Khí 3D</span> • <span>9 Quân Nhân</span> • <span>Ghép Phòng Bạn Bè</span> • <span>Vercel Ready</span>
+        <span>50 VŨ KHÍ 3D</span>
+        <span class="sep">/</span>
+        <span>9 ĐẶC NHIỆM</span>
+        <span class="sep">/</span>
+        <span>BR 50 NGƯỜI</span>
+        <span class="sep">/</span>
+        <span>GHÉP PHÒNG BẠN BÈ</span>
       </div>
     </div>
   </div>
@@ -62,19 +78,21 @@
   <!-- 2. MAIN LOBBY SHELL (5 TABS + FRIEND DRAWER)                          -->
   <!-- ===================================================================== -->
   <div id="lobby-shell" class="hidden">
-    <!-- Top Esports Header -->
+    <!-- Top Tactical Command Header -->
     <header class="topbar glass-panel">
       <div class="brand-box">
-        <span class="brand-badge">BS</span>
+        <span class="brand-badge">
+          <svg class="ui-ico brand-mark" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.5 3.4 9.7 8 11 4.6-1.3 8-5.5 8-11V6l-8-4z"/><circle cx="12" cy="11" r="2.5"/></svg>
+        </span>
         <div>
           <div class="brand-title">BATTLE STRIKE <span class="v-tag">2.0</span></div>
-          <div id="top-transport-mode" class="brand-caption">ONLINE MULTIPLAYER</div>
+          <div id="top-transport-mode" class="brand-caption">TACTICAL MULTIPLAYER</div>
         </div>
       </div>
 
-      <nav class="main-nav">
+      <nav class="main-nav" aria-label="Điều hướng chính">
         <button class="nav-btn active" data-tab="home">SẢNH CHÍNH</button>
-        <button class="nav-btn" data-tab="rooms">PHÒNG ĐẤU & BẠN BÈ</button>
+        <button class="nav-btn" data-tab="rooms">PHÒNG ĐẤU &amp; BẠN BÈ</button>
         <button class="nav-btn" data-tab="operators">NHÂN VẬT</button>
         <button class="nav-btn" data-tab="armory">KHO VŨ KHÍ</button>
         <button class="nav-btn" data-tab="ranked">XẾP HẠNG</button>
@@ -83,11 +101,13 @@
       <div class="profile-strip">
         <div class="net-pill">
           <span class="dot-online"></span>
-          <span id="top-online-count">1 Online</span> • <span id="top-ping">14ms</span>
+          <span id="top-online-count">1 Online</span>
+          <span class="pill-sep">|</span>
+          <span id="top-ping">14ms</span>
         </div>
         <div class="gp-pill" title="Điểm Chiến Công GP dùng mở khóa Súng, Phụ kiện, Nhân vật & Skin">
-          <span class="gp-icon">◈</span>
-          <span id="top-gp">4,500</span> GP
+          <svg class="ui-ico sm gp-svg" aria-hidden="true" viewBox="0 0 24 24"><polygon points="12,2 22,12 12,22 2,12"/></svg>
+          <span id="top-gp">4,500</span> <span class="gp-unit">GP</span>
         </div>
         <div id="btn-open-my-profile" class="user-pill clickable-pill" title="Bấm để xem Hồ Sơ Cá Nhân & Chiến Tích">
           <span id="top-rank-badge" class="rank-mini">II</span>
@@ -96,11 +116,16 @@
             <div id="top-rank-text" class="user-rank">Bạc Đoàn • 1200 RP</div>
           </div>
         </div>
-        <button id="btn-toggle-friends" class="btn-secondary btn-sm" style="position:relative;" title="Mở Danh sách Bạn bè, Lời mời & Tổ đội">
-          👥 Bạn Bè <span id="friends-badge" class="notif-badge hidden">0</span>
+        <button id="btn-toggle-friends" class="btn-secondary btn-sm top-action-btn" style="position:relative;" title="Mở Danh sách Bạn bè, Lời mời & Tổ đội">
+          <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Bạn Bè <span id="friends-badge" class="notif-badge hidden">0</span>
         </button>
-        <button id="btn-open-settings" class="icon-btn" title="Cài đặt Đồ họa & Chuột">⚙</button>
-        <button id="btn-logout" class="icon-btn" title="Đổi Tài Khoản">⇄</button>
+        <button id="btn-open-settings" class="icon-btn" title="Cài đặt Đồ họa & Chuột" aria-label="Cài đặt">
+          <svg class="ui-ico" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <button id="btn-logout" class="icon-btn" title="Đổi Tài Khoản" aria-label="Đổi tài khoản">
+          <svg class="ui-ico" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
       </div>
     </header>
 
@@ -108,13 +133,17 @@
     <aside id="friends-drawer" class="friends-drawer glass-panel hidden">
       <div class="panel-header-row" style="margin-bottom:8px;">
         <div>
-          <div class="panel-tag" style="margin-bottom:2px;">TỔ ĐỘI & BẠN BÈ ONLINE</div>
+          <div class="panel-tag" style="margin-bottom:4px;">TỔ ĐỘI &amp; BẠN BÈ ONLINE</div>
           <div class="muted" style="display:flex;align-items:center;gap:6px;">
-            Mã của bạn: <strong id="my-friend-code" style="color:#facc15;">VN-0000</strong>
-            <button type="button" id="btn-copy-friend-code" class="btn-secondary btn-xs" title="Sao chép mã kết bạn">📋</button>
+            Mã của bạn: <strong id="my-friend-code" style="color:var(--gold);letter-spacing:0.8px;">VN-0000</strong>
+            <button type="button" id="btn-copy-friend-code" class="btn-secondary btn-xs" title="Sao chép mã kết bạn" aria-label="Sao chép mã kết bạn">
+              <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+            </button>
           </div>
         </div>
-        <button id="btn-close-friends" class="icon-btn">✕</button>
+        <button id="btn-close-friends" class="icon-btn" aria-label="Đóng">
+          <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
 
       <form id="add-friend-form" class="chat-input-row" style="margin-bottom:8px;">
@@ -130,7 +159,7 @@
 
       <div class="friends-scroll-body">
         <div id="friend-requests-section" class="hidden" style="margin-bottom:10px;">
-          <div class="panel-tag" style="color:#fbbf24;">🔔 LỜI MỜI KẾT BẠN ĐANG CHỜ</div>
+          <div class="panel-tag" style="color:var(--gold);">LỜI MỜI KẾT BẠN ĐANG CHỜ</div>
           <div id="friend-requests-box" class="stack-list"></div>
         </div>
 
@@ -142,71 +171,131 @@
       </div>
     </aside>
 
-    <!-- TAB 1: SẢNH CHÍNH (HOME + QUICK PLAY + CODE JOIN + GLOBAL CHAT) -->
-    <section id="tab-home" class="tab-view active">
-      <div class="home-left glass-panel">
-        <div class="panel-tag">CHỌN CHẾ ĐỘ CHIẾN ĐẤU</div>
-        <div id="quick-mode-list" class="mode-cards"></div>
-
-        <div class="panel-tag" style="margin-top:10px;">CHỌN BẢN ĐỒ 3D</div>
-        <select id="quick-map-select" class="tactical-select"></select>
-
-        <button id="btn-quick-play" class="btn-primary btn-xl full-w pulse-glow" style="margin-top:12px;">
-          ▶ TÌM TRẬN / BẮT ĐẦU NGAY
-        </button>
-
-        <div class="two-col" style="margin-top:8px;">
-          <button id="btn-home-create-5v5" class="btn-secondary full-w">⚔ Tạo Phòng 5v5</button>
-          <button id="btn-home-create-solo" class="btn-secondary full-w">🎯 Tạo Phòng Solo</button>
+    <!-- TAB 1: SẢNH CHÍNH (AAA 4-CORNER FRAMING + WIDE OPEN 3D SHOWCASE) -->
+    <section id="tab-home" class="tab-view active home-stage">
+      <div class="home-left-dock">
+        <!-- TOP-LEFT: OPERATOR DOSSIER & SEASON PRESTIGE -->
+        <div id="home-dossier-card" class="home-dossier-card glass-panel">
+          <div class="dossier-season-bar">
+            <span class="season-pill">MÙA 2 • ZERO HOUR</span>
+            <span class="season-live">LIVE SERVER</span>
+          </div>
+          <div id="home-dossier-body" class="dossier-body"></div>
+          <div class="dossier-actions">
+            <button type="button" id="btn-home-open-profile" class="ops-chip-btn">
+              <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span>Hồ Sơ</span>
+            </button>
+            <button type="button" id="btn-home-go-ranked" class="ops-chip-btn">
+              <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              <span>BXH Rank</span>
+            </button>
+          </div>
         </div>
-        <div class="two-col" style="margin-top:6px;">
-          <button id="btn-go-rooms" class="btn-secondary full-w">☰ Danh Sách Phòng</button>
-          <button id="btn-practice-range" class="btn-secondary full-w">🔫 Phòng Tập Thử Súng</button>
+
+        <div class="home-left-bottom">
+          <div class="home-ops-strip glass-panel">
+            <div class="panel-tag">ĐIỀU PHỐI NHANH</div>
+            <div class="home-ops-grid">
+              <button id="btn-home-create-5v5" class="ops-chip-btn">
+                <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span>Tạo 5v5</span>
+              </button>
+              <button id="btn-home-create-solo" class="ops-chip-btn">
+                <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+                <span>Tạo Solo</span>
+              </button>
+              <button id="btn-go-rooms" class="ops-chip-btn">
+                <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+                <span>DS Phòng</span>
+              </button>
+              <button id="btn-practice-range" class="ops-chip-btn">
+                <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg>
+                <span>Phòng Tập</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="home-deploy-dock glass-panel">
+            <div class="deploy-dock-head">
+              <span class="panel-tag" style="margin:0;">CHẾ ĐỘ &amp; BẢN ĐỒ TRIỂN KHAI</span>
+              <span class="deploy-ready-dot">SẴN SÀNG</span>
+            </div>
+
+            <button type="button" id="btn-open-mode-modal" class="active-mode-trigger" aria-haspopup="dialog" aria-controls="mode-selector-modal">
+              <div id="active-mode-emblem" class="amt-emblem"></div>
+              <div class="amt-body">
+                <div class="amt-kicker">
+                  <span id="active-mode-tag" class="amt-tag">5V5</span>
+                  <span class="amt-change-cue">
+                    ĐỔI CHẾ ĐỘ
+                    <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                  </span>
+                </div>
+                <div id="active-mode-name" class="amt-title">TEAM DEATHMATCH</div>
+                <div id="active-map-line" class="amt-sub">Nhà Kho Công Nghiệp • 5v5 • 40 Hạ gục</div>
+              </div>
+            </button>
+
+            <select id="quick-map-select" class="hidden" aria-hidden="true"></select>
+
+            <button id="btn-quick-play" class="btn-primary btn-xl full-w pulse-glow deploy-cta">
+              <svg class="ui-ico" aria-hidden="true" viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" fill="currentColor" stroke="none"/></svg>
+              <span>TÌM TRẬN / TRIỂN KHAI</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <div class="home-center-hint">
         <div class="quick-code-bar glass-panel">
-          <span>🔗 Có Mã Phòng của bạn bè?</span>
-          <input id="home-room-code-input" type="text" maxlength="10" placeholder="VD: BS1001" style="width:120px;padding:6px 10px;" />
+          <svg class="ui-ico sm" style="color:var(--cyan);" aria-hidden="true" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          <span>MÃ PHÒNG BẠN BÈ</span>
+          <input id="home-room-code-input" type="text" maxlength="10" placeholder="VD: BS1001" style="width:118px;padding:6px 10px;" />
           <button id="btn-home-join-code" class="btn-primary btn-sm">Vào Phòng</button>
         </div>
 
         <div class="center-bottom-group">
-          <div class="drag-hint">⟲ Kéo chuột để xoay Quân nhân 3D</div>
+          <div class="drag-hint">
+            <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
+            KÉO CHUỘT ĐỂ XOAY QUÂN NHÂN 3D
+          </div>
           <div id="home-loadout-summary" class="loadout-chip glass-panel"></div>
         </div>
       </div>
 
-      <div class="home-right">
-        <div class="controls-card glass-panel">
-          <div class="panel-tag">PHÍM TẮT CHIẾN THUẬT</div>
-          <div class="key-grid">
-            <div><kbd>WASD</kbd> Di chuyển</div>
-            <div><kbd>Shift</kbd> Chạy nhanh</div>
-            <div><kbd>Space</kbd> Nhảy</div>
-            <div><kbd>Ctrl / C</kbd> Ngồi nấp</div>
-            <div><kbd>Chuột Trái</kbd> Bắn</div>
-            <div><kbd>Chuột Phải</kbd> Ngắm ADS / Scope</div>
-            <div><kbd>1 / 2 / 3</kbd> Đổi vũ khí</div>
-            <div><kbd>G</kbd> Ném Lựu Đạn Nổ</div>
-            <div><kbd>R</kbd> Nạp đạn</div>
-            <div><kbd>E / F</kbd> Nhặt / Nhảy Dù / C4</div>
-            <div><kbd>Tab / I</kbd> Balo & Hòm Xác (BR)</div>
-            <div><kbd>M</kbd> Bản đồ 5km (BR)</div>
-            <div><kbd>Z</kbd> Radio Tổ Đội</div>
-            <div><kbd>V</kbd> Nói voice đội</div>
-            <div><kbd>N</kbd> Mic mở</div>
+      <div class="home-right-dock">
+        <!-- TOP-RIGHT: ARMED LOADOUT & QUICK GUNSMITH -->
+        <div id="home-arsenal-card" class="home-arsenal-card glass-panel">
+          <div class="panel-tag">TRANG BỊ TÁC CHIẾN HIỆN TẠI</div>
+          <div id="home-arsenal-body" class="arsenal-quick-body"></div>
+          <div class="dossier-actions">
+            <button type="button" id="btn-home-go-armory" class="ops-chip-btn">
+              <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+              <span>Độ Súng</span>
+            </button>
+            <button type="button" id="btn-home-go-operators" class="ops-chip-btn">
+              <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2l7 4v6c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-4z"/></svg>
+              <span>Nhân Vật</span>
+            </button>
           </div>
         </div>
 
-        <div class="chat-card glass-panel">
-          <div class="panel-tag">KÊNH CHAT SẢNH CHUNG & TÌM ĐỒNG ĐỘI</div>
-          <div id="global-chat-log" class="chat-log"></div>
-          <form id="global-chat-form" class="chat-input-row">
-            <input id="global-chat-input" type="text" maxlength="140" placeholder="Rủ bạn bè hoặc gửi Mã Phòng..." />
-            <button type="submit" class="btn-primary btn-sm">Gửi</button>
-          </form>
+        <div class="home-right-bottom">
+          <button type="button" id="btn-open-controls-modal" class="controls-trigger-btn glass-panel">
+            <svg class="ui-ico sm" style="color:var(--cyan);" aria-hidden="true" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>
+            <span>PHÍM TẮT CHIẾN THUẬT</span>
+            <svg class="ui-ico xs" style="margin-left:auto;color:var(--text-muted);" aria-hidden="true" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+
+          <div class="chat-card glass-panel compact-chat">
+            <div class="panel-tag">KÊNH LIÊN LẠC SẢNH CHUNG</div>
+            <div id="global-chat-log" class="chat-log"></div>
+            <form id="global-chat-form" class="chat-input-row">
+              <input id="global-chat-input" type="text" maxlength="140" placeholder="Rủ bạn bè hoặc gửi Mã Phòng..." />
+              <button type="submit" class="btn-primary btn-sm">Gửi</button>
+            </form>
+          </div>
         </div>
       </div>
     </section>
@@ -217,16 +306,19 @@
       <div id="room-browser-panel" class="full-panel glass-panel">
         <div class="panel-header-row">
           <div>
-            <h2 class="section-title">PHÒNG ĐẤU ONLINE & GHÉP TRẬN BẠN BÈ</h2>
-            <p class="muted">Tạo phòng <strong>Solo (1v1 / Tự Do)</strong> hoặc <strong>Đấu Đội 5v5</strong> lấy Mã Phòng gửi cho bạn bè vào bắn chung ngay!</p>
+            <h2 class="section-title">TRUNG TÂM PHÒNG ĐẤU &amp; GHÉP TRẬN</h2>
+            <p class="muted">Tạo phòng <strong>Solo (1v1 / Tự Do)</strong> hoặc <strong>Đấu Đội 5v5</strong> lấy Mã Phòng gửi bạn bè vào chiến ngay.</p>
           </div>
           <div class="row-gap">
             <input id="browser-code-input" type="text" maxlength="10" placeholder="Nhập Mã Phòng (VD: BS1001)..." style="width:190px;" />
             <button id="btn-browser-join-code" class="btn-secondary">Vào Bằng Mã</button>
-            <button id="btn-refresh-rooms" class="btn-secondary">↻ Làm mới</button>
-            <button id="btn-quick-create-solo" class="btn-secondary">🎯 Tạo Nhanh Solo</button>
-            <button id="btn-quick-create-5v5" class="btn-secondary">⚔ Tạo Nhanh 5v5</button>
-            <button id="btn-open-create-room" class="btn-primary pulse-glow">+ TÙY CHỈNH TẠO PHÒNG</button>
+            <button id="btn-refresh-rooms" class="btn-secondary">
+              <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+              Làm mới
+            </button>
+            <button id="btn-quick-create-solo" class="btn-secondary">Tạo Nhanh Solo</button>
+            <button id="btn-quick-create-5v5" class="btn-secondary">Tạo Nhanh 5v5</button>
+            <button id="btn-open-create-room" class="btn-primary pulse-glow">+ TẠO PHÒNG</button>
           </div>
         </div>
 
@@ -260,28 +352,34 @@
             </div>
           </div>
           <div class="row-gap">
-            <button id="btn-copy-room-code" class="btn-secondary">📋 Sao Chép Mã</button>
-            <button id="btn-copy-invite-link" class="btn-primary">🔗 Copy Link Mời Bạn Bè</button>
-            <button id="btn-switch-team" class="btn-secondary">⇄ Đổi Đội Alpha/Bravo</button>
-            <button id="btn-leave-room" class="btn-danger">✕ Rời Phòng</button>
+            <button id="btn-copy-room-code" class="btn-secondary">
+              <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>
+              Sao Chép Mã
+            </button>
+            <button id="btn-copy-invite-link" class="btn-primary">
+              <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Copy Link Mời
+            </button>
+            <button id="btn-switch-team" class="btn-secondary">Đổi Đội Alpha/Bravo</button>
+            <button id="btn-leave-room" class="btn-danger">Rời Phòng</button>
           </div>
         </div>
 
         <div class="room-lobby-grid">
           <div class="teams-columns">
             <div class="team-box alpha-box">
-              <div class="team-box-header">ĐỘI ALPHA (ĐẶC NHIỆM)</div>
+              <div class="team-box-header">ĐỘI ALPHA — ĐẶC NHIỆM</div>
               <div id="room-team-alpha" class="roster-list"></div>
             </div>
             <div class="team-box bravo-box">
-              <div class="team-box-header">ĐỘI BRAVO (LÍNH ĐÁNH THUÊ)</div>
+              <div class="team-box-header">ĐỘI BRAVO — ĐÁNH THUÊ</div>
               <div id="room-team-bravo" class="roster-list"></div>
             </div>
           </div>
 
           <div class="room-side-controls">
             <div class="room-settings-box">
-              <div class="panel-tag">THIẾT LẬP PHÒNG ĐẤU (SOLO / 5V5)</div>
+              <div class="panel-tag">THIẾT LẬP PHÒNG ĐẤU</div>
               <div class="two-col">
                 <div>
                   <label class="field-label">Chế độ chơi</label>
@@ -317,12 +415,13 @@
                 <span>Tự động lấp đầy vị trí trống bằng AI Bot</span>
               </label>
               <button id="btn-start-match" class="btn-primary btn-xl full-w pulse-glow" style="margin-top:12px;">
-                ⚡ BẮT ĐẦU TRẬN ĐẤU
+                <svg class="ui-ico" aria-hidden="true" viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" fill="currentColor" stroke="none"/></svg>
+                BẮT ĐẦU TRẬN ĐẤU
               </button>
             </div>
 
             <div class="room-chat-box">
-              <div class="panel-tag">CHAT PHÒNG ĐẤU</div>
+              <div class="panel-tag">LIÊN LẠC PHÒNG ĐẤU</div>
               <div id="room-chat-log" class="chat-log"></div>
               <form id="room-chat-form" class="chat-input-row">
                 <input id="room-chat-input" type="text" maxlength="140" placeholder="Nhập tin nhắn phòng..." />
@@ -342,10 +441,13 @@
       </div>
 
       <div class="home-center-hint">
-        <div class="drag-hint">⟲ Kéo chuột xoay xem Quân nhân, Mũ chiến thuật &amp; Trang phục 3D</div>
+        <div class="drag-hint">
+          <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
+          KÉO CHUỘT XOAY XEM QUÂN NHÂN &amp; TRANG PHỤC 3D
+        </div>
         <div id="operator-center-actions" class="armory-center-actions glass-panel">
-          <button id="btn-action-operator" class="btn-primary btn-xl">✓ ĐANG DÙNG QUÂN NHÂN</button>
-          <button id="btn-action-outfit" class="btn-secondary btn-xl">✓ ĐANG MẶC TRANG PHỤC</button>
+          <button id="btn-action-operator" class="btn-primary btn-xl">ĐANG DÙNG QUÂN NHÂN</button>
+          <button id="btn-action-outfit" class="btn-secondary btn-xl">ĐANG MẶC TRANG PHỤC</button>
         </div>
       </div>
 
@@ -356,7 +458,7 @@
       </div>
     </section>
 
-    <!-- TAB 4: KHO VŨ KHÍ (30 WEAPONS, SUBCLASS FILTER, ATTACHMENTS & 8 SKINS) -->
+    <!-- TAB 4: KHO VŨ KHÍ (50 WEAPONS, SUBCLASS FILTER, ATTACHMENTS & 8 SKINS) -->
     <section id="tab-armory" class="tab-view hidden">
       <div class="side-panel-left glass-panel">
         <div class="panel-tag">PHÂN LOẠI VŨ KHÍ (50 KHẨU)</div>
@@ -365,12 +467,24 @@
       </div>
 
       <div class="home-center-hint">
-        <div class="drag-hint">⟲ Kéo chuột xoay 360° • Cuộn chuột để Zoom cận cảnh Súng, Phụ kiện & Skin 3D</div>
+        <div class="drag-hint">
+          <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><polyline points="21 3 21 8 16 8"/></svg>
+          XOAY 360° • CUỘN CHUỘT ZOOM CẬN CẢNH SÚNG &amp; PHỤ KIỆN
+        </div>
         <div class="armory-center-actions glass-panel">
           <button id="btn-equip-weapon" class="btn-primary btn-xl">TRANG BỊ VÀO BALO</button>
-          <button id="btn-preview-fire" class="btn-secondary btn-xl" title="Bắn thử hiệu ứng lửa nòng, giật súng, vỏ đạn và âm thanh 3D">🔥 BẮN THỬ 3D</button>
-          <button id="btn-preview-reload" class="btn-secondary btn-xl" title="Xem animation tháo/lắp băng đạn & kéo khóa nòng">🔄 THAY ĐẠN</button>
-          <button id="btn-test-weapon-range" class="btn-secondary btn-xl">🎯 PHÒNG TẬP</button>
+          <button id="btn-preview-fire" class="btn-secondary btn-xl" title="Bắn thử hiệu ứng lửa nòng, giật súng, vỏ đạn và âm thanh 3D">
+            <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            BẮN THỬ 3D
+          </button>
+          <button id="btn-preview-reload" class="btn-secondary btn-xl" title="Xem animation tháo/lắp băng đạn & kéo khóa nòng">
+            <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            THAY ĐẠN
+          </button>
+          <button id="btn-test-weapon-range" class="btn-secondary btn-xl">
+            <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+            PHÒNG TẬP
+          </button>
         </div>
       </div>
 
@@ -378,7 +492,7 @@
         <div class="panel-tag">THÔNG SỐ KỸ THUẬT</div>
         <div class="weapon-stats-card" id="armory-stats-box"></div>
 
-        <div class="panel-tag" style="margin-top:12px;">PHỤ KIỆN NÂNG CẤP (ATTACHMENTS)</div>
+        <div class="panel-tag" style="margin-top:12px;">PHỤ KIỆN NÂNG CẤP (GUNSMITH)</div>
         <div id="armory-attachments-box"></div>
 
         <div class="panel-tag" style="margin-top:12px;">8 SKIN VŨ KHÍ ĐẶC BIỆT</div>
@@ -402,7 +516,10 @@
               <h2 class="section-title">BẢNG XẾP HẠNG HUYỀN THOẠI</h2>
               <p class="muted">Thi đấu chế độ Đấu Rank 5v5 để tích lũy RP từ Đồng Đoàn tới Huyền Thoại</p>
             </div>
-            <button id="btn-queue-ranked" class="btn-primary pulse-glow">★ ĐẤU RANK NGAY</button>
+            <button id="btn-queue-ranked" class="btn-primary pulse-glow">
+              <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              ĐẤU RANK NGAY
+            </button>
           </div>
           <div class="table-scroll">
             <table class="tactical-table">
@@ -424,16 +541,87 @@
     </section>
   </div>
 
+  <!-- MODE & MAP SELECTOR POPUP MODAL (AAA FPS DEPLOYMENT SELECTOR) -->
+  <div id="mode-selector-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="mode-modal-title">
+    <div class="mode-modal-card glass-panel">
+      <div class="mode-modal-header">
+        <div>
+          <div class="panel-tag" style="margin-bottom:4px;">TRUNG TÂM TÁC CHIẾN • CHỌN CHIẾN TRƯỜNG</div>
+          <h2 id="mode-modal-title" class="section-title">CHỌN CHẾ ĐỘ ĐẤU &amp; BẢN ĐỒ 3D</h2>
+        </div>
+        <button type="button" id="btn-close-mode-modal" class="icon-btn" aria-label="Đóng">
+          <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="mode-modal-body">
+        <div class="mode-section-head">
+          <span class="panel-tag" style="margin:0;">01 / CHẾ ĐỘ CHIẾN ĐẤU</span>
+          <span class="muted" style="font-size:11.5px;">Chọn thể thức tác chiến phù hợp</span>
+        </div>
+        <div id="quick-mode-list" class="mode-tiles-grid"></div>
+
+        <div class="mode-section-head" style="margin-top:16px;">
+          <span class="panel-tag" style="margin:0;">02 / BẢN ĐỒ TRIỂN KHAI 3D</span>
+          <span id="mode-map-hint" class="muted" style="font-size:11.5px;">Chọn đấu trường 3D tương ứng</span>
+        </div>
+        <div id="mode-map-cards" class="map-tiles-grid"></div>
+      </div>
+
+      <div class="mode-modal-footer">
+        <div id="mode-modal-summary" class="mode-modal-summary"></div>
+        <div class="row-gap">
+          <button type="button" id="btn-confirm-mode-modal" class="btn-secondary">XÁC NHẬN</button>
+          <button type="button" id="btn-mode-modal-play" class="btn-primary pulse-glow">
+            <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20" fill="currentColor" stroke="none"/></svg>
+            TRIỂN KHAI NGAY
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TACTICAL CONTROLS POPUP MODAL -->
+  <div id="controls-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Phím tắt chiến thuật">
+    <div class="modal-card glass-panel" style="width:min(560px, 94vw);">
+      <div class="panel-header-row" style="margin-bottom:12px;">
+        <h3 class="section-title">PHÍM TẮT CHIẾN THUẬT</h3>
+        <button type="button" id="btn-close-controls-modal" class="icon-btn" aria-label="Đóng">
+          <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="key-grid key-grid-modal">
+        <div><kbd>WASD</kbd> Di chuyển chiến thuật</div>
+        <div><kbd>Shift</kbd> Chạy nhanh (Sprint)</div>
+        <div><kbd>Space</kbd> Nhảy / Bung dù sớm</div>
+        <div><kbd>Ctrl / C</kbd> Ngồi nấp giảm giật</div>
+        <div><kbd>LMB</kbd> Khai hỏa vũ khí</div>
+        <div><kbd>RMB</kbd> Mở ống ngắm ADS / Scope</div>
+        <div><kbd>1 / 2 / 3</kbd> Đổi Súng chính / Phụ / Dao</div>
+        <div><kbd>G</kbd> Ném Lựu Đạn Nổ</div>
+        <div><kbd>R</kbd> Nạp lại băng đạn</div>
+        <div><kbd>E / F</kbd> Nhặt đồ / Nhảy Dù / C4</div>
+        <div><kbd>Tab / I</kbd> Balo &amp; Hòm Xác (BR)</div>
+        <div><kbd>M</kbd> Bản Đồ Chiến Thuật</div>
+        <div><kbd>Z</kbd> Radio Tổ Đội</div>
+        <div><kbd>V / N</kbd> Voice Push-to-Talk / Mic</div>
+      </div>
+      <div class="row-gap" style="margin-top:16px;justify-content:flex-end;">
+        <button type="button" id="btn-ok-controls-modal" class="btn-primary">ĐÃ HIỂU</button>
+      </div>
+    </div>
+  </div>
+
   <!-- CREATE ROOM MODAL -->
   <div id="create-room-modal" class="modal-backdrop hidden">
     <div class="modal-card glass-panel">
-      <h3 class="section-title">TẠO PHÒNG ĐẤU (SOLO HOẶC 5V5)</h3>
+      <h3 class="section-title">TẠO PHÒNG ĐẤU CHIẾN THUẬT</h3>
       <div class="panel-tag" style="margin-top:8px;">CHỌN NHANH THỂ THỨC PHÒNG</div>
-      <div class="two-col" style="margin-bottom:6px;">
-        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="tdm" data-max="10">⚔ Đấu Đội 5v5 (10 Người)</button>
-        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="ffa" data-max="2">🔥 Solo 1v1 Tay Đôi (2 Người)</button>
-        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="ffa" data-max="8">🎯 Solo Tự Do (8 Người)</button>
-        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="bomb" data-max="10">💣 Đặt Bom C4 5v5 (10 Người)</button>
+      <div class="two-col" style="margin-bottom:8px;">
+        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="tdm" data-max="10">Đấu Đội 5v5 (10 Người)</button>
+        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="ffa" data-max="2">Solo 1v1 Tay Đôi (2 Người)</button>
+        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="ffa" data-max="8">Solo Tự Do (8 Người)</button>
+        <button type="button" class="btn-secondary btn-sm cr-preset-btn" data-mode="bomb" data-max="10">Đặt Bom C4 5v5 (10 Người)</button>
       </div>
       <form id="create-room-form">
         <label class="field-label">Tên Phòng Đấu</label>
@@ -473,7 +661,7 @@
 
         <div class="row-gap" style="margin-top:16px;justify-content:flex-end;">
           <button type="button" id="btn-cancel-create-room" class="btn-secondary">Hủy</button>
-          <button type="submit" class="btn-primary">Tạo Phòng & Lấy Mã</button>
+          <button type="submit" class="btn-primary">Tạo Phòng &amp; Lấy Mã</button>
         </div>
       </form>
     </div>
@@ -482,11 +670,11 @@
   <!-- SETTINGS MODAL -->
   <div id="settings-modal" class="modal-backdrop hidden">
     <div class="modal-card glass-panel">
-      <h3 class="section-title">CÀI ĐẶT HỆ THỐNG & HIỆU NĂNG</h3>
+      <h3 class="section-title">CÀI ĐẶT HỆ THỐNG &amp; HIỆU NĂNG</h3>
       <label class="field-label">Độ Nhạy Chuột (Mouse Sensitivity): <span id="lbl-sens">50%</span></label>
       <input id="set-sens" type="range" min="0.1" max="1.0" step="0.05" value="0.5" class="full-w" />
 
-      <label class="field-label">Âm Lượng Súng & Hiệu Ứng: <span id="lbl-vol">75%</span></label>
+      <label class="field-label">Âm Lượng Súng &amp; Hiệu Ứng: <span id="lbl-vol">75%</span></label>
       <input id="set-vol" type="range" min="0" max="1" step="0.05" value="0.75" class="full-w" />
 
       <label class="field-label">Chất Lượng Đồ Họa 3D</label>
@@ -521,12 +709,14 @@
     </div>
   </div>
 
-  <!-- PLAYER PROFILE MODAL (XEM HỒ SƠ CHIẾN BINH, THÀNH TÍCH, KẾT BẠN & MỜI ĐẤU) -->
+  <!-- PLAYER PROFILE MODAL -->
   <div id="player-profile-modal" class="modal-backdrop hidden">
     <div class="modal-card glass-panel profile-modal-card">
       <div class="panel-header-row" style="margin-bottom:10px;">
         <div class="panel-tag" style="margin:0;">HỒ SƠ CHIẾN BINH • BATTLE STRIKE</div>
-        <button id="btn-close-profile-modal" class="icon-btn">✕</button>
+        <button id="btn-close-profile-modal" class="icon-btn" aria-label="Đóng hồ sơ">
+          <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
       </div>
       <div id="player-profile-body">
         <div class="muted" style="padding:24px;text-align:center;">Đang tải hồ sơ chiến binh...</div>
@@ -571,9 +761,11 @@
 
     <!-- Top Left: Rotating Radar Minimap + FPS/Ping + Room Code -->
     <div class="hud-top-left">
-      <canvas id="minimap-canvas" width="172" height="172"></canvas>
+      <div class="radar-bezel">
+        <canvas id="minimap-canvas" width="172" height="172"></canvas>
+      </div>
       <div id="hud-fps-ping" class="hud-fps-ping">FPS: 60 | PING: 14ms</div>
-      <div id="hud-room-code" class="hud-fps-ping" style="color:#facc15;"></div>
+      <div id="hud-room-code" class="hud-fps-ping hud-room-pill"></div>
     </div>
 
     <!-- Top Center: Two-Team Scoreboard, Match Timer & Kill Streak Banner -->
@@ -599,7 +791,10 @@
 
     <!-- Top Right: Kill Feed & Leave Button -->
     <div class="hud-top-right">
-      <button id="btn-leave-match" class="hud-exit-btn" title="Rời trận về sảnh">✕ Rời Trận</button>
+      <button id="btn-leave-match" class="hud-exit-btn" title="Rời trận về sảnh">
+        <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        RỜI TRẬN
+      </button>
       <div id="hud-killfeed" class="killfeed-list"></div>
     </div>
 
@@ -619,7 +814,8 @@
     <div id="hud-round-banner" class="hud-round-banner hidden"></div>
 
     <div id="hud-lock-prompt" class="lock-prompt">
-      🎯 Nhấp chuột khóa tâm ngắm • <kbd>F</kbd> Nhảy Dù • <kbd>=</kbd> Tự Động Chạy • <kbd>Tab</kbd>/<kbd>I</kbd> Balo • <kbd>M</kbd> Bản Đồ • <kbd>ESC</kbd> Mở chuột
+      <svg class="ui-ico sm" style="color:var(--cyan);" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+      Nhấp chuột khóa tâm • <kbd>F</kbd> Nhảy Dù • <kbd>=</kbd> Tự Chạy • <kbd>Tab</kbd>/<kbd>I</kbd> Balo • <kbd>M</kbd> Bản Đồ • <kbd>ESC</kbd> Mở chuột
     </div>
 
     <!-- Battle Royale Parachute Altimeter & Guidance Card -->
@@ -627,18 +823,19 @@
 
     <!-- PUBG Auto-Run Active Badge -->
     <div id="autorun-badge" class="autorun-badge hidden">
-      <span class="autorun-icon">🏃</span> TỰ ĐỘNG CHẠY <span class="autorun-key">[ = ]</span>
+      <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
+      TỰ ĐỘNG CHẠY <span class="autorun-key">[ = ]</span>
     </div>
 
     <!-- Radio Quick Callouts Menu [Z] -->
     <div id="hud-radio-menu" class="radio-menu glass-hud hidden">
       <div class="panel-tag">RADIO CHIẾN THUẬT [Z]</div>
-      <div><kbd>1</kbd> ⚡ Tấn công Khu A ngay!</div>
-      <div><kbd>2</kbd> ⚡ Tập hợp đánh Khu B!</div>
-      <div><kbd>3</kbd> ⚠ Phát hiện kẻ địch phía trước!</div>
-      <div><kbd>4</kbd> 🛡 Cần đồng đội chi viện!</div>
-      <div><kbd>5</kbd> 🎯 Giữ vững vị trí phòng thủ!</div>
-      <div><kbd>6</kbd> 🔥 Bắn đỉnh lắm đồng đội!</div>
+      <div><kbd>1</kbd> Tấn công Khu A ngay!</div>
+      <div><kbd>2</kbd> Tập hợp đánh Khu B!</div>
+      <div><kbd>3</kbd> Phát hiện kẻ địch phía trước!</div>
+      <div><kbd>4</kbd> Cần đồng đội chi viện!</div>
+      <div><kbd>5</kbd> Giữ vững vị trí phòng thủ!</div>
+      <div><kbd>6</kbd> Bắn đỉnh lắm đồng đội!</div>
     </div>
 
     <!-- Contextual [E] Bomb Plant/Defuse Hint & Progress Bar -->
@@ -660,7 +857,7 @@
     <div class="hud-bottom-left">
       <div id="hud-voice-panel" class="voice-panel glass-hud hidden">
         <div class="voice-head">
-          <span id="hud-voice-self" class="voice-self">🎙 Bạn • GIỮ [V] ĐỂ NÓI</span>
+          <span id="hud-voice-self" class="voice-self">VOICE • GIỮ [V] ĐỂ NÓI</span>
           <button id="hud-voice-toggle" class="hud-mini-btn" title="Bật/tắt mic mở (phím N)">MIC</button>
         </div>
         <div id="hud-voice-list" class="voice-list"></div>
@@ -676,14 +873,20 @@
 
       <div class="vitals-box glass-hud">
         <div class="vital-row">
-          <span class="vital-tag hp">✚ MÁU</span>
+          <span class="vital-tag hp">
+            <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke-width="3"/></svg>
+            HP
+          </span>
           <div class="vital-bar-bg">
             <div id="hud-hp-bar" class="vital-bar-fill hp" style="width:100%"></div>
           </div>
           <span id="hud-hp-val" class="vital-num">100</span>
         </div>
         <div class="vital-row">
-          <span class="vital-tag armor">🛡 GIÁP</span>
+          <span class="vital-tag armor">
+            <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2L4 6v6c0 5.5 3.4 9.7 8 11 4.6-1.3 8-5.5 8-11V6l-8-4z"/></svg>
+            AP
+          </span>
           <div class="vital-bar-bg">
             <div id="hud-armor-bar" class="vital-bar-fill armor" style="width:100%"></div>
           </div>
@@ -701,9 +904,12 @@
 
       <div class="ammo-box glass-hud">
         <div class="ammo-top">
-          <div>
+          <div class="weapon-title-wrap">
             <span id="hud-weapon-name" class="weapon-title">AK-47</span>
-            <span class="grenade-badge" title="Nhấn phím G để ném Lựu đạn nổ">💣 <strong id="hud-grenade-count">1</strong> <kbd>G</kbd></span>
+            <span class="grenade-badge" title="Nhấn phím G để ném Lựu đạn nổ">
+              <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="14" r="6"/><path d="M12 8V4h3"/></svg>
+              <strong id="hud-grenade-count">1</strong> <kbd>G</kbd>
+            </span>
           </div>
           <div class="ammo-numbers">
             <span id="hud-ammo-mag" class="ammo-mag">30</span>
@@ -717,7 +923,7 @@
         </div>
         <div class="hud-action-btns">
           <button id="hud-btn-reload" class="hud-mini-btn"><kbd>R</kbd> Nạp Đạn</button>
-          <button id="hud-btn-grenade" class="hud-mini-btn"><kbd>G</kbd> Ném Lựu Đạn</button>
+          <button id="hud-btn-grenade" class="hud-mini-btn"><kbd>G</kbd> Lựu Đạn</button>
           <button id="hud-btn-swap-primary" class="hud-mini-btn"><kbd>B</kbd> Kho Súng</button>
         </div>
       </div>
@@ -727,12 +933,12 @@
     <div id="br-backpack-modal" class="modal-backdrop hidden">
       <div class="br-inv-card glass-panel">
         <div class="br-inv-head">
-          <h3 class="section-title" style="margin:0;">🎒 BALO SINH TỒN &amp; HÒM ĐỒ XUNG QUANH <kbd>Tab</kbd> / <kbd>I</kbd></h3>
+          <h3 class="section-title" style="margin:0;">BALO SINH TỒN &amp; HÒM ĐỒ XUNG QUANH <kbd>Tab</kbd> / <kbd>I</kbd></h3>
           <div class="br-weight-wrap">
             <span id="br-bag-weight-text">0 / 120 kg</span>
             <div class="br-weight-track"><div id="br-bag-weight-fill" class="br-weight-fill" style="width:0%"></div></div>
           </div>
-          <button id="btn-close-backpack" class="btn-secondary btn-sm">✕ Đóng</button>
+          <button id="btn-close-backpack" class="btn-secondary btn-sm">Đóng</button>
         </div>
         <div class="br-inv-cols">
           <div class="br-inv-col">
@@ -751,12 +957,12 @@
       </div>
     </div>
 
-    <!-- Full 5km x 5km Battle Royale Tactical Map [M] -->
+    <!-- Full Battle Royale Tactical Map [M] -->
     <div id="br-bigmap-modal" class="modal-backdrop hidden">
       <div class="br-map-card glass-panel">
         <div class="br-inv-head">
-          <h3 class="section-title" style="margin:0;">🗺 BẢN ĐỒ ĐẢO 5×5 KM (Khu Nhà • Núi • Sông • Cầu • Chòi) <kbd>M</kbd></h3>
-          <button id="btn-close-bigmap" class="btn-secondary btn-sm">✕ Đóng</button>
+          <h3 class="section-title" style="margin:0;">BẢN ĐỒ CHIẾN THUẬT ĐẢO SINH TỒN <kbd>M</kbd></h3>
+          <button id="btn-close-bigmap" class="btn-secondary btn-sm">Đóng</button>
         </div>
         <p class="muted" style="margin:4px 0 8px;">Nhấp vào bản đồ để ghim mốc dẫn đường xanh lam (Waypoint) giúp canh hướng nhảy dù hoặc di chuyển.</p>
         <canvas id="br-bigmap-canvas" width="560" height="560" class="br-bigmap-canvas"></canvas>
@@ -767,7 +973,7 @@
     <div id="ingame-weapon-modal" class="modal-backdrop hidden">
       <div class="modal-card glass-panel" style="width:min(680px,94vw);">
         <h3 class="section-title">KHO VŨ KHÍ TÁC CHIẾN TRONG TRẬN <kbd>B</kbd></h3>
-        <p class="muted">Chọn súng chính, súng phụ hoặc cận chiến để đổi ngay lập tức trong trận — không cần chết hay chờ hồi sinh!</p>
+        <p class="muted">Chọn súng chính, súng phụ hoặc cận chiến để đổi ngay lập tức trong trận — không cần chờ hồi sinh.</p>
         <div id="ingame-buy-grid" class="buy-weapons-grid two-col"></div>
         <button id="btn-close-buy-modal" class="btn-secondary full-w" style="margin-top:14px;">Đóng (Quay lại chiến đấu)</button>
       </div>
@@ -794,12 +1000,12 @@
     </div>
   </div>
 
-  <!-- MATCHMAKING QUEUE OVERLAY (PRIORITIZE REAL HUMANS) -->
+  <!-- MATCHMAKING QUEUE OVERLAY -->
   <div id="matchmaking-queue-overlay" class="modal-backdrop hidden">
     <div class="queue-card glass-panel">
       <div class="queue-radar-ring"></div>
-      <div id="queue-mode-badge" class="panel-tag">ĐANG GHÉP TRẬN TRỰC TUYẾN</div>
-      <h2 class="queue-title">ĐANG TÌM ĐỐI THỦ & ĐỒNG ĐỘI THẬT...</h2>
+      <div id="queue-mode-badge" class="panel-tag" style="justify-content:center;">ĐANG GHÉP TRẬN TRỰC TUYẾN</div>
+      <h2 class="queue-title">ĐANG TÌM ĐỐI THỦ &amp; ĐỒNG ĐỘI THẬT...</h2>
       <p id="queue-subtitle" class="queue-sub">Hệ thống ưu tiên ghép người chơi đang tìm trận trước khi bổ sung AI.</p>
       <div class="queue-stats-row">
         <div class="queue-stat-box">
@@ -812,8 +1018,8 @@
         </div>
       </div>
       <div class="row-gap" style="margin-top:18px;justify-content:center;">
-        <button id="btn-queue-force-start" class="btn-primary">⚡ Bắt Đầu Ngay</button>
-        <button id="btn-queue-cancel" class="btn-secondary">✕ Hủy Tìm Trận</button>
+        <button id="btn-queue-force-start" class="btn-primary">Bắt Đầu Ngay</button>
+        <button id="btn-queue-cancel" class="btn-secondary">Hủy Tìm Trận</button>
       </div>
     </div>
   </div>
@@ -846,7 +1052,7 @@
       </div>
 
       <div class="row-gap" style="margin-top:16px;justify-content:center;">
-        <button id="btn-pm-rematch" class="btn-primary btn-xl">⚡ CHƠI TIẾP TRONG PHÒNG</button>
+        <button id="btn-pm-rematch" class="btn-primary btn-xl pulse-glow">CHƠI TIẾP TRONG PHÒNG</button>
         <button id="btn-pm-lobby" class="btn-secondary btn-xl">Về Sảnh Chính</button>
       </div>
     </div>

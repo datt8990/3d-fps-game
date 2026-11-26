@@ -1386,6 +1386,15 @@ export class FPSGameClient {
       this.sniperZoomStage = 0;
       soundEngine.cancelReloadSequence();
       if (this.fpRig) this.fpRig.visible = false;
+    } else if (msg.victimId) {
+      // Trigger immediate collapse animation on victim the exact frame kill_event arrives (0ms delay!)
+      const vEnt = this.remoteEntities.get(msg.victimId);
+      if (vEnt && vEnt.target && !vEnt.target.dead) {
+        vEnt.target.dead = true;
+        vEnt.target.vx = 0;
+        vEnt.target.vz = 0;
+        vEnt.deadAt = performance.now();
+      }
     }
   }
 
@@ -1671,6 +1680,16 @@ export class FPSGameClient {
         ent.target = { ...ps };
         ent.pred = { x: ps.x, y: ps.y, z: ps.z };
         ent.predAge = 0;
+        if (!wasDead && ps.dead) {
+          ent.deadAt = performance.now();
+        } else if (wasDead && !ps.dead) {
+          ent.deadAt = 0;
+          if (ent.rig) {
+            ent.rig.isDeadState = false;
+            ent.rig._deathPoseSettled = false;
+            ent.rig.deathProgress = 0;
+          }
+        }
         if ((wasDead && !ps.dead) || Math.hypot(ps.x - ent.current.x, ps.z - ent.current.z) > 8.5) {
           ent.current.x = ps.x;
           ent.current.y = ps.y;
@@ -2507,23 +2526,24 @@ export class FPSGameClient {
       const dzMe = cur.z - lz;
       const distSq = dxMe * dxMe + dzMe * dzMe;
 
-      // In open-world BR, release rigs of very distant or permanently eliminated bots to keep GPU VRAM & draw calls tiny
-      if (isOpenWorld && ent.rig && (distSq > releaseDistSq || (tgt.dead && ent.rig.deathProgress >= 0.99))) {
+      // In open-world BR, keep eliminated enemy corpse lying visibly for 6.5s before releasing VRAM/draw calls
+      const deadAgeMs = tgt.dead ? (performance.now() - (ent.deadAt || 0)) : 0;
+      if (isOpenWorld && ent.rig && (distSq > releaseDistSq || (tgt.dead && deadAgeMs > 6500 && ent.rig.deathProgress >= 0.99))) {
         this.releaseEntityRig(ent);
         continue;
       }
 
       if (!ent.rig) continue;
 
-      if (tgt.dp === 1 || tgt.dead || distSq > maxDrawDistSq) {
+      if (tgt.dp === 1 || distSq > maxDrawDistSq || (isOpenWorld && tgt.dead && deadAgeMs > 6500)) {
         ent.rig.group.visible = false;
         if (ent.chuteCanopy) ent.chuteCanopy.visible = false;
         setRigShadowCast(ent.rig, false);
         continue;
       }
 
-      // Camera frustum culling (generous 2.4m sphere covers tall characters + weapon + jump)
-      this._cullSphere.center.set(cur.x, cur.y + 1.0, cur.z);
+      // Camera frustum culling (generous 2.4m sphere covers tall characters + lying corpse + weapon)
+      this._cullSphere.center.set(cur.x, cur.y + (tgt.dead ? 0.35 : 1.0), cur.z);
       this._cullSphere.radius = 2.4;
       const inView = this._frustum.intersectsSphere(this._cullSphere);
 
@@ -2534,8 +2554,8 @@ export class FPSGameClient {
         continue;
       }
 
-      // Only run wall depenetration for nearby visible bots (< 90m)
-      if (distSq < 8100 && this.mapData) {
+      // Only run wall depenetration for nearby LIVING visible bots (< 90m) so lying corpses stay planted cleanly
+      if (!tgt.dead && distSq < 8100 && this.mapData) {
         const h = tgt.crouch ? PHYSICS.HEIGHT_CROUCH : PHYSICS.HEIGHT_STAND;
         cur.onGround = Boolean(tgt.ground);
         depenetratePlayerXZ(cur, h, PHYSICS.PLAYER_RADIUS, this.mapData);
@@ -2543,13 +2563,13 @@ export class FPSGameClient {
 
       ent.rig.group.visible = true;
       if (ent.chuteCanopy) {
-        ent.chuteCanopy.visible = tgt.dp === 3;
+        ent.chuteCanopy.visible = !tgt.dead && tgt.dp === 3;
       }
       ent.rig.group.position.set(cur.x, cur.y, cur.z);
       ent.rig.group.rotation.y = cur.yaw;
 
-      // Dynamic bot shadow budget: max 2 visible nearby bots cast shadows on High quality only
-      const shouldCastShadow = allowBotShadows && distSq < 484 && botShadowsUsed < 2;
+      // Dynamic bot shadow budget: max 2 visible nearby living bots cast shadows on High quality only (corpses never waste shadow pass!)
+      const shouldCastShadow = !tgt.dead && allowBotShadows && distSq < 484 && botShadowsUsed < 2;
       if (shouldCastShadow) botShadowsUsed++;
       setRigShadowCast(ent.rig, shouldCastShadow);
 
@@ -2557,27 +2577,30 @@ export class FPSGameClient {
       const lod = distSq < 484 ? 0 : (distSq < 3600 ? 1 : 2); // <22m -> LOD 0 | 22-60m -> LOD 1 | >60m -> LOD 2
       ent.animAccumDt = (ent.animAccumDt || 0) + dt;
       const bucket = ent.animBucket || 0;
-      const shouldAnimate = lod === 0 || (lod === 1 ? ((frameTick + bucket) & 1) === 0 : ((frameTick + bucket) & 3) === 0);
+      // Always animate collapsing corpses at full FPS until they finish hitting the ground, then skip bone work completely!
+      const isCollapsing = Boolean(tgt.dead && !ent.rig._deathPoseSettled);
+      const shouldAnimate = isCollapsing
+        || (!tgt.dead && (lod === 0 || (lod === 1 ? ((frameTick + bucket) & 1) === 0 : ((frameTick + bucket) & 3) === 0)));
       if (!shouldAnimate) continue;
 
       const animDt = ent.animAccumDt;
       ent.animAccumDt = 0;
 
-      const serverSpeed = (tgt.vx !== undefined && tgt.vz !== undefined)
+      const serverSpeed = tgt.dead ? 0 : ((tgt.vx !== undefined && tgt.vz !== undefined)
         ? Math.hypot(tgt.vx, tgt.vz)
-        : Math.hypot(cur.x - prevX, cur.z - prevZ) / Math.max(0.001, dt);
+        : Math.hypot(cur.x - prevX, cur.z - prevZ) / Math.max(0.001, dt));
 
       animateOperatorRig(
         ent.rig,
         {
-          dead: false,
+          dead: Boolean(tgt.dead),
           crouch: Boolean(tgt.crouch),
           sprint: Boolean(tgt.sprint),
           moveSpeed: serverSpeed,
           pitch: cur.pitch,
           hasBomb: Boolean(tgt.hasBomb),
           shield: Boolean(tgt.shield),
-          showNameplate: ent.isAlly || distSq < 576,
+          showNameplate: !tgt.dead && (ent.isAlly || distSq < 576),
           lodLevel: lod
         },
         animDt,

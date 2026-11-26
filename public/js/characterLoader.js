@@ -68,6 +68,14 @@ export const CHARACTER_ARCHETYPES = {
     yOffset: 0.056,
     rigType: 'vroid',
     animSource: 'xbot'
+  },
+  ghost_male: {
+    url: '/assets/models/GhostMale.glb',
+    facingY: 0,
+    scale: 1.08,
+    yOffset: 0.02,
+    rigType: 'vroid',
+    animSource: 'xbot'
   }
 };
 
@@ -84,7 +92,7 @@ export function resolveCharacterArchetype(operatorId = 'vanguard') {
     case 'kagura':
       return 'vivi';
     case 'ghost':
-      return 'rpm';
+      return 'ghost_male';
     case 'titan':
       return 'xbot';
     case 'shadow':
@@ -434,7 +442,7 @@ export async function preloadCharacterModels(priorityKey = 'soldier') {
   if (preloadPromise) return preloadPromise;
 
   preloadPromise = (async () => {
-    const keys = Object.keys(CHARACTER_ARCHETYPES);
+    const keys = Object.keys(CHARACTER_ARCHETYPES).filter((k) => k !== 'rpm');
     const priorityList = [priorityKey, 'soldier', 'xbot'].filter((k) => k && CHARACTER_ARCHETYPES[k]);
     const remaining = keys.filter((k) => !priorityList.includes(k));
     const loadOrder = [...new Set([...priorityList, ...remaining])];
@@ -1210,38 +1218,73 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
       const mName = (mat.name || '').toLowerCase();
 
       if (key === 'soldier') {
+        const isGhost = opCfg?.id === 'ghost';
         if (mName.includes('visor')) {
-          mat.color.set('#e2e8f0');
-          mat.emissive.copy(glowCol);
-          mat.emissiveIntensity = 1.05;
-          mat.metalness = 0.88;
-          mat.roughness = 0.10;
+          if (isGhost && outfitId === 'urban') {
+            mat.color.set('#0f141c');
+            mat.emissive.set('#1e293b');
+            mat.emissiveIntensity = 0.25;
+            mat.metalness = 0.55;
+            mat.roughness = 0.35;
+          } else {
+            mat.color.set('#e2e8f0');
+            mat.emissive.copy(glowCol);
+            mat.emissiveIntensity = 1.05;
+            mat.metalness = 0.88;
+            mat.roughness = 0.10;
+          }
         } else {
-          const pCol = outfitId === 'urban' ? '#475569' : primaryHex;
-          const sCol = outfitId === 'urban' ? '#1e293b' : secHex;
-          applyRecoloredClothingMat(mat, pCol, sCol, 0.28, 0.72, accentHex, outfitId);
-          mat.metalness = isRoyalGold ? 0.74 : (isCyber ? 0.45 : 0.24);
-          mat.roughness = isRoyalGold ? 0.22 : (isCyber ? 0.30 : 0.44);
+          const pCol = outfitId === 'urban' ? (isGhost ? '#1b222e' : '#475569') : primaryHex;
+          const sCol = outfitId === 'urban' ? (isGhost ? '#090d14' : '#1e293b') : secHex;
+          applyRecoloredClothingMat(mat, pCol, sCol, isGhost ? 0.22 : 0.28, 0.76, accentHex, outfitId);
+          mat.metalness = isRoyalGold ? 0.74 : (isCyber ? 0.45 : (isGhost ? 0.20 : 0.24));
+          mat.roughness = isRoyalGold ? 0.22 : (isCyber ? 0.30 : (isGhost ? 0.56 : 0.44));
         }
       } else if (key === 'xbot') {
-        const armorBase = opCfg?.id === 'titan' && outfitId === 'urban' ? '#94a3b8' : primaryHex;
-        if (mName.includes('joint')) {
-          mat.color.set(secHex);
-          mat.emissive.copy(glowCol);
-          mat.emissiveIntensity = isCyber ? 1.35 : 0.95;
-          mat.metalness = 0.76;
-          mat.roughness = 0.20;
-        } else {
-          mat.color.copy(blendWithWhite(armorBase, 0.92));
-          if (isRoyalGold) {
-            mat.emissive.set('#ca8a04');
-            mat.emissiveIntensity = 0.16;
-          } else if (isCyber) {
-            mat.emissive.set('#4c1d95');
-            mat.emissiveIntensity = 0.25;
+        const isGhost = opCfg?.id === 'ghost';
+        if (isGhost) {
+          // Phantom Recon Ghost: Pitch-matte tactical stealth bodysuit (zero shiny robot metal!) + ghostly ice-cyan seam accents
+          const clothCol = outfitId === 'urban' ? '#141923' : primaryHex;
+          const seamCol = outfitId === 'urban' ? '#090d14' : secHex;
+          const spectralGlow = outfitId === 'urban' ? '#38bdf8' : glowCol;
+          if (mName.includes('joint')) {
+            mat.color.set(seamCol);
+            mat.emissive.set(spectralGlow);
+            mat.emissiveIntensity = isCyber ? 1.15 : 0.42;
+            mat.metalness = 0.18;
+            mat.roughness = 0.62;
+          } else {
+            mat.color.set(clothCol);
+            if (isRoyalGold) {
+              mat.emissive.set('#854d0e');
+              mat.emissiveIntensity = 0.18;
+            } else if (isCyber) {
+              mat.emissive.set('#2e1065');
+              mat.emissiveIntensity = 0.24;
+            }
+            mat.metalness = isRoyalGold ? 0.65 : 0.10;
+            mat.roughness = isRoyalGold ? 0.26 : 0.84;
           }
-          mat.metalness = isRoyalGold ? 0.88 : 0.62;
-          mat.roughness = isRoyalGold ? 0.18 : 0.24;
+        } else {
+          const armorBase = opCfg?.id === 'titan' && outfitId === 'urban' ? '#94a3b8' : primaryHex;
+          if (mName.includes('joint')) {
+            mat.color.set(secHex);
+            mat.emissive.copy(glowCol);
+            mat.emissiveIntensity = isCyber ? 1.35 : 0.95;
+            mat.metalness = 0.76;
+            mat.roughness = 0.20;
+          } else {
+            mat.color.copy(blendWithWhite(armorBase, 0.92));
+            if (isRoyalGold) {
+              mat.emissive.set('#ca8a04');
+              mat.emissiveIntensity = 0.16;
+            } else if (isCyber) {
+              mat.emissive.set('#4c1d95');
+              mat.emissiveIntensity = 0.25;
+            }
+            mat.metalness = isRoyalGold ? 0.88 : 0.62;
+            mat.roughness = isRoyalGold ? 0.18 : 0.24;
+          }
         }
       } else if (key === 'orion') {
         if (mName.includes('wireframe')) {
@@ -1363,6 +1406,58 @@ export function styleOperatorGlbMaterials(modelRoot, key, opCfg, outCfg, teamGlo
             mat.emissiveIntensity = 0.18;
           }
         }
+      } else if (key === 'ghost_male') {
+        const useNativeDark = outfitId === 'urban' || isSwimwear;
+        if (mName.includes('tops_')) {
+          if (useNativeDark) {
+            mat.color.set('#e2e8f0');
+            mat.roughness = 0.46;
+            mat.metalness = 0.14;
+          } else {
+            applyRecoloredClothingMat(mat, primaryHex, secHex, 0.34, 0.82, accentHex, outfitId);
+            mat.roughness = isRoyalGold ? 0.22 : (isCyber ? 0.28 : 0.44);
+            mat.metalness = isRoyalGold ? 0.72 : (isCyber ? 0.42 : 0.16);
+          }
+        } else if (mName.includes('bottoms_')) {
+          if (useNativeDark) {
+            mat.color.set('#d8dee9');
+            mat.roughness = 0.52;
+            mat.metalness = 0.08;
+          } else {
+            applyRecoloredClothingMat(mat, secHex, vestHex, 0.30, 0.78, accentHex, outfitId);
+            mat.roughness = isRoyalGold ? 0.26 : 0.48;
+            mat.metalness = isRoyalGold ? 0.52 : 0.12;
+          }
+        } else if (mName.includes('shoes_')) {
+          if (useNativeDark) {
+            mat.color.set('#cbd5e1');
+            mat.roughness = 0.38;
+            mat.metalness = 0.22;
+          } else {
+            applyRecoloredClothingMat(mat, vestHex, accentHex, 0.28, 0.72, accentHex, outfitId);
+            mat.roughness = isRoyalGold ? 0.24 : 0.38;
+            mat.metalness = isRoyalGold ? 0.65 : 0.24;
+          }
+        } else if (mName.includes('hair')) {
+          mat.roughness = 0.38;
+          mat.metalness = 0.12;
+          if (mat.map) {
+            mat.emissive.set('#ffffff');
+            mat.emissiveMap = mat.map;
+            mat.emissiveIntensity = 0.10;
+          }
+        } else {
+          // Crisp anime male face, crimson eyes & skin
+          mat.color.set('#ffffff');
+          mat.roughness = 0.50;
+          mat.metalness = 0.02;
+          mat.envMapIntensity = 0.85;
+          if (mat.map) {
+            mat.emissive.set('#ffffff');
+            mat.emissiveMap = mat.map;
+            mat.emissiveIntensity = 0.18;
+          }
+        }
       }
 
       styledMatCache.set(cacheKey, mat);
@@ -1453,7 +1548,7 @@ export function instantiateGlbInstance(loadedBundle, opCfg, outCfg, teamGlowColo
     const { gltf, clips, cfg } = loadedBundle;
     const cloned = SkeletonUtils.clone(gltf.scene);
     const key = Object.keys(CHARACTER_ARCHETYPES).find((k) => CHARACTER_ARCHETYPES[k] === cfg) || 'soldier';
-    if (cfg.rigType === 'vroid') {
+    if (cfg.rigType === 'vroid' && key !== 'ghost_male') {
       applyFemaleCurveSculpt(cloned, Boolean(outCfg?.isSwimwear), key);
     }
     const scaleMult = opCfg?.helmetStyle === 'heavy' ? 1.07 : 1.0;
