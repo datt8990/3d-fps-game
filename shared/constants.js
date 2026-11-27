@@ -23,15 +23,95 @@ export const PHYSICS = {
 };
 
 export const GRENADE_CONFIG = {
-  maxPerSpawn: 1,
-  throwSpeed: 19.5,
+  maxPerSpawn: 2,
+  throwSpeed: 19.8,
   upwardBoost: 3.6,
   fuseMs: 2100,
-  blastRadius: 8.2,
-  maxDamage: 98,
+  blastRadius: 8.5,
+  maxDamage: 105,
   gravity: 17.5,
   bounceRestitution: 0.42
 };
+
+export const GRENADE_TYPES = {
+  frag: {
+    id: 'frag',
+    name: 'Lựu Đạn Nổ (HE)',
+    shortName: 'NỔ',
+    keyHint: '4',
+    color: '#f97316',
+    fuseMs: 2100,
+    blastRadius: 8.5,
+    maxDamage: 105,
+    spawnCount: 2,
+    practiceCount: 9
+  },
+  flash: {
+    id: 'flash',
+    name: 'Lựu Đạn Choáng (M84)',
+    shortName: 'CHOÁNG',
+    keyHint: '5',
+    color: '#e0f2fe',
+    fuseMs: 1450,
+    blastRadius: 17.5,
+    maxDamage: 6,
+    blindDurationMs: 3600,
+    spawnCount: 2,
+    practiceCount: 9
+  },
+  smoke: {
+    id: 'smoke',
+    name: 'Lựu Đạn Khói (M18)',
+    shortName: 'KHÓI',
+    keyHint: '6',
+    color: '#94a3b8',
+    fuseMs: 1600,
+    blastRadius: 7.4,
+    maxDamage: 0,
+    durationMs: 12000,
+    spawnCount: 2,
+    practiceCount: 9
+  },
+  ap: {
+    id: 'ap',
+    name: 'Lựu Đạn Phá Giáp (EMP)',
+    shortName: 'PHÁ GIÁP',
+    keyHint: '7',
+    color: '#38bdf8',
+    fuseMs: 1850,
+    blastRadius: 8.2,
+    maxDamage: 52,
+    armorShred: 150,
+    spawnCount: 1,
+    practiceCount: 9
+  },
+  molotov: {
+    id: 'molotov',
+    name: 'Bom Cháy (Molotov)',
+    shortName: 'CHÁY',
+    keyHint: '8',
+    color: '#ef4444',
+    fuseMs: 1150,
+    impactDetonate: true,
+    blastRadius: 4.8,
+    maxDamage: 24,
+    dps: 18,
+    durationMs: 6000,
+    spawnCount: 1,
+    practiceCount: 9
+  }
+};
+
+export const GRENADE_ORDER = ['frag', 'flash', 'smoke', 'ap', 'molotov'];
+
+export function createDefaultGrenadeBelt(isPractice = false) {
+  const belt = {};
+  for (const id of GRENADE_ORDER) {
+    const cfg = GRENADE_TYPES[id];
+    belt[id] = isPractice ? cfg.practiceCount : cfg.spawnCount;
+  }
+  return belt;
+}
 
 // Battle Royale (PUBG-style) Backpack, Gear Tiers, Medical Consumables & Caliber Groups
 export const BR_BACKPACKS = {
@@ -71,12 +151,16 @@ export const BR_AMMO_TYPES = {
 export const WEAPON_AMMO_MAP = {
   ak47: '7.62mm', scarh: '7.62mm', galil: '7.62mm', rpk: '7.62mm', kar98k: '7.62mm', svd: '7.62mm',
   groza: '7.62mm', asval: '7.62mm', fal: '7.62mm', mcx: '7.62mm', pkm: '7.62mm', mg3: '7.62mm', negev: '7.62mm', mk14: '7.62mm',
+  hk417: '7.62mm', acr: '7.62mm', m60e4: '7.62mm', rpd: '7.62mm', mg42: '7.62mm', dp28: '7.62mm', sks: '7.62mm', vss: '7.62mm', mosin: '7.62mm', psg1: '7.62mm', m110: '7.62mm',
   m4a1: '5.56mm', aug: '5.56mm', m16a4: '5.56mm', famas: '5.56mm', hk416: '5.56mm', m249: '5.56mm',
-  ak12: '5.56mm', g36c: '5.56mm',
+  ak12: '5.56mm', g36c: '5.56mm', ak74m: '5.56mm', an94: '5.56mm', qbz95: '5.56mm', bren2: '5.56mm', f2000: '5.56mm', sg553: '5.56mm', tar21: '5.56mm', type89: '5.56mm', l85a2: '5.56mm', m416_cqb: '5.56mm', stoner63: '5.56mm', l86: '5.56mm',
   mp5: '9mm', p90: '9mm', vector: '9mm', ump45: '9mm', mp7: '9mm', glock18: '9mm', usps: '9mm', fiveseven: '9mm',
   uzi: '9mm', mac10: '9mm', bizon: '9mm', thompson: '9mm', m1911: '9mm', beretta92: '9mm',
+  vityaz: '9mm', mpx: '9mm', scorpion: '9mm', mp9: '9mm', ppsh41: '9mm', mp40: '9mm', sten: '9mm', k1a: '9mm', mx4: '9mm', qcw05: '9mm', p226: '9mm', makarov: '9mm', cz75: '9mm', luger: '9mm',
   spas12: '12G', aa12: '12G', m870: '12G', benellim4: '12G', db_shotgun: '12G',
-  awp: '.338', barrett: '.338', m200: '.338', m24: '.338', deagle: '.338', magnum: '.338'
+  ksg12: '12G', saiga12: '12G', striker12: '12G', m1887: '12G', mossberg590: '12G', origin12: '12G',
+  awp: '.338', barrett: '.338', m200: '.338', m24: '.338', deagle: '.338', magnum: '.338',
+  msr: '.338', dsr1: '.338', ntw20: '.338', ragingbull: '.338'
 };
 
 export function getWeaponAmmoType(weaponId) {
@@ -1311,8 +1395,8 @@ export const WEAPONS = {
     spreadAds: 0,
     spreadMove: 0,
     spreadJump: 0,
-    range: 2.85,
-    falloffStart: 2.85,
+    range: 3.35,
+    falloffStart: 3.35,
     minDamageMult: 1.0,
     magSize: 0,
     reserveAmmo: 0,
@@ -1327,23 +1411,23 @@ export const WEAPONS = {
     category: 'melee',
     subClass: 'melee',
     typeLabel: 'Dao Cong Huyền Thoại',
-    desc: 'Lưỡi dao cong sắc lẹm với tốc độ vung đòn chớp nhoáng và tăng +10% tốc độ chạy nước rút!',
+    desc: 'Lưỡi dao cong sắc lẹm với tốc độ vung chém chớp nhoáng, tầm chém 3.45m và tăng +10% tốc chạy!',
     fireMode: 'melee',
     pellets: 1,
-    damage: 62,
-    heavyDamage: 105,
-    headMult: 1.5,
+    damage: 65,
+    heavyDamage: 112,
+    headMult: 1.55,
     legMult: 1.0,
-    rpm: 132,
-    fireIntervalMs: 450,
+    rpm: 138,
+    fireIntervalMs: 430,
     recoilPitch: 0.01,
     recoilYaw: 0,
     spreadStand: 0,
     spreadAds: 0,
     spreadMove: 0,
     spreadJump: 0,
-    range: 2.95,
-    falloffStart: 2.95,
+    range: 3.45,
+    falloffStart: 3.45,
     minDamageMult: 1.0,
     magSize: 0,
     reserveAmmo: 0,
@@ -1935,23 +2019,23 @@ export const WEAPONS = {
     category: 'melee',
     subClass: 'melee',
     typeLabel: 'Kiếm Carbon Nhật Bản',
-    desc: 'Lưỡi kiếm thép Damascus rèn cong siêu bén với tầm chém xa 3.35m và tăng +11% tốc độ di chuyển!',
+    desc: 'Lưỡi kiếm thép Damascus rèn cong siêu bén với tầm chém xa 4.10m, đòn chém quét cực rộng và +11% tốc chạy!',
     fireMode: 'melee',
     pellets: 1,
-    damage: 70,
-    heavyDamage: 120,
+    damage: 74,
+    heavyDamage: 128,
     headMult: 1.6,
     legMult: 1.0,
-    rpm: 105,
-    fireIntervalMs: 570,
+    rpm: 112,
+    fireIntervalMs: 535,
     recoilPitch: 0.012,
     recoilYaw: 0,
     spreadStand: 0,
     spreadAds: 0,
     spreadMove: 0,
     spreadJump: 0,
-    range: 3.35,
-    falloffStart: 3.35,
+    range: 4.10,
+    falloffStart: 4.10,
     minDamageMult: 1.0,
     magSize: 0,
     reserveAmmo: 0,
@@ -1959,6 +2043,421 @@ export const WEAPONS = {
     moveSpeedMult: 1.11,
     isMelee: true,
     unlockCost: 1500
+  },
+
+  // === 50 NEW REAL-WORLD WEAPONS (TOTAL ARSENAL: 100 WEAPONS) ===
+  // --- 12 ASSAULT RIFLES ---
+  ak74m: {
+    id: 'ak74m', name: 'AK-74M Spetsnaz', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Tiêu Chuẩn Nga 5.45mm',
+    desc: 'Dòng AK hiện đại báng polymer đen gập ngang, độ giật thấp hơn AK-47 và tốc độ xả 660 RPM cực êm.',
+    fireMode: 'auto', pellets: 1, damage: 32, headMult: 3.0, legMult: 0.80, rpm: 660, fireIntervalMs: 91,
+    recoilPitch: 0.0056, recoilYaw: 0.0021, spreadStand: 0.0020, spreadAds: 0.00030, spreadMove: 0.010, spreadJump: 0.041,
+    range: 128, falloffStart: 48, minDamageMult: 0.77, magSize: 30, reserveAmmo: 90, reloadTimeSec: 2.25, moveSpeedMult: 0.96, adsFov: 41, unlockCost: 650
+  },
+  an94: {
+    id: 'an94', name: 'AN-94 Abakan', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Siêu Tốc Nga 5.45mm',
+    desc: 'Cơ chế nòng trượt giảm giật huyền thoại của Nga với tốc độ 780 RPM sắc bén và độ chụm đạn gần như tuyệt đối.',
+    fireMode: 'auto', pellets: 1, damage: 31, headMult: 3.1, legMult: 0.80, rpm: 780, fireIntervalMs: 77,
+    recoilPitch: 0.0040, recoilYaw: 0.0014, spreadStand: 0.0015, spreadAds: 0.00020, spreadMove: 0.009, spreadJump: 0.038,
+    range: 138, falloffStart: 54, minDamageMult: 0.81, magSize: 30, reserveAmmo: 90, reloadTimeSec: 2.2, moveSpeedMult: 0.95, adsFov: 39, unlockCost: 1300
+  },
+  qbz95: {
+    id: 'qbz95', name: 'QBZ-95-1 Bullpup', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Bullpup 5.8mm',
+    desc: 'Thiết kế Bullpup gọn nhẹ với quai xách đặc trưng, ổn định cao ở cự ly trung và di chuyển linh hoạt.',
+    fireMode: 'auto', pellets: 1, damage: 31, headMult: 2.9, legMult: 0.80, rpm: 700, fireIntervalMs: 86,
+    recoilPitch: 0.0048, recoilYaw: 0.0018, spreadStand: 0.0019, spreadAds: 0.00028, spreadMove: 0.0085, spreadJump: 0.036,
+    range: 126, falloffStart: 48, minDamageMult: 0.77, magSize: 30, reserveAmmo: 90, reloadTimeSec: 2.2, moveSpeedMult: 0.98, adsFov: 41, unlockCost: 800
+  },
+  bren2: {
+    id: 'bren2', name: 'CZ Bren 2 Ms', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Đặc Nhiệm Séc 5.56mm',
+    desc: 'Thân nhôm nguyên khối hiện đại của CH Séc, thay đạn cực nhanh 1.95s và kiểm soát đường đạn chuẩn xác.',
+    fireMode: 'auto', pellets: 1, damage: 30, headMult: 3.0, legMult: 0.82, rpm: 760, fireIntervalMs: 79,
+    recoilPitch: 0.0044, recoilYaw: 0.0017, spreadStand: 0.0017, spreadAds: 0.00024, spreadMove: 0.0085, spreadJump: 0.036,
+    range: 130, falloffStart: 50, minDamageMult: 0.79, magSize: 30, reserveAmmo: 90, reloadTimeSec: 1.95, moveSpeedMult: 0.97, adsFov: 40, unlockCost: 1100
+  },
+  f2000: {
+    id: 'f2000', name: 'FN F2000 Tactical', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Bullpup Bỉ 850 RPM',
+    desc: 'Kiểu dáng khí động học tương lai của FN Herstal, xả đạn 850 RPM cực nhanh và cơ động khi vừa chạy vừa bắn.',
+    fireMode: 'auto', pellets: 1, damage: 27, headMult: 2.9, legMult: 0.82, rpm: 850, fireIntervalMs: 70,
+    recoilPitch: 0.0045, recoilYaw: 0.0019, spreadStand: 0.0021, spreadAds: 0.00032, spreadMove: 0.008, spreadJump: 0.034,
+    range: 118, falloffStart: 42, minDamageMult: 0.74, magSize: 30, reserveAmmo: 120, reloadTimeSec: 2.15, moveSpeedMult: 0.98, adsFov: 41, unlockCost: 1050
+  },
+  sg553: {
+    id: 'sg553', name: 'SIG SG 553 Commando', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Biệt Kích Thụy Sĩ',
+    desc: 'Độ hoàn thiện cơ khí chuẩn Thụy Sĩ với hỏa lực đầm 34 sát thương và khả năng bắn điểm xạ tầm xa tuyệt hảo.',
+    fireMode: 'auto', pellets: 1, damage: 34, headMult: 3.0, legMult: 0.80, rpm: 670, fireIntervalMs: 89,
+    recoilPitch: 0.0050, recoilYaw: 0.0018, spreadStand: 0.0017, spreadAds: 0.00023, spreadMove: 0.0095, spreadJump: 0.038,
+    range: 136, falloffStart: 54, minDamageMult: 0.80, magSize: 30, reserveAmmo: 90, reloadTimeSec: 2.15, moveSpeedMult: 0.96, adsFov: 39, unlockCost: 1150
+  },
+  tar21: {
+    id: 'tar21', name: 'IWI Tavor TAR-21', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Bullpup Israel 5.56mm',
+    desc: 'Chuyên gia tác chiến đô thị của quân đội Israel với tốc độ bắn 820 RPM và độ ổn định cao ở cự ly gần–trung.',
+    fireMode: 'auto', pellets: 1, damage: 28, headMult: 2.9, legMult: 0.82, rpm: 820, fireIntervalMs: 73,
+    recoilPitch: 0.0046, recoilYaw: 0.0019, spreadStand: 0.0020, spreadAds: 0.00030, spreadMove: 0.0082, spreadJump: 0.035,
+    range: 120, falloffStart: 44, minDamageMult: 0.75, magSize: 30, reserveAmmo: 90, reloadTimeSec: 2.1, moveSpeedMult: 0.99, adsFov: 42, unlockCost: 950
+  },
+  type89: {
+    id: 'type89', name: 'Howa Type 89', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Lực Lượng Phòng Vệ Nhật',
+    desc: 'Khẩu súng trường chiến thuật của Nhật Bản nổi tiếng về độ chính xác cao, ít giật và cực kỳ bền bỉ.',
+    fireMode: 'auto', pellets: 1, damage: 31, headMult: 3.0, legMult: 0.80, rpm: 710, fireIntervalMs: 84,
+    recoilPitch: 0.0042, recoilYaw: 0.0015, spreadStand: 0.0016, spreadAds: 0.00024, spreadMove: 0.009, spreadJump: 0.038,
+    range: 132, falloffStart: 52, minDamageMult: 0.79, magSize: 30, reserveAmmo: 90, reloadTimeSec: 2.1, moveSpeedMult: 0.96, adsFov: 40, unlockCost: 900
+  },
+  acr: {
+    id: 'acr', name: 'Bushmaster ACR 6.8', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Đa Năng 6.8mm SPC',
+    desc: 'Huyền thoại Adaptive Combat Rifle cỡ đạn 6.8mm — giật siêu nhẹ như tia laser nhưng sát thương lên tới 33.',
+    fireMode: 'auto', pellets: 1, damage: 33, headMult: 3.0, legMult: 0.82, rpm: 690, fireIntervalMs: 87,
+    recoilPitch: 0.0038, recoilYaw: 0.0014, spreadStand: 0.0015, spreadAds: 0.00021, spreadMove: 0.0085, spreadJump: 0.036,
+    range: 138, falloffStart: 54, minDamageMult: 0.82, magSize: 30, reserveAmmo: 90, reloadTimeSec: 2.05, moveSpeedMult: 0.96, adsFov: 39, unlockCost: 1350
+  },
+  l85a2: {
+    id: 'l85a2', name: 'SA80 L85A2', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Bullpup Hoàng Gia Anh',
+    desc: 'Nòng dài tích hợp trong thân Bullpup nhỏ gọn giúp duy trì độ chính xác tầm xa vượt trội chuẩn SAS Anh Quốc.',
+    fireMode: 'auto', pellets: 1, damage: 32, headMult: 3.0, legMult: 0.80, rpm: 650, fireIntervalMs: 92,
+    recoilPitch: 0.0045, recoilYaw: 0.0016, spreadStand: 0.0016, spreadAds: 0.00022, spreadMove: 0.009, spreadJump: 0.038,
+    range: 140, falloffStart: 56, minDamageMult: 0.82, magSize: 30, reserveAmmo: 90, reloadTimeSec: 2.35, moveSpeedMult: 0.95, adsFov: 38, unlockCost: 850
+  },
+  hk417: {
+    id: 'hk417', name: 'HK417 Assaulter 7.62', category: 'primary', subClass: 'ar',
+    typeLabel: 'Súng Trường Hạng Nặng Đức 7.62 NATO',
+    desc: 'Phiên bản cỡ đạn lớn 7.62×51mm của dòng HK416: sát thương 44 cực rát, xuyên giáp tốt ở cả tầm xa.',
+    fireMode: 'auto', pellets: 1, damage: 44, headMult: 2.8, legMult: 0.82, rpm: 530, fireIntervalMs: 113,
+    recoilPitch: 0.0074, recoilYaw: 0.0024, spreadStand: 0.0019, spreadAds: 0.00023, spreadMove: 0.012, spreadJump: 0.045,
+    range: 152, falloffStart: 60, minDamageMult: 0.84, magSize: 20, reserveAmmo: 80, reloadTimeSec: 2.35, moveSpeedMult: 0.93, adsFov: 37, unlockCost: 1450
+  },
+  m416_cqb: {
+    id: 'm416_cqb', name: 'MK18 Mod 1 CQB', category: 'primary', subClass: 'ar',
+    typeLabel: 'Carbine Đặc Nhiệm Hải Quân SEALs',
+    desc: 'Phiên bản nòng ngắn 10.3 inch của đội đặc nhiệm SEALs: tốc độ xả 800 RPM, thay đạn 1.85s siêu linh hoạt.',
+    fireMode: 'auto', pellets: 1, damage: 29, headMult: 3.0, legMult: 0.82, rpm: 800, fireIntervalMs: 75,
+    recoilPitch: 0.0044, recoilYaw: 0.0017, spreadStand: 0.0018, spreadAds: 0.00026, spreadMove: 0.0078, spreadJump: 0.034,
+    range: 118, falloffStart: 42, minDamageMult: 0.75, magSize: 30, reserveAmmo: 120, reloadTimeSec: 1.85, moveSpeedMult: 0.99, adsFov: 42, unlockCost: 1200
+  },
+
+  // --- 10 SUBMACHINE GUNS (SMG) ---
+  vityaz: {
+    id: 'vityaz', name: 'PP-19-01 Vityaz', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Spetsnaz 9mm',
+    desc: 'Phát triển trên khung AK thu nhỏ cho lực lượng đặc nhiệm Nga, cực kỳ chắc tay với 750 RPM và độ giật êm.',
+    fireMode: 'auto', pellets: 1, damage: 26, headMult: 2.7, legMult: 0.84, rpm: 750, fireIntervalMs: 80,
+    recoilPitch: 0.0034, recoilYaw: 0.0016, spreadStand: 0.0024, spreadAds: 0.00050, spreadMove: 0.0075, spreadJump: 0.030,
+    range: 84, falloffStart: 27, minDamageMult: 0.66, magSize: 30, reserveAmmo: 120, reloadTimeSec: 1.9, moveSpeedMult: 1.03, adsFov: 46, unlockCost: 700
+  },
+  mpx: {
+    id: 'mpx', name: 'SIG MPX Tactical', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Piston Hiện Đại 9mm',
+    desc: 'Thiết kế piston khí chuẩn quân sự Mỹ với tốc độ 880 RPM, độ chính xác cao nhất phân khúc tiểu liên.',
+    fireMode: 'auto', pellets: 1, damage: 24, headMult: 2.7, legMult: 0.85, rpm: 880, fireIntervalMs: 68,
+    recoilPitch: 0.0029, recoilYaw: 0.0014, spreadStand: 0.0022, spreadAds: 0.00046, spreadMove: 0.007, spreadJump: 0.028,
+    range: 86, falloffStart: 28, minDamageMult: 0.67, magSize: 30, reserveAmmo: 150, reloadTimeSec: 1.8, moveSpeedMult: 1.04, adsFov: 46, unlockCost: 950
+  },
+  scorpion: {
+    id: 'scorpion', name: 'CZ Scorpion EVO 3', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Siêu Tốc 1150 RPM',
+    desc: 'Quái vật cự ly gần với tốc độ xả kinh hoàng 1150 viên/phút — bốc hơi mục tiêu trong chưa đầy nửa giây!',
+    fireMode: 'auto', pellets: 1, damage: 20, headMult: 2.5, legMult: 0.85, rpm: 1150, fireIntervalMs: 52,
+    recoilPitch: 0.0030, recoilYaw: 0.0020, spreadStand: 0.0032, spreadAds: 0.00072, spreadMove: 0.0075, spreadJump: 0.029,
+    range: 70, falloffStart: 20, minDamageMult: 0.58, magSize: 30, reserveAmmo: 150, reloadTimeSec: 1.8, moveSpeedMult: 1.04, adsFov: 47, unlockCost: 1150
+  },
+  mp9: {
+    id: 'mp9', name: 'B&T MP9-N Compact', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Cận Vệ Thụy Sĩ 950 RPM',
+    desc: 'Siêu nhẹ với tốc độ chạy +5%, tốc độ bắn 950 RPM và kiểm soát tâm cực ngọt khi nhảy bắn.',
+    fireMode: 'auto', pellets: 1, damage: 22, headMult: 2.6, legMult: 0.85, rpm: 950, fireIntervalMs: 63,
+    recoilPitch: 0.0028, recoilYaw: 0.0016, spreadStand: 0.0026, spreadAds: 0.00058, spreadMove: 0.0068, spreadJump: 0.024,
+    range: 74, falloffStart: 22, minDamageMult: 0.60, magSize: 30, reserveAmmo: 150, reloadTimeSec: 1.75, moveSpeedMult: 1.05, adsFov: 48, unlockCost: 800
+  },
+  ppsh41: {
+    id: 'ppsh41', name: 'PPSh-41 Drum 71', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Huyền Thoại Trống 71 Viên',
+    desc: 'Cỗ máy càn quét lịch sử với băng đạn trống 71 viên và tốc độ 960 RPM, bắn không ngừng nghỉ giữa vòng vây!',
+    fireMode: 'auto', pellets: 1, damage: 21, headMult: 2.5, legMult: 0.85, rpm: 960, fireIntervalMs: 62,
+    recoilPitch: 0.0036, recoilYaw: 0.0022, spreadStand: 0.0034, spreadAds: 0.00075, spreadMove: 0.0085, spreadJump: 0.032,
+    range: 76, falloffStart: 22, minDamageMult: 0.60, magSize: 71, reserveAmmo: 213, reloadTimeSec: 2.65, moveSpeedMult: 1.00, adsFov: 47, unlockCost: 1200
+  },
+  mp40: {
+    id: 'mp40', name: 'MP40 Classic', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Cổ Điển Đức 9mm',
+    desc: 'Tốc độ bắn 560 RPM đầm chắc, gần như không giật với sát thương 30 mỗi viên cực dễ kiểm soát headshot.',
+    fireMode: 'auto', pellets: 1, damage: 30, headMult: 2.8, legMult: 0.84, rpm: 560, fireIntervalMs: 107,
+    recoilPitch: 0.0028, recoilYaw: 0.0012, spreadStand: 0.0021, spreadAds: 0.00042, spreadMove: 0.007, spreadJump: 0.028,
+    range: 88, falloffStart: 30, minDamageMult: 0.68, magSize: 32, reserveAmmo: 128, reloadTimeSec: 2.0, moveSpeedMult: 1.02, adsFov: 46, unlockCost: 550
+  },
+  sten: {
+    id: 'sten', name: 'Sten Mk II-S', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Giảm Thanh Đặc Nhiệm',
+    desc: 'Phiên bản nòng giảm thanh liền thân cổ điển của biệt kích Anh, bắn cực êm và ẩn dấu trên bản đồ radar.',
+    fireMode: 'auto', pellets: 1, damage: 28, headMult: 2.7, legMult: 0.84, rpm: 620, fireIntervalMs: 96,
+    recoilPitch: 0.0030, recoilYaw: 0.0014, spreadStand: 0.0024, spreadAds: 0.00050, spreadMove: 0.0075, spreadJump: 0.030,
+    range: 82, falloffStart: 26, minDamageMult: 0.65, magSize: 32, reserveAmmo: 128, reloadTimeSec: 1.95, moveSpeedMult: 1.03, adsFov: 47, builtInSuppressed: true, unlockCost: 650
+  },
+  k1a: {
+    id: 'k1a', name: 'Daewoo K1A Carbine', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Cỡ Đạn 5.56mm Hàn Quốc',
+    desc: 'Dùng cỡ đạn 5.56mm trong thân hình tiểu liên gọn nhẹ, sát thương 27 mạnh mẽ ở cả tầm trung.',
+    fireMode: 'auto', pellets: 1, damage: 27, headMult: 2.8, legMult: 0.82, rpm: 800, fireIntervalMs: 75,
+    recoilPitch: 0.0038, recoilYaw: 0.0017, spreadStand: 0.0023, spreadAds: 0.00045, spreadMove: 0.0078, spreadJump: 0.031,
+    range: 96, falloffStart: 34, minDamageMult: 0.70, magSize: 30, reserveAmmo: 120, reloadTimeSec: 1.95, moveSpeedMult: 1.02, adsFov: 44, unlockCost: 850
+  },
+  mx4: {
+    id: 'mx4', name: 'Beretta Mx4 Storm', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Đặc Nhiệm Ý 920 RPM',
+    desc: 'Thiết kế thân liền khối bóng bẩy kiểu Ý với tốc độ xả 920 RPM và độ ổn định rất cao khi di chuyển ngang.',
+    fireMode: 'auto', pellets: 1, damage: 23, headMult: 2.6, legMult: 0.85, rpm: 920, fireIntervalMs: 65,
+    recoilPitch: 0.0030, recoilYaw: 0.0015, spreadStand: 0.0025, spreadAds: 0.00052, spreadMove: 0.007, spreadJump: 0.028,
+    range: 80, falloffStart: 25, minDamageMult: 0.64, magSize: 30, reserveAmmo: 150, reloadTimeSec: 1.85, moveSpeedMult: 1.03, adsFov: 46, unlockCost: 900
+  },
+  qcw05: {
+    id: 'qcw05', name: 'QCW-05 Silenced', category: 'primary', subClass: 'smg',
+    typeLabel: 'Tiểu Liên Bullpup Giảm Thanh 50 Viên',
+    desc: 'Băng đạn 50 viên 4 hàng kết hợp giảm thanh tích hợp siêu êm, hoàn hảo cho những pha móc lốp âm thầm.',
+    fireMode: 'auto', pellets: 1, damage: 23, headMult: 2.6, legMult: 0.85, rpm: 860, fireIntervalMs: 69,
+    recoilPitch: 0.0031, recoilYaw: 0.0016, spreadStand: 0.0026, spreadAds: 0.00055, spreadMove: 0.0075, spreadJump: 0.030,
+    range: 82, falloffStart: 26, minDamageMult: 0.64, magSize: 50, reserveAmmo: 150, reloadTimeSec: 2.3, moveSpeedMult: 1.02, adsFov: 46, builtInSuppressed: true, unlockCost: 1100
+  },
+
+  // --- 6 LIGHT MACHINE GUNS (LMG) ---
+  m60e4: {
+    id: 'm60e4', name: 'M60E4 Heavy 7.62', category: 'primary', subClass: 'lmg',
+    typeLabel: 'Đại Liên Biệt Kích Mỹ 7.62 NATO',
+    desc: 'Huyền thoại "The Pig" với sát thương 41 mỗi viên, nhịp bắn 560 RPM đầm chắc và dây đạn 100 viên hủy diệt.',
+    fireMode: 'auto', pellets: 1, damage: 41, headMult: 2.7, legMult: 0.80, rpm: 560, fireIntervalMs: 107,
+    recoilPitch: 0.0072, recoilYaw: 0.0028, spreadStand: 0.0034, spreadAds: 0.00055, spreadMove: 0.018, spreadJump: 0.055,
+    range: 142, falloffStart: 54, minDamageMult: 0.80, magSize: 100, reserveAmmo: 200, reloadTimeSec: 4.0, moveSpeedMult: 0.84, adsFov: 41, unlockCost: 1500
+  },
+  rpd: {
+    id: 'rpd', name: 'RPD Drum 100', category: 'primary', subClass: 'lmg',
+    typeLabel: 'Trung Liên Trống Dây 7.62mm',
+    desc: 'Thân gọn nhẹ hơn PKM nhưng vẫn mang hộp trống 100 viên 7.62mm với độ ổn định ấn tượng ở tầm trung.',
+    fireMode: 'auto', pellets: 1, damage: 35, headMult: 2.7, legMult: 0.80, rpm: 670, fireIntervalMs: 89,
+    recoilPitch: 0.0062, recoilYaw: 0.0026, spreadStand: 0.0032, spreadAds: 0.00052, spreadMove: 0.016, spreadJump: 0.052,
+    range: 128, falloffStart: 48, minDamageMult: 0.76, magSize: 100, reserveAmmo: 200, reloadTimeSec: 3.7, moveSpeedMult: 0.87, adsFov: 42, unlockCost: 1350
+  },
+  mg42: {
+    id: 'mg42', name: 'MG42 Buzzsaw', category: 'primary', subClass: 'lmg',
+    typeLabel: 'Đại Liên Huyền Thoại 1200 RPM',
+    desc: 'Tốc độ bắn nhanh nhất kho vũ khí — 1200 RPM như tiếng xé vải, biến mọi hành lang thành vùng tử địa!',
+    fireMode: 'auto', pellets: 1, damage: 29, headMult: 2.4, legMult: 0.80, rpm: 1200, fireIntervalMs: 50,
+    recoilPitch: 0.0062, recoilYaw: 0.0034, spreadStand: 0.0044, spreadAds: 0.00085, spreadMove: 0.022, spreadJump: 0.060,
+    range: 118, falloffStart: 40, minDamageMult: 0.72, magSize: 100, reserveAmmo: 200, reloadTimeSec: 4.1, moveSpeedMult: 0.83, adsFov: 43, unlockCost: 1750
+  },
+  stoner63: {
+    id: 'stoner63', name: 'Stoner 63 Commando', category: 'primary', subClass: 'lmg',
+    typeLabel: 'Trung Liên Cơ Động SEALs 5.56mm',
+    desc: 'Khẩu LMG nhẹ và linh hoạt bậc nhất với 75 viên/băng, thay đạn chỉ 3.1s và tốc độ di chuyển gần ngang AR.',
+    fireMode: 'auto', pellets: 1, damage: 32, headMult: 2.7, legMult: 0.82, rpm: 740, fireIntervalMs: 81,
+    recoilPitch: 0.0052, recoilYaw: 0.0022, spreadStand: 0.0028, spreadAds: 0.00045, spreadMove: 0.013, spreadJump: 0.046,
+    range: 126, falloffStart: 48, minDamageMult: 0.76, magSize: 75, reserveAmmo: 225, reloadTimeSec: 3.1, moveSpeedMult: 0.90, adsFov: 41, unlockCost: 1400
+  },
+  l86: {
+    id: 'l86', name: 'L86A2 LSW', category: 'primary', subClass: 'lmg',
+    typeLabel: 'Trung Liên Bullpup Chính Xác Cao',
+    desc: 'Biến thể nòng nặng của SA80 với độ giật siêu thấp, bắn chính xác tầm xa như súng trường xạ thủ kèm 60 viên đạn.',
+    fireMode: 'auto', pellets: 1, damage: 34, headMult: 2.8, legMult: 0.80, rpm: 660, fireIntervalMs: 91,
+    recoilPitch: 0.0046, recoilYaw: 0.0018, spreadStand: 0.0022, spreadAds: 0.00032, spreadMove: 0.012, spreadJump: 0.044,
+    range: 144, falloffStart: 56, minDamageMult: 0.82, magSize: 60, reserveAmmo: 180, reloadTimeSec: 2.9, moveSpeedMult: 0.91, adsFov: 39, unlockCost: 1250
+  },
+  dp28: {
+    id: 'dp28', name: 'DP-28 Pan LMG', category: 'primary', subClass: 'lmg',
+    typeLabel: 'Trung Liên Đĩa Xoay 47 Viên 7.62',
+    desc: 'Băng đạn đĩa tròn đặc trưng đặt trên thân súng, sát thương 40 cực khỏe và tiếng nổ đầm chắc khó lẫn.',
+    fireMode: 'auto', pellets: 1, damage: 40, headMult: 2.7, legMult: 0.80, rpm: 550, fireIntervalMs: 109,
+    recoilPitch: 0.0064, recoilYaw: 0.0024, spreadStand: 0.0030, spreadAds: 0.00048, spreadMove: 0.016, spreadJump: 0.052,
+    range: 136, falloffStart: 52, minDamageMult: 0.78, magSize: 47, reserveAmmo: 141, reloadTimeSec: 3.2, moveSpeedMult: 0.88, adsFov: 41, unlockCost: 1100
+  },
+
+  // --- 6 SHOTGUNS ---
+  ksg12: {
+    id: 'ksg12', name: 'Kel-Tec KSG-12', category: 'primary', subClass: 'shotgun',
+    typeLabel: 'Shotgun Bullpup Ống Đôi 14 Viên',
+    desc: 'Thiết kế Bullpup ống đạn kép chứa tới 14 viên 12G, chùm 9 viên chì gom cực chặt giúp tiêu diệt từ cự ly 15m.',
+    fireMode: 'semi', pellets: 9, pelletSpread: 0.036, damage: 16, headMult: 2.0, legMult: 0.85, rpm: 84, fireIntervalMs: 714,
+    recoilPitch: 0.017, recoilYaw: 0.0038, spreadStand: 0.0065, spreadAds: 0.0022, spreadMove: 0.013, spreadJump: 0.034,
+    range: 40, falloffStart: 13, minDamageMult: 0.42, magSize: 14, reserveAmmo: 42, reloadTimeSec: 2.9, moveSpeedMult: 0.97, adsFov: 50, unlockCost: 1100
+  },
+  saiga12: {
+    id: 'saiga12', name: 'Saiga-12K Auto', category: 'primary', subClass: 'shotgun',
+    typeLabel: 'Shotgun Khung AK Băng Rời 10 Viên',
+    desc: 'Lắp băng đạn rời thay cực nhanh 2.1s và bắn liên tiếp 230 RPM, áp đảo hoàn toàn các pha đẩy nhà.',
+    fireMode: 'semi', pellets: 8, pelletSpread: 0.044, damage: 14, headMult: 1.9, legMult: 0.85, rpm: 230, fireIntervalMs: 260,
+    recoilPitch: 0.013, recoilYaw: 0.0034, spreadStand: 0.008, spreadAds: 0.0032, spreadMove: 0.014, spreadJump: 0.036,
+    range: 36, falloffStart: 11, minDamageMult: 0.36, magSize: 10, reserveAmmo: 40, reloadTimeSec: 2.1, moveSpeedMult: 0.95, adsFov: 51, unlockCost: 1050
+  },
+  striker12: {
+    id: 'striker12', name: 'Striker-12 Sweeper', category: 'primary', subClass: 'shotgun',
+    typeLabel: 'Shotgun Ổ Quay 12 Viên',
+    desc: 'Biệt danh "Chổi Quét Phố" với ổ quay tròn 12 viên bán tự động 250 RPM, dọn sạch góc hẹp chớp nhoáng.',
+    fireMode: 'semi', pellets: 7, pelletSpread: 0.046, damage: 15, headMult: 1.9, legMult: 0.85, rpm: 250, fireIntervalMs: 240,
+    recoilPitch: 0.012, recoilYaw: 0.0034, spreadStand: 0.0085, spreadAds: 0.0035, spreadMove: 0.014, spreadJump: 0.036,
+    range: 35, falloffStart: 10, minDamageMult: 0.35, magSize: 12, reserveAmmo: 48, reloadTimeSec: 2.85, moveSpeedMult: 0.94, adsFov: 52, unlockCost: 1150
+  },
+  m1887: {
+    id: 'm1887', name: 'Model 1887 Lever', category: 'primary', subClass: 'shotgun',
+    typeLabel: 'Shotgun Đòn Bẩy Huyền Thoại',
+    desc: 'Khẩu shotgun đòn bẩy phong cách cao bồi cực ngầu với chùm 10 viên chì sát thương khủng 160 mỗi phát!',
+    fireMode: 'semi', pellets: 10, pelletSpread: 0.038, damage: 16, headMult: 2.1, legMult: 0.85, rpm: 76, fireIntervalMs: 790,
+    recoilPitch: 0.019, recoilYaw: 0.0040, spreadStand: 0.0068, spreadAds: 0.0024, spreadMove: 0.013, spreadJump: 0.034,
+    range: 41, falloffStart: 13, minDamageMult: 0.42, magSize: 6, reserveAmmo: 30, reloadTimeSec: 2.4, moveSpeedMult: 0.98, adsFov: 50, unlockCost: 950
+  },
+  mossberg590: {
+    id: 'mossberg590', name: 'Mossberg 590A1', category: 'primary', subClass: 'shotgun',
+    typeLabel: 'Shotgun Tác Chiến Hải Quân 8 Viên',
+    desc: 'Nòng dày chống quá nhiệt chuẩn quân sự, độ gom đạn cực ổn định với 9 viên chì mỗi phát.',
+    fireMode: 'semi', pellets: 9, pelletSpread: 0.040, damage: 15, headMult: 2.0, legMult: 0.85, rpm: 86, fireIntervalMs: 695,
+    recoilPitch: 0.017, recoilYaw: 0.0038, spreadStand: 0.007, spreadAds: 0.0025, spreadMove: 0.013, spreadJump: 0.034,
+    range: 39, falloffStart: 12, minDamageMult: 0.39, magSize: 8, reserveAmmo: 32, reloadTimeSec: 2.45, moveSpeedMult: 0.97, adsFov: 50, unlockCost: 700
+  },
+  origin12: {
+    id: 'origin12', name: 'Origin-12 Drum', category: 'primary', subClass: 'shotgun',
+    typeLabel: 'Shotgun Tự Động Trống 16 Viên',
+    desc: 'Shotgun bán tự động cực nhanh 320 RPM lắp băng trống 16 viên — cỗ máy càn quét cận chiến hiện đại nhất!',
+    fireMode: 'auto', pellets: 7, pelletSpread: 0.047, damage: 13, headMult: 1.8, legMult: 0.85, rpm: 320, fireIntervalMs: 187,
+    recoilPitch: 0.011, recoilYaw: 0.0032, spreadStand: 0.0085, spreadAds: 0.0038, spreadMove: 0.014, spreadJump: 0.036,
+    range: 34, falloffStart: 10, minDamageMult: 0.35, magSize: 16, reserveAmmo: 64, reloadTimeSec: 2.65, moveSpeedMult: 0.93, adsFov: 52, unlockCost: 1450
+  },
+
+  // --- 8 SNIPERS & DMRS ---
+  vss: {
+    id: 'vss', name: 'VSS Vintorez', category: 'primary', subClass: 'sniper',
+    typeLabel: 'Súng Tỉa Giảm Thanh Liên Thanh 9×39',
+    desc: 'Súng bắn tỉa giảm thanh tích hợp có thể bắn liên thanh 540 RPM siêu êm, ám sát địch không một tiếng động!',
+    fireMode: 'auto', pellets: 1, damage: 52, headMult: 2.8, legMult: 0.80, rpm: 540, fireIntervalMs: 111,
+    recoilPitch: 0.0085, recoilYaw: 0.0020, spreadStand: 0.012, spreadAds: 0.00024, spreadMove: 0.026, spreadJump: 0.060,
+    range: 175, falloffStart: 85, minDamageMult: 0.80, magSize: 15, reserveAmmo: 75, reloadTimeSec: 2.35, moveSpeedMult: 0.94, isSniper: true, scopeFovs: [30, 16], builtInSuppressed: true, unlockCost: 1300
+  },
+  mosin: {
+    id: 'mosin', name: 'Mosin-Nagant M91/30', category: 'primary', subClass: 'sniper',
+    typeLabel: 'Súng Tỉa Cổ Điển Huyền Thoại 7.62',
+    desc: 'Báu vật bắn tỉa cổ điển cực nhẹ, cơ động +92% tốc chạy và uy lực 105 hạ gục gọn gàng.',
+    fireMode: 'bolt', pellets: 1, damage: 105, headMult: 2.8, legMult: 0.76, rpm: 49, fireIntervalMs: 1220,
+    recoilPitch: 0.018, recoilYaw: 0.0022, spreadStand: 0.032, spreadAds: 0.00018, spreadMove: 0.056, spreadJump: 0.092,
+    range: 235, falloffStart: 145, minDamageMult: 0.90, magSize: 5, reserveAmmo: 25, reloadTimeSec: 2.85, moveSpeedMult: 0.92, isSniper: true, scopeFovs: [24, 11], unlockCost: 750
+  },
+  psg1: {
+    id: 'psg1', name: 'HK PSG1 Precision', category: 'primary', subClass: 'sniper',
+    typeLabel: 'Súng Tỉa Bán Tự Động Đức 7.62',
+    desc: 'Khẩu bắn tỉa bán tự động trứ danh của đặc nhiệm GSG 9: sát thương 90, giật nhẹ và bắn nối tiếp cực mượt.',
+    fireMode: 'semi', pellets: 1, damage: 90, headMult: 2.8, legMult: 0.78, rpm: 145, fireIntervalMs: 413,
+    recoilPitch: 0.014, recoilYaw: 0.0022, spreadStand: 0.024, spreadAds: 0.00018, spreadMove: 0.048, spreadJump: 0.086,
+    range: 240, falloffStart: 150, minDamageMult: 0.92, magSize: 10, reserveAmmo: 40, reloadTimeSec: 2.7, moveSpeedMult: 0.90, isSniper: true, scopeFovs: [24, 11], unlockCost: 1400
+  },
+  msr: {
+    id: 'msr', name: 'Remington MSR .338', category: 'primary', subClass: 'sniper',
+    typeLabel: 'Siêu Bắn Tỉa Đặc Nhiệm .338 Lapua',
+    desc: 'Khung nhôm rút gọn siêu tốc độ ngắm, kéo quy-lát nhanh 52 RPM cùng uy lực 118 sát thương 1-shot cực bén.',
+    fireMode: 'bolt', pellets: 1, damage: 118, headMult: 2.8, legMult: 0.78, rpm: 52, fireIntervalMs: 1150,
+    recoilPitch: 0.019, recoilYaw: 0.0022, spreadStand: 0.032, spreadAds: 0.00014, spreadMove: 0.056, spreadJump: 0.092,
+    range: 265, falloffStart: 165, minDamageMult: 0.94, magSize: 7, reserveAmmo: 28, reloadTimeSec: 2.8, moveSpeedMult: 0.90, isSniper: true, scopeFovs: [22, 10], unlockCost: 1550
+  },
+  dsr1: {
+    id: 'dsr1', name: 'DSR-1 Bullpup Sniper', category: 'primary', subClass: 'sniper',
+    typeLabel: 'Súng Tỉa Bullpup Hạng Nặng Đức',
+    desc: 'Thiết kế Bullpup băng đạn kép, sát thương 122 xuyên giáp dày và độ chuẩn xác tuyệt đối tới 270m.',
+    fireMode: 'bolt', pellets: 1, damage: 122, headMult: 2.8, legMult: 0.79, rpm: 46, fireIntervalMs: 1300,
+    recoilPitch: 0.020, recoilYaw: 0.0022, spreadStand: 0.035, spreadAds: 0.00013, spreadMove: 0.060, spreadJump: 0.098,
+    range: 270, falloffStart: 170, minDamageMult: 0.95, magSize: 5, reserveAmmo: 25, reloadTimeSec: 2.9, moveSpeedMult: 0.89, isSniper: true, scopeFovs: [22, 9], unlockCost: 1650
+  },
+  m110: {
+    id: 'm110', name: 'M110 SASS Silenced', category: 'primary', subClass: 'sniper',
+    typeLabel: 'Súng Tỉa Xạ Thủ Giảm Thanh 7.62',
+    desc: 'Súng bắn tỉa bán tự động giảm thanh của Mỹ với 20 viên đạn và tốc độ bắn 210 RPM siêu êm.',
+    fireMode: 'semi', pellets: 1, damage: 76, headMult: 2.7, legMult: 0.80, rpm: 210, fireIntervalMs: 285,
+    recoilPitch: 0.011, recoilYaw: 0.0020, spreadStand: 0.018, spreadAds: 0.00020, spreadMove: 0.040, spreadJump: 0.078,
+    range: 220, falloffStart: 130, minDamageMult: 0.88, magSize: 20, reserveAmmo: 60, reloadTimeSec: 2.6, moveSpeedMult: 0.91, isSniper: true, scopeFovs: [26, 13], builtInSuppressed: true, unlockCost: 1450
+  },
+  sks: {
+    id: 'sks', name: 'SKS Tactical DMR', category: 'primary', subClass: 'sniper',
+    typeLabel: 'Súng Trường Xạ Thủ Bán Tự Động 7.62',
+    desc: 'Bắn điểm xạ liên hoàn 280 RPM với sát thương 64 cực rát và băng đạn 20 viên gọn nhẹ.',
+    fireMode: 'semi', pellets: 1, damage: 64, headMult: 2.7, legMult: 0.80, rpm: 280, fireIntervalMs: 214,
+    recoilPitch: 0.010, recoilYaw: 0.0020, spreadStand: 0.014, spreadAds: 0.00022, spreadMove: 0.032, spreadJump: 0.068,
+    range: 195, falloffStart: 105, minDamageMult: 0.86, magSize: 20, reserveAmmo: 80, reloadTimeSec: 2.4, moveSpeedMult: 0.94, isSniper: true, scopeFovs: [30, 15], unlockCost: 900
+  },
+  ntw20: {
+    id: 'ntw20', name: 'Denel NTW-20 20mm', category: 'primary', subClass: 'sniper',
+    typeLabel: 'Siêu Pháo Chống Thiết Giáp 20mm',
+    desc: 'Khẩu súng mạnh nhất toàn game — đạn pháo 20mm gây 150 sát thương hạ gục tức thì dù trúng giáp cấp 3!',
+    fireMode: 'bolt', pellets: 1, damage: 150, headMult: 2.8, legMult: 0.88, rpm: 34, fireIntervalMs: 1750,
+    recoilPitch: 0.028, recoilYaw: 0.0032, spreadStand: 0.048, spreadAds: 0.00015, spreadMove: 0.080, spreadJump: 0.12,
+    range: 300, falloffStart: 200, minDamageMult: 0.98, magSize: 3, reserveAmmo: 15, reloadTimeSec: 3.8, moveSpeedMult: 0.80, isSniper: true, scopeFovs: [20, 8], unlockCost: 2200
+  },
+
+  // --- 5 PISTOLS & REVOLVERS ---
+  p226: {
+    id: 'p226', name: 'SIG Sauer P226 Navy', category: 'secondary', subClass: 'pistol',
+    typeLabel: 'Súng Ngắn Đặc Nhiệm Hải Quân 9mm',
+    desc: 'Khẩu súng lục tin cậy của SEALs: 15 viên đạn, độ giật mượt và headshot cực kỳ chính xác.',
+    fireMode: 'semi', pellets: 1, damage: 36, headMult: 3.0, legMult: 0.82, rpm: 390, fireIntervalMs: 153,
+    recoilPitch: 0.0044, recoilYaw: 0.0014, spreadStand: 0.0018, spreadAds: 0.00028, spreadMove: 0.0075, spreadJump: 0.026,
+    range: 88, falloffStart: 32, minDamageMult: 0.74, magSize: 15, reserveAmmo: 60, reloadTimeSec: 1.65, moveSpeedMult: 1.03, adsFov: 45, unlockCost: 450
+  },
+  makarov: {
+    id: 'makarov', name: 'PM Makarov 9×18', category: 'secondary', subClass: 'pistol',
+    typeLabel: 'Súng Ngắn Cổ Điển Nga 9×18mm',
+    desc: 'Siêu gọn nhẹ, rút súng cực nhanh và thay đạn chỉ 1.45s, rất tiện để dứt điểm mục tiêu còn ít máu.',
+    fireMode: 'semi', pellets: 1, damage: 35, headMult: 3.0, legMult: 0.82, rpm: 430, fireIntervalMs: 139,
+    recoilPitch: 0.0040, recoilYaw: 0.0014, spreadStand: 0.0020, spreadAds: 0.00032, spreadMove: 0.0075, spreadJump: 0.025,
+    range: 80, falloffStart: 26, minDamageMult: 0.72, magSize: 12, reserveAmmo: 60, reloadTimeSec: 1.45, moveSpeedMult: 1.04, adsFov: 46, unlockCost: 350
+  },
+  cz75: {
+    id: 'cz75', name: 'CZ-75 Auto', category: 'secondary', subClass: 'pistol',
+    typeLabel: 'Súng Ngắn Liên Thanh 880 RPM',
+    desc: 'Súng phụ bắn tự động 880 RPM đầy uy lực, biến vũ khí phụ thành một khẩu tiểu liên bỏ túi cực gắt!',
+    fireMode: 'auto', pellets: 1, damage: 24, headMult: 2.7, legMult: 0.84, rpm: 880, fireIntervalMs: 68,
+    recoilPitch: 0.0050, recoilYaw: 0.0024, spreadStand: 0.0032, spreadAds: 0.00075, spreadMove: 0.0085, spreadJump: 0.030,
+    range: 70, falloffStart: 22, minDamageMult: 0.65, magSize: 16, reserveAmmo: 64, reloadTimeSec: 1.8, moveSpeedMult: 1.03, adsFov: 46, unlockCost: 750
+  },
+  luger: {
+    id: 'luger', name: 'Luger P08 Parabellum', category: 'secondary', subClass: 'pistol',
+    typeLabel: 'Súng Lục Cổ Điển Khóa Gối 9mm',
+    desc: 'Thiết kế khóa gối gập độc bản với độ chính xác cực cao và cảm giác bóp cò siêu bén.',
+    fireMode: 'semi', pellets: 1, damage: 40, headMult: 3.1, legMult: 0.82, rpm: 340, fireIntervalMs: 176,
+    recoilPitch: 0.0048, recoilYaw: 0.0015, spreadStand: 0.0016, spreadAds: 0.00024, spreadMove: 0.008, spreadJump: 0.026,
+    range: 92, falloffStart: 34, minDamageMult: 0.76, magSize: 10, reserveAmmo: 50, reloadTimeSec: 1.7, moveSpeedMult: 1.03, adsFov: 44, unlockCost: 600
+  },
+  ragingbull: {
+    id: 'ragingbull', name: 'Raging Bull .454', category: 'secondary', subClass: 'pistol',
+    typeLabel: 'Siêu Súng Lục Ổ Quay .454 Casull',
+    desc: 'Đại bác cầm tay uy lực 74 sát thương mỗi viên — mạnh hơn cả Desert Eagle, thổi bay giáp đối phương!',
+    fireMode: 'semi', pellets: 1, damage: 74, headMult: 3.0, legMult: 0.82, rpm: 145, fireIntervalMs: 413,
+    recoilPitch: 0.017, recoilYaw: 0.0030, spreadStand: 0.0024, spreadAds: 0.00028, spreadMove: 0.012, spreadJump: 0.038,
+    range: 112, falloffStart: 44, minDamageMult: 0.80, magSize: 5, reserveAmmo: 30, reloadTimeSec: 2.45, moveSpeedMult: 0.98, adsFov: 42, unlockCost: 1050
+  },
+
+  // --- 3 NEW TACTICAL MELEE BLADES (TOTAL 6 MELEE WEAPONS) ---
+  kukri: {
+    id: 'kukri', name: 'Kukri Gurkha', category: 'melee', subClass: 'melee',
+    typeLabel: 'Dao Quắm Chém Nặng Nepal',
+    desc: 'Lưỡi dao cong hướng trước chuyên bổ chém tầm xa 3.75m, nhát chém nặng chuột phải hạ gục tức thì!',
+    fireMode: 'melee', pellets: 1, damage: 72, heavyDamage: 124, headMult: 1.6, legMult: 1.0, rpm: 116, fireIntervalMs: 515,
+    recoilPitch: 0.012, recoilYaw: 0, spreadStand: 0, spreadAds: 0, spreadMove: 0, spreadJump: 0,
+    range: 3.75, falloffStart: 3.75, minDamageMult: 1.0, magSize: 0, reserveAmmo: 0, reloadTimeSec: 0, moveSpeedMult: 1.09, isMelee: true, unlockCost: 1100
+  },
+  tomahawk: {
+    id: 'tomahawk', name: 'Rìu Chiến Tomahawk', category: 'melee', subClass: 'melee',
+    typeLabel: 'Rìu Bổ Chiến Thuật Phá Giáp',
+    desc: 'Rìu thép carbon với lưỡi bổ cực nặng (130 sát thương nặng) và tầm vung 3.60m, chém xuyên giáp cực rát!',
+    fireMode: 'melee', pellets: 1, damage: 76, heavyDamage: 130, headMult: 1.6, legMult: 1.0, rpm: 108, fireIntervalMs: 555,
+    recoilPitch: 0.014, recoilYaw: 0, spreadStand: 0, spreadAds: 0, spreadMove: 0, spreadJump: 0,
+    range: 3.60, falloffStart: 3.60, minDamageMult: 1.0, magSize: 0, reserveAmmo: 0, reloadTimeSec: 0, moveSpeedMult: 1.09, isMelee: true, unlockCost: 1300
+  },
+  balisong: {
+    id: 'balisong', name: 'Dao Bướm Balisong', category: 'melee', subClass: 'melee',
+    typeLabel: 'Dao Bướm Liên Hoàn Tốc Độ Cao',
+    desc: 'Vung chém chéo liên hoàn siêu nhanh 155 RPM với tầm chém 3.40m và tốc độ di chuyển cao nhất +12%!',
+    fireMode: 'melee', pellets: 1, damage: 58, heavyDamage: 108, headMult: 1.55, legMult: 1.0, rpm: 155, fireIntervalMs: 385,
+    recoilPitch: 0.008, recoilYaw: 0, spreadStand: 0, spreadAds: 0, spreadMove: 0, spreadJump: 0,
+    range: 3.40, falloffStart: 3.40, minDamageMult: 1.0, magSize: 0, reserveAmmo: 0, reloadTimeSec: 0, moveSpeedMult: 1.12, isMelee: true, unlockCost: 1400
   }
 };
 

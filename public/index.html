@@ -63,7 +63,7 @@
         </button>
       </form>
       <div class="auth-features">
-        <span>50 VŨ KHÍ 3D</span>
+        <span>100 VŨ KHÍ 3D</span>
         <span class="sep">/</span>
         <span>9 ĐẶC NHIỆM</span>
         <span class="sep">/</span>
@@ -461,7 +461,7 @@
     <!-- TAB 4: KHO VŨ KHÍ (50 WEAPONS, SUBCLASS FILTER, ATTACHMENTS & 8 SKINS) -->
     <section id="tab-armory" class="tab-view hidden">
       <div class="side-panel-left glass-panel">
-        <div class="panel-tag">PHÂN LOẠI VŨ KHÍ (50 KHẨU)</div>
+        <div class="panel-tag">PHÂN LOẠI VŨ KHÍ (100 KHẨU)</div>
         <div id="armory-subclass-tabs" class="subclass-pills"></div>
         <div id="armory-weapons-list" class="stack-list" style="margin-top:8px;flex:1;overflow-y:auto;"></div>
       </div>
@@ -847,6 +847,10 @@
       </div>
     </div>
 
+    <!-- Flashbang Pure-White Blind Overlay (Zero backdrop-filter, pure GPU opacity!) & Tactical Alert -->
+    <div id="hud-flash-overlay" class="flash-blind-overlay hidden"></div>
+    <div id="hud-status-alert" class="hud-status-alert hidden"></div>
+
     <!-- Respawn Overlay -->
     <div id="hud-respawn-overlay" class="respawn-banner hidden">
       <div class="respawn-title">BẠN ĐÃ BỊ HẠ GỤC</div>
@@ -895,6 +899,16 @@
       </div>
     </div>
 
+    <!-- Reload / Bomb Progress & Tactical Grenade Aim/Power Charge Gauge -->
+    <div id="hud-grenade-charge-wrap" class="grenade-charge-wrap hidden">
+      <div class="gc-top">
+        <span id="hud-gc-title" class="gc-title">LỰU ĐẠN NỔ (HE) • NÉM XA</span>
+        <span id="hud-gc-pct" class="gc-pct">40%</span>
+      </div>
+      <div class="gc-track"><div id="hud-gc-fill" class="gc-fill" style="width:40%"></div></div>
+      <div class="gc-hint"><kbd>Giữ Chuột Trái</kbd> Căn lực &amp; Thả để ném &bull; <kbd>Chuột Phải</kbd> Ném gần / Hủy &bull; <kbd>1-3</kbd> Rút súng</div>
+    </div>
+
     <!-- Bottom Right: Ammo, Grenades, Reload Progress, Weapon Slots & Action Buttons -->
     <div class="hud-bottom-right">
       <div id="hud-reload-wrap" class="reload-bar-wrap hidden">
@@ -906,15 +920,23 @@
         <div class="ammo-top">
           <div class="weapon-title-wrap">
             <span id="hud-weapon-name" class="weapon-title">AK-47</span>
-            <span class="grenade-badge" title="Nhấn phím G để ném Lựu đạn nổ">
+            <span class="grenade-badge" id="hud-grenade-badge" title="Nhấn phím G để ném lựu đạn đang chọn (4-8 hoặc X để đổi loại)">
               <svg class="ui-ico xs" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="14" r="6"/><path d="M12 8V4h3"/></svg>
-              <strong id="hud-grenade-count">1</strong> <kbd>G</kbd>
+              <span id="hud-grenade-active-name">NỔ</span>
+              <strong id="hud-grenade-count">2</strong> <kbd>G</kbd>
             </span>
           </div>
           <div class="ammo-numbers">
             <span id="hud-ammo-mag" class="ammo-mag">30</span>
             <span id="hud-ammo-res" class="ammo-res">/ 90</span>
           </div>
+        </div>
+        <div class="grenade-belt-row" id="hud-grenade-belt">
+          <button class="gren-pill active" data-grenade="frag" title="[4] Lựu Đạn Nổ HE"><kbd>4</kbd> Nổ <b id="hud-g-frag">2</b></button>
+          <button class="gren-pill" data-grenade="flash" title="[5] Lựu Đạn Choáng M84"><kbd>5</kbd> Choáng <b id="hud-g-flash">2</b></button>
+          <button class="gren-pill" data-grenade="smoke" title="[6] Lựu Đạn Khói M18"><kbd>6</kbd> Khói <b id="hud-g-smoke">2</b></button>
+          <button class="gren-pill" data-grenade="ap" title="[7] Lựu Đạn Phá Giáp EMP"><kbd>7</kbd> Phá Giáp <b id="hud-g-ap">1</b></button>
+          <button class="gren-pill" data-grenade="molotov" title="[8] Bom Cháy Molotov"><kbd>8</kbd> Cháy <b id="hud-g-molotov">1</b></button>
         </div>
         <div class="weapon-slots-row">
           <button class="hud-slot-btn active" data-slot="1"><kbd>1</kbd> <span id="hud-slot1-name">AK-47</span></button>

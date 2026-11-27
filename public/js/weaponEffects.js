@@ -6,6 +6,31 @@ let muzzleCoreTex = null;
 let bulletHoleConcreteTex = null;
 let bulletHoleMetalTex = null;
 let smokePuffTex = null;
+let slashArcTex = null;
+
+function getSlashArcTexture() {
+  if (slashArcTex) return slashArcTex;
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 256, 128);
+  const grad = ctx.createLinearGradient(0, 64, 256, 64);
+  grad.addColorStop(0.0, 'rgba(224, 242, 254, 0.0)');
+  grad.addColorStop(0.28, 'rgba(186, 230, 253, 0.55)');
+  grad.addColorStop(0.75, 'rgba(255, 255, 255, 0.96)');
+  grad.addColorStop(1.0, 'rgba(56, 189, 248, 0.0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(14, 96);
+  ctx.quadraticCurveTo(132, 8, 246, 52);
+  ctx.quadraticCurveTo(138, 36, 14, 96);
+  ctx.closePath();
+  ctx.fill();
+  slashArcTex = new THREE.CanvasTexture(c);
+  slashArcTex.colorSpace = THREE.SRGBColorSpace;
+  return slashArcTex;
+}
 
 function getMuzzleStarTexture() {
   if (muzzleStarTex) return muzzleStarTex;
@@ -697,6 +722,245 @@ export class BallisticVfxManager {
     }
   }
 
+  /**
+   * M84 Flashbang: intense pure-white magnesium burst + expanding blinding shock ring
+   */
+  spawnFlashbang(pos) {
+    const center = new THREE.Vector3(pos.x, pos.y + 0.35, pos.z);
+    const light = new THREE.PointLight('#ffffff', 22, 26, 1.4);
+    light.position.copy(center);
+    this.scene.add(light);
+    this.lights.push({ light, life: 0.24, maxLife: 0.24, maxIntensity: 22 });
+
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: '#ffffff',
+      transparent: true,
+      opacity: 1.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const core = new THREE.Mesh(sharedImpactGeos.sphereLow, coreMat);
+    core.position.copy(center);
+    core.scale.setScalar(1.2);
+    this.scene.add(core);
+    this.particles.push({ mesh: core, mat: coreMat, life: 0.22, maxLife: 0.22, vel: null, gravity: 0, scaleGrow: 18 });
+
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: '#e0f2fe',
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const ring = new THREE.Mesh(sharedImpactGeos.ringLow, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(center.x, pos.y + 0.12, center.z);
+    ring.scale.setScalar(0.5);
+    this.scene.add(ring);
+    this.particles.push({ mesh: ring, mat: ringMat, life: 0.30, maxLife: 0.30, vel: null, gravity: 0, scaleGrow: 24 });
+  }
+
+  /**
+   * M18 Tactical Smoke Grenade: dense billowing volumetric smoke cloud (16 GPU-cheap sprites -> 0 FPS drop!)
+   */
+  spawnSmokeCloud(pos, durationMs = 12000) {
+    const durSec = Math.max(4, durationMs / 1000);
+    const center = new THREE.Vector3(pos.x, pos.y + 0.65, pos.z);
+    const puffCount = 16;
+    for (let i = 0; i < puffCount; i++) {
+      const ang = (i / puffCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+      const rad = i < 4 ? Math.random() * 1.0 : 1.2 + Math.random() * 3.1;
+      const spMat = new THREE.SpriteMaterial({
+        map: getSmokePuffTexture(),
+        color: i % 3 === 0 ? '#e2e8f0' : (i % 2 === 0 ? '#cbd5e1' : '#94a3b8'),
+        transparent: true,
+        opacity: 0.88,
+        depthWrite: false
+      });
+      const sp = new THREE.Sprite(spMat);
+      sp.position.set(
+        center.x + Math.cos(ang) * rad * 0.35,
+        center.y + Math.random() * 0.6,
+        center.z + Math.sin(ang) * rad * 0.35
+      );
+      sp.scale.setScalar(1.8 + Math.random() * 0.9);
+      this.scene.add(sp);
+      const life = durSec * (0.86 + Math.random() * 0.18);
+      this.particles.push({
+        mesh: sp,
+        mat: spMat,
+        life,
+        maxLife: life,
+        vel: new THREE.Vector3(Math.cos(ang) * (rad * 0.38), 0.42 + Math.random() * 0.25, Math.sin(ang) * (rad * 0.38)),
+        drag: 0.72,
+        gravity: 0,
+        scaleGrow: 0.22,
+        maxScale: 5.6 + Math.random() * 1.4,
+        holdOpaque: true
+      });
+    }
+  }
+
+  /**
+   * Thermite EMP Armor-Piercing Grenade: electric cyan-orange plasma shockwave & tungsten sparks
+   */
+  spawnArmorPierceBlast(pos) {
+    const center = new THREE.Vector3(pos.x, pos.y + 0.35, pos.z);
+    const light = new THREE.PointLight('#00e5ff', 16, 22, 1.5);
+    light.position.copy(center).add(new THREE.Vector3(0, 0.7, 0));
+    this.scene.add(light);
+    this.lights.push({ light, life: 0.35, maxLife: 0.35, maxIntensity: 16 });
+
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: '#38bdf8',
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const core = new THREE.Mesh(sharedImpactGeos.sphereLow, coreMat);
+    core.position.copy(center);
+    core.scale.setScalar(0.95);
+    this.scene.add(core);
+    this.particles.push({ mesh: core, mat: coreMat, life: 0.24, maxLife: 0.24, vel: null, gravity: 0, scaleGrow: 16 });
+
+    // Dual EMP + Thermite shock rings
+    for (let r = 0; r < 2; r++) {
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: r === 0 ? '#00e5ff' : '#f97316',
+        transparent: true,
+        opacity: 0.92,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const ring = new THREE.Mesh(sharedImpactGeos.ringLow, ringMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(center.x, pos.y + 0.12 + r * 0.25, center.z);
+      ring.scale.setScalar(0.6);
+      this.scene.add(ring);
+      this.particles.push({ mesh: ring, mat: ringMat, life: 0.38 + r * 0.08, maxLife: 0.46, vel: null, gravity: 0, scaleGrow: 23 });
+    }
+
+    for (let i = 0; i < 14; i++) {
+      const eMat = new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? '#38bdf8' : '#fb923c',
+        transparent: true,
+        opacity: 0.98,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const spark = new THREE.Mesh(sharedImpactGeos.spark, eMat);
+      spark.position.copy(center);
+      const theta = (i / 14) * Math.PI * 2;
+      const spd = 5.5 + Math.random() * 6.0;
+      const vel = new THREE.Vector3(Math.cos(theta) * spd, 2.5 + Math.random() * 4.5, Math.sin(theta) * spd);
+      spark.scale.set(1.5, 1.5, 2.4);
+      spark.lookAt(spark.position.clone().add(vel));
+      this.scene.add(spark);
+      this.particles.push({ mesh: spark, mat: eMat, life: 0.45 + Math.random() * 0.25, maxLife: 0.7, vel, gravity: 11.5, alignToVel: true, scaleGrow: 0 });
+    }
+  }
+
+  /**
+   * Incendiary / Molotov Fire Zone: glowing burning ground pool + rising flame tongues
+   */
+  spawnMolotovFire(pos, radius = 4.6, durationMs = 6000) {
+    const durSec = Math.max(2.5, durationMs / 1000);
+    const center = new THREE.Vector3(pos.x, pos.y + 0.08, pos.z);
+    const light = new THREE.PointLight('#ff5a00', 10, 16, 1.6);
+    light.position.set(center.x, center.y + 1.1, center.z);
+    this.scene.add(light);
+    this.lights.push({ light, life: durSec, maxLife: durSec, maxIntensity: 10 });
+
+    // Glowing fire ring carpet
+    const poolMat = new THREE.MeshBasicMaterial({
+      color: '#ea580c',
+      transparent: true,
+      opacity: 0.62,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.88, 20), poolMat);
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.copy(center);
+    this.scene.add(pool);
+    this.particles.push({ mesh: pool, mat: poolMat, life: durSec, maxLife: durSec, vel: null, gravity: 0, scaleGrow: 0, holdOpaque: true });
+
+    // 10 flickering flame clusters across fire zone
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * Math.PI * 2 + Math.random() * 0.4;
+      const dist = i === 0 ? 0 : 0.7 + Math.random() * (radius * 0.65);
+      const spMat = new THREE.SpriteMaterial({
+        map: getMuzzleStarTexture(),
+        color: i % 2 === 0 ? '#ff6b00' : '#facc15',
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const sp = new THREE.Sprite(spMat);
+      sp.position.set(center.x + Math.cos(ang) * dist, center.y + 0.45 + Math.random() * 0.3, center.z + Math.sin(ang) * dist);
+      sp.scale.set(1.1 + Math.random() * 0.7, 1.4 + Math.random() * 0.9, 1);
+      this.scene.add(sp);
+      const life = durSec * (0.85 + Math.random() * 0.15);
+      this.particles.push({
+        mesh: sp,
+        mat: spMat,
+        life,
+        maxLife: life,
+        vel: new THREE.Vector3(0, 0.08, 0),
+        gravity: 0,
+        scaleGrow: 0,
+        flicker: true,
+        holdOpaque: true
+      });
+    }
+  }
+
+  /**
+   * Crisp 3D FPS Melee Blade Slash Arc Trail right in front of the player camera!
+   */
+  spawnMeleeSlashArc(camera, { combo = 0, heavy = false, color = '#e0f2fe' } = {}) {
+    if (!camera) return;
+    const mat = new THREE.MeshBasicMaterial({
+      map: getSlashArcTexture(),
+      color: heavy ? '#fbbf24' : color,
+      transparent: true,
+      opacity: heavy ? 0.92 : 0.78,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      depthTest: false
+    });
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(heavy ? 1.05 : 0.92, heavy ? 0.48 : 0.36), mat);
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    plane.position.copy(camera.position).addScaledVector(fwd, 0.88).addScaledVector(up, -0.06);
+    plane.quaternion.copy(camera.quaternion);
+    if (heavy) {
+      plane.rotateZ(Math.PI * 0.46); // Vertical overhead cleave
+    } else if (combo % 2 === 0) {
+      plane.rotateZ(-0.42); // Right-to-left diagonal slash
+    } else {
+      plane.rotateZ(0.38); // Left-to-right reverse slash
+      plane.scale.x = -1;
+    }
+    this.scene.add(plane);
+    this.particles.push({
+      mesh: plane,
+      mat,
+      life: 0.13,
+      maxLife: 0.13,
+      vel: fwd.clone().multiplyScalar(1.4).addScaledVector(right, combo % 2 === 0 ? -0.45 : 0.45),
+      gravity: 0,
+      scaleGrow: 2.2
+    });
+  }
+
   update(dt) {
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -708,18 +972,30 @@ export class BallisticVfxManager {
         continue;
       }
       const ratio = p.life / p.maxLife;
-      if (p.mat) p.mat.opacity = Math.min(1, ratio * 1.15);
+      if (p.mat) {
+        if (p.holdOpaque) {
+          // Hold dense smoke/fire opacity until final 22% fade-out
+          const fadeOut = ratio < 0.22 ? ratio / 0.22 : 1.0;
+          const flick = p.flicker ? (0.72 + Math.sin(p.life * 28 + i) * 0.24) : 1.0;
+          p.mat.opacity = Math.min(0.92, fadeOut * 0.86 * flick);
+        } else {
+          p.mat.opacity = Math.min(1, ratio * 1.15);
+        }
+      }
 
       if (p.vel) {
         if (p.gravity) p.vel.y -= p.gravity * dt;
+        if (p.drag) p.vel.multiplyScalar(Math.max(0.1, 1 - p.drag * dt));
         p.mesh.position.addScaledVector(p.vel, dt);
         if (p.alignToVel) {
           p.mesh.lookAt(p.mesh.position.clone().add(p.vel));
         }
       }
       if (p.scaleGrow) {
-        const mult = Math.max(0.15, 1 + p.scaleGrow * dt);
-        p.mesh.scale.multiplyScalar(mult);
+        if (!p.maxScale || p.mesh.scale.x < p.maxScale) {
+          const mult = Math.max(0.15, 1 + p.scaleGrow * dt);
+          p.mesh.scale.multiplyScalar(mult);
+        }
       }
     }
 

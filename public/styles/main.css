@@ -3280,3 +3280,129 @@ kbd {
   .profile-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .profile-loadout-row, .br-inv-cols { grid-template-columns: 1fr; }
 }
+
+
+/* ============================================================================
+   TACTICAL 5-GRENADE BELT HUD & PURE-WHITE FLASHBANG BLIND OVERLAY (0-BLUR)
+   ============================================================================ */
+.grenade-belt-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 7px;
+}
+.gren-pill {
+  padding: 4px 3px;
+  border-radius: 2px;
+  background: rgba(10, 15, 26, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-top: 2px solid rgba(148, 163, 184, 0.35);
+  color: #cbd5e1;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gren-pill kbd {
+  padding: 0 3px;
+  font-size: 9px;
+  margin-right: 1px;
+}
+.gren-pill b {
+  color: #fff;
+  margin-left: 2px;
+}
+.gren-pill[data-grenade="frag"] { border-top-color: #f97316; }
+.gren-pill[data-grenade="flash"] { border-top-color: #e0f2fe; }
+.gren-pill[data-grenade="smoke"] { border-top-color: #94a3b8; }
+.gren-pill[data-grenade="ap"] { border-top-color: #38bdf8; }
+.gren-pill[data-grenade="molotov"] { border-top-color: #ef4444; }
+.gren-pill.active {
+  background: linear-gradient(180deg, rgba(0, 224, 255, 0.26), rgba(14, 165, 233, 0.14));
+  border-color: var(--cyan);
+  color: #ffffff;
+}
+.gren-pill.empty {
+  opacity: 0.38;
+}
+.flash-blind-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 48;
+  background: #ffffff;
+  pointer-events: none;
+  will-change: opacity;
+}
+.hud-status-alert {
+  position: fixed;
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 46;
+  padding: 7px 20px;
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  background: linear-gradient(90deg, rgba(12, 20, 36, 0.94), rgba(2, 132, 199, 0.88), rgba(12, 20, 36, 0.94));
+  border: 1px solid #38bdf8;
+  color: #f8fafc;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.hud-status-alert.armor {
+  border-color: #38bdf8;
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.45);
+}
+
+/* Grenade Aim & Power Charge Gauge (Zero backdrop-filter, crisp esports overlay) */
+.grenade-charge-wrap {
+  position: fixed;
+  top: calc(50% + 74px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 340px;
+  padding: 8px 13px;
+  background: linear-gradient(160deg, rgba(8, 13, 24, 0.94), rgba(4, 8, 15, 0.96));
+  border: 1px solid rgba(0, 224, 255, 0.48);
+  border-top: 2px solid #f97316;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  pointer-events: none;
+  z-index: 32;
+}
+.gc-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  margin-bottom: 5px;
+}
+.gc-title { color: #f8fafc; }
+.gc-pct { color: #facc15; font-size: 13px; }
+.gc-track {
+  height: 8px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  overflow: hidden;
+  margin-bottom: 5px;
+}
+.gc-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8 0%, #facc15 55%, #f97316 100%);
+}
+.gc-hint {
+  font-size: 10px;
+  color: #cbd5e1;
+  text-align: center;
+}
+.gc-hint kbd {
+  padding: 0 4px;
+  font-size: 9.5px;
+}

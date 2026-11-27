@@ -708,7 +708,59 @@ function batchStaticWeaponParts(rootGroup) {
   return rootGroup;
 }
 
-function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachments = {}) {
+const WEAPON_VISUAL_VARIANTS = {
+  ak74m:       { base: 'ak12',       tint: '#242933' },
+  an94:        { base: 'ak12',       tint: '#1d242e' },
+  qbz95:       { base: 'famas',      tint: '#222830' },
+  bren2:       { base: 'scarh',      tint: '#3c4239' },
+  f2000:       { base: 'p90',        tint: '#2d333b', scaleZ: 1.18 },
+  sg553:       { base: 'g36c',       tint: '#363f4a' },
+  tar21:       { base: 'aug',        tint: '#786950' },
+  type89:      { base: 'hk416',      tint: '#2b313a' },
+  acr:         { base: 'scarh',      tint: '#a8916b' },
+  l85a2:       { base: 'aug',        tint: '#3f523a' },
+  hk417:       { base: 'hk416',      tint: '#232830', scaleZ: 1.12 },
+  m416_cqb:    { base: 'm4a1',       tint: '#8b7759', scaleZ: 0.90 },
+  vityaz:      { base: 'ak12',       tint: '#1e232b', scaleZ: 0.78 },
+  mpx:         { base: 'mp7',        tint: '#252b35', scaleZ: 1.08 },
+  scorpion:    { base: 'ump45',      tint: '#2b313c', scaleZ: 0.94 },
+  mp9:         { base: 'uzi',        tint: '#27303c', scaleZ: 1.05 },
+  ppsh41:      { base: 'thompson',   tint: '#23272e' },
+  mp40:        { base: 'ump45',      tint: '#1c222b' },
+  sten:        { base: 'mp5',        tint: '#2e343d', scaleZ: 0.96 },
+  k1a:         { base: 'g36c',       tint: '#2a3038', scaleZ: 0.88 },
+  mx4:         { base: 'p90',        tint: '#1f252e', scaleZ: 0.95 },
+  qcw05:       { base: 'asval',      tint: '#252a30', scaleZ: 0.86 },
+  m60e4:       { base: 'pkm',        tint: '#262b30' },
+  rpd:         { base: 'rpk',        tint: '#2b2f35' },
+  mg42:        { base: 'mg3',        tint: '#1f252e' },
+  stoner63:    { base: 'm249',       tint: '#303740', scaleZ: 0.94 },
+  l86:         { base: 'aug',        tint: '#364632', scaleZ: 1.16 },
+  dp28:        { base: 'pkm',        tint: '#2a2e33', panMag: true },
+  ksg12:       { base: 'spas12',     tint: '#20262e', scaleZ: 0.84 },
+  saiga12:     { base: 'ak12',       tint: '#1e242c' },
+  striker12:   { base: 'aa12',       tint: '#252a32', scaleZ: 0.92 },
+  m1887:       { base: 'db_shotgun', tint: '#2c3138' },
+  mossberg590: { base: 'm870',       tint: '#1d2229' },
+  origin12:    { base: 'aa12',       tint: '#343b45' },
+  vss:         { base: 'asval',      tint: '#262c34', addScope: true },
+  mosin:       { base: 'kar98k',     tint: '#2d2926' },
+  psg1:        { base: 'svd',        tint: '#1c222a' },
+  msr:         { base: 'm200',       tint: '#9b8764' },
+  dsr1:        { base: 'awp',        tint: '#232933', scaleZ: 0.92 },
+  m110:        { base: 'mk14',       tint: '#9c8866' },
+  sks:         { base: 'mk14',       tint: '#342c24' },
+  ntw20:       { base: 'barrett',    tint: '#384638', scaleZ: 1.12, scaleY: 1.10 },
+  p226:        { base: 'beretta92',  tint: '#202630' },
+  makarov:     { base: 'm1911',      tint: '#1e242e', scaleZ: 0.86 },
+  cz75:        { base: 'glock18',    tint: '#2a313c' },
+  luger:       { base: 'beretta92',  tint: '#1b2029', scaleZ: 1.04 },
+  ragingbull:  { base: 'magnum',     tint: '#38404c', scaleZ: 1.12 }
+};
+
+function buildWeaponModelDirect(origWeaponId = 'ak47', skinId = 'default', attachments = {}) {
+  const variant = WEAPON_VISUAL_VARIANTS[origWeaponId] || null;
+  const weaponId = variant ? variant.base : origWeaponId;
   const group = new THREE.Group();
   const skin = WEAPON_SKINS[skinId] || WEAPON_SKINS.default;
   const skinTex = getWeaponSkinTexture(skinId);
@@ -717,15 +769,25 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   const polyTex = getPolymerGripTexture('#1f242d');
 
   const envMap = getStudioEnvMap();
-  const bodyMat = getSharedWeaponMat(`body_${skinId}`, () => new THREE.MeshStandardMaterial({
-    map: skinTex,
-    bumpMap: metalBump,
-    bumpScale: 0.0045,
-    envMap,
-    metalness: Math.min(0.88, skin.metalness + 0.06),
-    roughness: Math.max(0.20, skin.roughness - 0.04),
-    envMapIntensity: 1.15
-  }));
+  const bodyMat = (skinId === 'default' && variant?.tint)
+    ? getSharedWeaponMat(`body_var_${variant.tint}`, () => new THREE.MeshStandardMaterial({
+        color: variant.tint,
+        bumpMap: metalBump,
+        bumpScale: 0.0045,
+        envMap,
+        metalness: 0.72,
+        roughness: 0.34,
+        envMapIntensity: 1.12
+      }))
+    : getSharedWeaponMat(`body_${skinId}`, () => new THREE.MeshStandardMaterial({
+        map: skinTex,
+        bumpMap: metalBump,
+        bumpScale: 0.0045,
+        envMap,
+        metalness: Math.min(0.88, skin.metalness + 0.06),
+        roughness: Math.max(0.20, skin.roughness - 0.04),
+        envMapIntensity: 1.15
+      }));
   const darkMetal = getSharedWeaponMat('dark_metal', () => new THREE.MeshStandardMaterial({
     color: '#1f242e',
     bumpMap: metalBump,
@@ -762,10 +824,10 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
     roughness: 0.20,
     envMapIntensity: 1.15
   }));
-  const useWoodGrip = skinId === 'default' && ['ak47', 'svd', 'rpk', 'm870', 'kar98k', 'thompson', 'db_shotgun', 'm1911', 'pkm'].includes(weaponId);
+  const useWoodGrip = skinId === 'default' && ['ak47', 'svd', 'rpk', 'm870', 'kar98k', 'thompson', 'db_shotgun', 'm1911', 'pkm', 'ppsh41', 'm1887', 'mosin', 'sks', 'dp28'].includes(origWeaponId);
   const gripMat = useWoodGrip
     ? woodMat
-    : (skinId === 'default' && (weaponId === 'scarh' || weaponId === 'mcx')
+    : (skinId === 'default' && ['scarh', 'mcx', 'acr', 'tar21', 'm416_cqb', 'msr', 'm110'].includes(origWeaponId)
       ? getSharedWeaponMat('grip_fde', () => new THREE.MeshStandardMaterial({ map: getPolymerGripTexture('#a28458'), metalness: 0.14, roughness: 0.56 }))
       : getSharedWeaponMat(`grip_${skinId}`, () => new THREE.MeshStandardMaterial({
         map: getPolymerGripTexture(skin.woodOrGrip || '#1f242d'),
@@ -789,7 +851,7 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   let aimDistanceZ = -0.28;
 
   const isExt = attachments?.mag === 'extended';
-  const wCfg = WEAPONS[weaponId] || WEAPONS.ak47;
+  const wCfg = WEAPONS[origWeaponId] || WEAPONS[weaponId] || WEAPONS.ak47;
   const isMelee = Boolean(wCfg.isMelee);
   const isSniper = Boolean(wCfg.isSniper);
   const optic = attachments?.optic || 'iron';
@@ -2740,15 +2802,20 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
     group.add(frame, slide, expBarrel, grip, hammer, magMesh,
       buildPistolSlideDetails(0.030, 0.054, -0.16, 0.075, darkMetal, steelMat, brassMat));
     muzzleZ = is1911 ? -0.195 : -0.205;
-  } else if (weaponId === 'knife' || weaponId === 'karambit' || weaponId === 'katana') {
+  } else if (isMelee) {
     const isKara = weaponId === 'karambit';
     const isKatana = weaponId === 'katana';
+    const isKukri = weaponId === 'kukri';
+    const isTomahawk = weaponId === 'tomahawk';
+    const isBalisong = weaponId === 'balisong';
     const bladeMat = new THREE.MeshStandardMaterial({
       map: skinId === 'default' ? null : skinTex,
       bumpMap: metalBump,
       bumpScale: 0.002,
       envMap,
-      color: skinId === 'default' ? (isKara ? '#ef4444' : '#e2e8f0') : '#ffffff',
+      color: skinId === 'default'
+        ? (isKara ? '#ef4444' : (isTomahawk ? '#cbd5e1' : (isBalisong ? '#38bdf8' : '#e2e8f0')))
+        : '#ffffff',
       metalness: 0.95,
       roughness: 0.14,
       envMapIntensity: 1.7
@@ -2777,6 +2844,49 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
         [0.52, 0.034], [0.38, 0.022], [0.18, 0.014], [0.040, 0.014]
       ], 0.0055, 0.0018, bladeMat);
       group.add(tsuka, pommel, tsuba, habaki, blade);
+    } else if (isKukri) {
+      // Heavy Gurkha Kukri: Forward-curved broad belly chopper blade + contoured wood/rubber handle
+      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.021, 0.145, 12), skinId === 'default' ? woodMat : polymerMat);
+      handle.rotation.x = Math.PI / 2;
+      handle.position.set(0, 0, 0.06);
+      const bolster = new THREE.Mesh(new THREE.CylinderGeometry(0.020, 0.020, 0.020, 12), brassMat);
+      bolster.rotation.x = Math.PI / 2;
+      bolster.position.set(0, 0, -0.015);
+      const blade = extrudeSideProfile([
+        [0.022, -0.012], [0.15, -0.005], [0.27, -0.032], [0.39, -0.068],
+        [0.44, -0.036], [0.34, 0.018], [0.17, 0.024], [0.022, 0.018]
+      ], 0.0065, 0.002, bladeMat);
+      group.add(handle, bolster, blade);
+    } else if (isTomahawk) {
+      // Tactical Combat Tomahawk: Composite shaft + bearded axe head + rear armor-piercing spike
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.018, 0.44, 12), polymerMat);
+      shaft.rotation.x = Math.PI / 2;
+      shaft.position.set(0, 0, -0.10);
+      const gripWrap = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.020, 0.16, 12), accentMat);
+      gripWrap.rotation.x = Math.PI / 2;
+      gripWrap.position.set(0, 0, 0.04);
+      const headCore = new THREE.Mesh(new THREE.BoxGeometry(0.030, 0.056, 0.068), darkMetal);
+      headCore.position.set(0, 0, -0.29);
+      const axeBlade = extrudeSideProfile([
+        [0.255, 0.020], [0.335, 0.020], [0.355, 0.112], [0.295, 0.132], [0.235, 0.098]
+      ], 0.007, 0.002, bladeMat);
+      const rearSpike = extrudeSideProfile([
+        [0.275, -0.020], [0.315, -0.020], [0.298, -0.092], [0.282, -0.088]
+      ], 0.008, 0.002, darkMetal);
+      group.add(shaft, gripWrap, headCore, axeBlade, rearSpike);
+    } else if (isBalisong) {
+      // Butterfly Knife (Balisong): Dual split skeletonized titanium handles + razor spearpoint blade
+      const hTop = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.014, 0.135), darkMetal);
+      hTop.position.set(0, 0.010, 0.052);
+      const hBot = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.014, 0.135), accentMat);
+      hBot.position.set(0, -0.010, 0.052);
+      const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.018, 10), steelMat);
+      pivot.rotation.z = Math.PI / 2;
+      pivot.position.set(0, 0, -0.012);
+      const blade = extrudeSideProfile([
+        [0.016, -0.012], [0.195, -0.012], [0.265, 0.002], [0.195, 0.016], [0.016, 0.016]
+      ], 0.005, 0.0016, bladeMat);
+      group.add(hTop, hBot, pivot, blade);
     } else if (isKara) {
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.006, 12, 22), darkMetal);
       ring.rotation.y = Math.PI / 2;
@@ -2803,7 +2913,27 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
       fuller.position.set(0, 0.008, -0.115);
       group.add(handle, pommel, guard, blade, fuller);
     }
-    muzzleZ = isKatana ? -0.52 : -0.25;
+    muzzleZ = isKatana ? -0.52 : (isKukri || isTomahawk ? -0.38 : -0.25);
+  }
+
+  // Signature per-variant hardware addons (DP-28 Top Pan Magazine, VSS Integrated PSO Scope, proportional scaling)
+  if (variant?.panMag) {
+    const panDisk = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.115, 0.028, 18), darkMetal);
+    panDisk.position.set(0, railY + 0.024, -0.06);
+    const panHub = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.034, 12), steelMat);
+    panHub.position.set(0, railY + 0.026, -0.06);
+    group.add(panDisk, panHub);
+  }
+  if (variant?.addScope) {
+    const scopeTube = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.016, 0.21, 14), darkMetal);
+    scopeTube.rotation.x = Math.PI / 2;
+    scopeTube.position.set(0, railY + 0.034, 0.01);
+    const scopeLens = new THREE.Mesh(new THREE.CircleGeometry(0.015, 12), new THREE.MeshBasicMaterial({ color: '#38bdf8' }));
+    scopeLens.position.set(0, railY + 0.034, 0.116);
+    group.add(scopeTube, scopeLens);
+  }
+  if (variant?.scaleZ || variant?.scaleY) {
+    group.scale.set(1, variant.scaleY || 1, variant.scaleZ || 1);
   }
 
   // Mount Realistic EOTech EXPS3 Holo / Trijicon ACOG TA31 & Muzzle Attachments
@@ -2889,11 +3019,11 @@ function buildWeaponModelDirect(weaponId = 'ak47', skinId = 'default', attachmen
   if (magMesh) magMesh.name = 'gun_mag';
   if (boltMesh) boltMesh.name = 'gun_bolt';
 
-  const isSuppressed = attachments?.muzzle === 'suppressor' || Boolean(wCfg.builtInSuppressed) || weaponId === 'm4a1';
+  const isSuppressed = attachments?.muzzle === 'suppressor' || Boolean(wCfg.builtInSuppressed) || origWeaponId === 'm4a1';
   const ejectPortPos = new THREE.Vector3(0.032, barrelY + 0.008, 0.012);
 
   group.userData = {
-    weaponId,
+    weaponId: origWeaponId,
     optic,
     isSuppressed,
     magMesh,
@@ -4293,27 +4423,106 @@ export function createC4Mesh() {
   return g;
 }
 
-export function createGrenadeMesh() {
+export function createGrenadeMesh(grenadeType = 'frag') {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.SphereGeometry(0.085, 14, 14),
-    new THREE.MeshStandardMaterial({ color: '#365314', roughness: 0.48, metalness: 0.38 })
-  );
-  const band = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.088, 0.088, 0.024, 14),
-    new THREE.MeshBasicMaterial({ color: '#facc15' })
-  );
   const fuseHead = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.028, 0.034, 0.045, 10),
+    new THREE.CylinderGeometry(0.026, 0.032, 0.042, 10),
     new THREE.MeshStandardMaterial({ color: '#64748b', metalness: 0.8, roughness: 0.25 })
   );
   fuseHead.position.y = 0.095;
   const spoon = new THREE.Mesh(
-    new THREE.BoxGeometry(0.016, 0.11, 0.025),
+    new THREE.BoxGeometry(0.015, 0.105, 0.022),
     new THREE.MeshStandardMaterial({ color: '#475569', metalness: 0.75, roughness: 0.3 })
   );
-  spoon.position.set(0.055, 0.035, 0);
+  spoon.position.set(0.052, 0.035, 0);
   spoon.rotation.z = 0.22;
-  g.add(body, band, fuseHead, spoon);
+
+  if (grenadeType === 'flash') {
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.046, 0.046, 0.155, 12),
+      new THREE.MeshStandardMaterial({ color: '#334155', roughness: 0.35, metalness: 0.72 })
+    );
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.049, 0.049, 0.032, 12),
+      new THREE.MeshBasicMaterial({ color: '#e0f2fe' })
+    );
+    g.add(body, band, fuseHead, spoon);
+  } else if (grenadeType === 'smoke') {
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.052, 0.052, 0.165, 12),
+      new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.55, metalness: 0.35 })
+    );
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.055, 0.055, 0.036, 12),
+      new THREE.MeshBasicMaterial({ color: '#22c55e' })
+    );
+    g.add(body, band, fuseHead, spoon);
+  } else if (grenadeType === 'ap') {
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.054, 0.048, 0.15, 6),
+      new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.28, metalness: 0.85 })
+    );
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.058, 0.058, 0.028, 12),
+      new THREE.MeshBasicMaterial({ color: '#38bdf8' })
+    );
+    const core2 = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.056, 0.056, 0.012, 12),
+      new THREE.MeshBasicMaterial({ color: '#f97316' })
+    );
+    core2.position.y = -0.042;
+    g.add(body, core, core2, fuseHead, spoon);
+  } else if (grenadeType === 'molotov') {
+    const bottle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.042, 0.048, 0.14, 10),
+      new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.18, metalness: 0.15, transparent: true, opacity: 0.86 })
+    );
+    const neck = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.016, 0.038, 0.065, 10),
+      new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.2 })
+    );
+    neck.position.y = 0.095;
+    const flame = new THREE.Mesh(
+      new THREE.SphereGeometry(0.034, 8, 8),
+      new THREE.MeshBasicMaterial({ color: '#ff6b00' })
+    );
+    flame.position.y = 0.145;
+    g.add(bottle, neck, flame);
+  } else {
+    const body = new THREE.Mesh(
+      new THREE.SphereGeometry(0.085, 14, 14),
+      new THREE.MeshStandardMaterial({ color: '#365314', roughness: 0.48, metalness: 0.38 })
+    );
+    const band = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.088, 0.088, 0.024, 14),
+      new THREE.MeshBasicMaterial({ color: '#facc15' })
+    );
+    g.add(body, band, fuseHead, spoon);
+  }
   return g;
+}
+
+export function createFirstPersonGrenadeRig(grenadeType = 'frag', outfitId = 'urban') {
+  const rig = new THREE.Group();
+  const outfit = OUTFITS[outfitId] || OUTFITS.urban;
+  const sleeveMat = new THREE.MeshStandardMaterial({ color: outfit.primary || '#2b3648', roughness: 0.72, metalness: 0.12 });
+  const gloveMat = new THREE.MeshStandardMaterial({ color: '#181e28', roughness: 0.58, metalness: 0.22 });
+
+  const rArm = new THREE.Group();
+  const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.046, 0.34, 10), sleeveMat);
+  forearm.rotation.x = Math.PI / 2 - 0.18;
+  forearm.position.set(0.03, -0.10, 0.17);
+  const glove = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.068, 0.088), gloveMat);
+  glove.position.set(0.015, -0.045, 0.015);
+  rArm.add(forearm, glove);
+
+  const gren = createGrenadeMesh(grenadeType);
+  gren.scale.setScalar(0.88);
+  gren.position.set(-0.005, 0.025, -0.025);
+  gren.rotation.set(0.18, 0.35, -0.16);
+  rArm.add(gren);
+
+  rig.add(rArm);
+  rig.userData = { grenadeType, isGrenadeRig: true };
+  return rig;
 }

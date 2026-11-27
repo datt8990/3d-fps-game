@@ -4,13 +4,18 @@ import {
   PHYSICS,
   OPERATORS,
   WEAPONS,
+  GRENADE_CONFIG,
+  GRENADE_TYPES,
+  GRENADE_ORDER,
+  createDefaultGrenadeBelt,
   getEffectiveWeaponStats
 } from '/shared/constants.js';
 import { MAPS } from '/shared/maps.js';
-import { stepPlayerPhysics, stepAirbornePhysics, depenetratePlayerXZ, hasLineOfSight } from '/shared/physics.js';
+import { stepPlayerPhysics, stepAirbornePhysics, depenetratePlayerXZ, hasLineOfSight, directionFromAngles, raycastMap } from '/shared/physics.js';
 import { buildThreeMap, createLootCrateMesh, createDropPlaneMesh, createParachuteMesh } from './mapBuilder.js';
 import {
   createFirstPersonRig,
+  createFirstPersonGrenadeRig,
   createOperatorRig,
   swapRigWeapon,
   animateOperatorRig,
@@ -130,7 +135,9 @@ export class FPSGameClient {
       weaponsState: null,
       ammo: 30,
       reserveAmmo: 90,
-      grenades: 1,
+      grenades: 8,
+      grenadeBelt: createDefaultGrenadeBelt(false),
+      selectedGrenade: 'frag',
       reloadingStart: 0,
       reloadingEnd: 0,
       lastFireTime: 0,
@@ -158,6 +165,27 @@ export class FPSGameClient {
     this.fpSignature = '';
     this.vmKickZ = 0;
     this.vmKickPitch = 0;
+    this.meleeSlash = {
+      active: false,
+      progress: 0,
+      duration: 0.34,
+      combo: 0,
+      heavy: false
+    };
+    this.grenadeMode = {
+      equipped: false,
+      charging: false,
+      chargeStart: 0,
+      power: 0.42,
+      underhand: false,
+      throwAnim: 0
+    };
+    this.fpGrenadeRig = null;
+    this._trajGroup = null;
+    this._trajLine = null;
+    this._trajRing = null;
+    this._trajPositions = new Float32Array(32 * 3);
+    this._lastFlashBlindAt = 0;
     this.vmKickRoll = 0;
     this.cameraShake = 0;
     this.drawProgress = 1.0;
@@ -243,8 +271,204 @@ export class FPSGameClient {
       this.local.primaryId,
       this.local.secondaryId,
       this.local.meleeId,
-      this.local.grenades
+      this.local.grenades,
+      this.mode === 'survival' ? null : this.local.grenadeBelt,
+      this.local.selectedGrenade
     );
+  }
+
+  selectGrenadeType(grenadeType, equipNow = true) {
+    if (!GRENADE_TYPES[grenadeType]) return;
+    this.local.selectedGrenade = grenadeType;
+    soundEngine.playUiTone(780, 0.04);
+    if (equipNow && this.active && !this.local.dead && this.local.dropPhase === 'ground' && !this.uiModalOpen) {
+      this.enterGrenadeMode(grenadeType);
+    } else {
+      this.refreshHudWeapon();
+    }
+  }
+
+  enterGrenadeMode(grenadeType = null) {
+    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen) return;
+    let gType = grenadeType || this.local.selectedGrenade || 'frag';
+    if (this.mode === 'survival') {
+      if ((this.local.grenades || 0) <= 0) return;
+      gType = 'frag';
+    } else {
+      const belt = this.local.grenadeBelt || {};
+      if ((belt[gType] || 0) <= 0) {
+        const avail = GRENADE_ORDER.find((id) => (belt[id] || 0) > 0);
+        if (!avail) return;
+        gType = avail;
+      }
+    }
+    this.local.selectedGrenade = gType;
+    this.adsActive = false;
+    this.adsBlend = 0;
+    this.sniperZoomStage = 0;
+    this.grenadeMode.equipped = true;
+    this.grenadeMode.charging = false;
+    this.grenadeMode.power = 0.42;
+    this.grenadeMode.throwAnim = 0;
+
+    if (this.fpRig) this.fpRig.visible = false;
+    if (this.fpGrenadeRig) {
+      this.camera.remove(this.fpGrenadeRig);
+      this.fpGrenadeRig = null;
+    }
+    this.fpGrenadeRig = createFirstPersonGrenadeRig(gType, this.localMeta?.outfit || 'urban');
+    this.fpGrenadeRig.position.set(0.22, -0.22, -0.34);
+    this.camera.add(this.fpGrenadeRig);
+
+    this._ensureTrajectoryVisuals();
+    this.refreshHudWeapon();
+    this.hud.updateGrenadeChargeHUD({
+      visible: true,
+      grenadeType: gType,
+      power: this.grenadeMode.power,
+      charging: false,
+      underhand: this.grenadeMode.underhand
+    });
+  }
+
+  exitGrenadeMode() {
+    this.grenadeMode.equipped = false;
+    this.grenadeMode.charging = false;
+    this.grenadeMode.throwAnim = 0;
+    if (this.fpGrenadeRig) {
+      this.camera.remove(this.fpGrenadeRig);
+      this.fpGrenadeRig = null;
+    }
+    if (this._trajGroup) this._trajGroup.visible = false;
+    if (this.fpRig && this.local.dropPhase === 'ground') this.fpRig.visible = true;
+    this.hud.updateGrenadeChargeHUD({ visible: false });
+  }
+
+  _ensureTrajectoryVisuals() {
+    if (this._trajGroup) return;
+    this._trajGroup = new THREE.Group();
+    this._trajGroup.visible = false;
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(this._trajPositions, 3));
+    const lineMat = new THREE.LineBasicMaterial({
+      color: '#38bdf8',
+      transparent: true,
+      opacity: 0.90,
+      depthWrite: false
+    });
+    this._trajLine = new THREE.Line(geo, lineMat);
+    this._trajLine.frustumCulled = false;
+
+    const ringGeo = new THREE.RingGeometry(0.28, 0.44, 24);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: '#f97316',
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    this._trajRing = new THREE.Mesh(ringGeo, ringMat);
+    this._trajGroup.add(this._trajLine, this._trajRing);
+    this.scene.add(this._trajGroup);
+  }
+
+  _updateGrenadeTrajectoryPreview() {
+    if (!this.grenadeMode.equipped || this.local.dead || !this._trajGroup) {
+      if (this._trajGroup) this._trajGroup.visible = false;
+      return;
+    }
+    const gType = this.local.selectedGrenade || 'frag';
+    const gCfg = GRENADE_TYPES[gType] || GRENADE_TYPES.frag;
+    const power = this.grenadeMode.charging ? this.grenadeMode.power : 0.72;
+    const underhand = this.grenadeMode.underhand;
+    const dir = directionFromAngles(this.local.yaw, this.local.pitch);
+    const speedBase = underhand ? GRENADE_CONFIG.throwSpeed * 0.50 : GRENADE_CONFIG.throwSpeed;
+    const launchSpeed = speedBase * power;
+    const upBoost = (underhand ? 1.65 : GRENADE_CONFIG.upwardBoost) * (0.48 + 0.52 * power);
+
+    let x = this.local.x + dir.x * 0.45;
+    let y = this.local.y + this.local.eyeHeight - 0.1;
+    let z = this.local.z + dir.z * 0.45;
+    let vx = dir.x * launchSpeed + this.local.vx * 0.35;
+    let vy = dir.y * launchSpeed + upBoost;
+    let vz = dir.z * launchSpeed + this.local.vz * 0.35;
+
+    const steps = 32;
+    const dtStep = Math.min(0.065, ((gCfg.fuseMs || 2000) / 1000) / steps);
+    const pos = this._trajPositions;
+    let hitCount = 0;
+
+    for (let i = 0; i < steps; i++) {
+      pos[i * 3] = x;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = z;
+
+      vy -= GRENADE_CONFIG.gravity * dtStep;
+      const dx = vx * dtStep, dy = vy * dtStep, dz = vz * dtStep;
+      const stepDist = Math.hypot(dx, dy, dz);
+      let hitNow = false;
+      if (stepDist > 0.001 && this.mapData) {
+        const hit = raycastMap({ x, y, z }, { x: dx / stepDist, y: dy / stepDist, z: dz / stepDist }, stepDist + 0.10, this.mapData);
+        if (hit) {
+          hitNow = true;
+          hitCount++;
+          if (hit.normal.x !== 0) vx = -vx * GRENADE_CONFIG.bounceRestitution;
+          if (hit.normal.y !== 0) {
+            vy = -vy * GRENADE_CONFIG.bounceRestitution;
+            vx *= 0.78;
+            vz *= 0.78;
+          }
+          if (hit.normal.z !== 0) vz = -vz * GRENADE_CONFIG.bounceRestitution;
+        }
+      }
+      x += vx * dtStep;
+      const floorY = this.mapData?.terrain ? this.mapData.terrain.floorAt(x, z) + 0.08 : 0.08;
+      if (y + vy * dtStep <= floorY) {
+        y = floorY;
+        hitNow = true;
+        hitCount++;
+        if (Math.abs(vy) < 1.2) vy = 0;
+        else {
+          vy = -vy * GRENADE_CONFIG.bounceRestitution;
+          vx *= 0.75;
+          vz *= 0.75;
+        }
+      } else {
+        y += vy * dtStep;
+      }
+      z += vz * dtStep;
+
+      if (gCfg.impactDetonate && hitNow && i >= 3) {
+        // Molotov explodes on impact — clamp remaining points to impact spot
+        for (let j = i + 1; j < steps; j++) {
+          pos[j * 3] = x; pos[j * 3 + 1] = y; pos[j * 3 + 2] = z;
+        }
+        break;
+      }
+    }
+
+    this._trajLine.geometry.attributes.position.needsUpdate = true;
+    this._trajLine.material.color.set(gCfg.color || '#38bdf8');
+    this._trajLine.material.opacity = this.grenadeMode.charging ? 0.95 : 0.48;
+    this._trajRing.material.color.set(gCfg.color || '#f97316');
+    this._trajRing.material.opacity = this.grenadeMode.charging ? 0.90 : 0.45;
+    this._trajRing.position.set(x, Math.max(0.06, y), z);
+    const ringScale = this.grenadeMode.charging ? (1.0 + Math.sin(performance.now() * 0.015) * 0.14) : 0.85;
+    this._trajRing.scale.setScalar(ringScale);
+    this._trajGroup.visible = true;
+  }
+
+  cycleGrenadeType() {
+    const idx = GRENADE_ORDER.indexOf(this.local.selectedGrenade);
+    for (let step = 1; step <= GRENADE_ORDER.length; step++) {
+      const cand = GRENADE_ORDER[(idx + step) % GRENADE_ORDER.length];
+      if (this.mode === 'survival' || (this.local.grenadeBelt?.[cand] ?? 0) > 0 || step === GRENADE_ORDER.length) {
+        this.selectGrenadeType(cand, this.grenadeMode.equipped);
+        return;
+      }
+    }
   }
 
   bindInputEvents() {
@@ -283,9 +507,36 @@ export class FPSGameClient {
       }
 
       if (e.button === 0) {
+        if (this.grenadeMode.equipped) {
+          this.grenadeMode.charging = true;
+          this.grenadeMode.chargeStart = performance.now();
+          this.grenadeMode.power = 0.36;
+          soundEngine.playGrenadePinPull();
+          return;
+        }
         this.mouseDownLeft = true;
         this.tryFireWeapon(false);
       } else if (e.button === 2) {
+        if (this.grenadeMode.equipped) {
+          if (this.grenadeMode.charging) {
+            // Right-click while charging cancels pin-pull safely!
+            this.grenadeMode.charging = false;
+            this.grenadeMode.power = 0.42;
+            soundEngine.playUiTone(420, 0.05);
+          } else {
+            // Right-click toggles Overhand Far Throw vs Underhand Close Lob!
+            this.grenadeMode.underhand = !this.grenadeMode.underhand;
+            soundEngine.playUiTone(this.grenadeMode.underhand ? 520 : 820, 0.05);
+          }
+          this.hud.updateGrenadeChargeHUD({
+            visible: true,
+            grenadeType: this.local.selectedGrenade,
+            power: this.grenadeMode.power,
+            charging: this.grenadeMode.charging,
+            underhand: this.grenadeMode.underhand
+          });
+          return;
+        }
         const w = WEAPONS[this.local.weaponId];
         if (w?.isMelee) {
           this.tryFireWeapon(true);
@@ -309,7 +560,12 @@ export class FPSGameClient {
     });
 
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDownLeft = false;
+      if (e.button === 0) {
+        if (this.grenadeMode.equipped && this.grenadeMode.charging) {
+          this.releaseChargedGrenade();
+        }
+        this.mouseDownLeft = false;
+      }
     });
 
     window.addEventListener('contextmenu', (e) => {
@@ -480,8 +736,18 @@ export class FPSGameClient {
       }
       else if (e.code === 'KeyR') this.requestReload();
       else if (e.code === 'KeyG') this.requestThrowGrenade();
-      else if (e.code === 'Digit7' && this.mode === 'survival') this.useQuickMed(['bandage', 'energy']);
-      else if (e.code === 'Digit8' && this.mode === 'survival') this.useQuickMed(['firstaid', 'medkit', 'bandage']);
+      else if (e.code === 'KeyX') this.cycleGrenadeType();
+      else if (e.code === 'Digit4') this.selectGrenadeType('frag');
+      else if (e.code === 'Digit5') this.selectGrenadeType('flash');
+      else if (e.code === 'Digit6') this.selectGrenadeType('smoke');
+      else if (e.code === 'Digit7') {
+        if (this.mode === 'survival') this.useQuickMed(['bandage', 'energy']);
+        else this.selectGrenadeType('ap');
+      }
+      else if (e.code === 'Digit8') {
+        if (this.mode === 'survival') this.useQuickMed(['firstaid', 'medkit', 'bandage']);
+        else this.selectGrenadeType('molotov');
+      }
       else if (e.code === 'KeyE' && this.mode === 'survival' && this.local.dropPhase === 'ground' && !this.local.dead) {
         const nearBox = [...this.lootData.values()].find(
           (c) => c.kind === 'deathbox' && Math.hypot(c.x - this.local.x, c.z - this.local.z) <= 3.6 && Math.abs((c.y || 0) - this.local.y) < 3.0
@@ -710,7 +976,11 @@ export class FPSGameClient {
         2: { id: this.local.secondaryId },
         3: { id: this.local.meleeId }
       };
-      this.local.grenades = this.localMeta.grenades ?? (this.mode === 'practice' ? 5 : 1);
+      this.local.grenadeBelt = this.localMeta.grenadeBelt
+        ? { ...this.localMeta.grenadeBelt }
+        : createDefaultGrenadeBelt(this.mode === 'practice');
+      this.local.selectedGrenade = 'frag';
+      this.local.grenades = GRENADE_ORDER.reduce((sum, id) => sum + (this.local.grenadeBelt[id] || 0), 0);
       this.local.dropPhase = 'ground';
       this.local.slot = 1;
       this.local.weaponId = this.local.primaryId;
@@ -889,6 +1159,13 @@ export class FPSGameClient {
       this.camera.remove(this.fpRig);
       this.fpRig = null;
     }
+    this.exitGrenadeMode();
+    if (this._trajGroup) {
+      this.scene.remove(this._trajGroup);
+      this._trajGroup = null;
+      this._trajLine = null;
+      this._trajRing = null;
+    }
   }
 
   syncRosterFromLobby(roomPayload) {
@@ -912,6 +1189,13 @@ export class FPSGameClient {
     if (this.fpRig) {
       this.camera.remove(this.fpRig);
       this.fpRig = null;
+    }
+    this.exitGrenadeMode();
+    if (this._trajGroup) {
+      this.scene.remove(this._trajGroup);
+      this._trajGroup = null;
+      this._trajLine = null;
+      this._trajRing = null;
     }
     const skinId = this.localMeta?.skins?.[weaponId] || 'default';
     const att = this.localMeta?.attachments?.[weaponId] || {};
@@ -949,6 +1233,13 @@ export class FPSGameClient {
   }
 
   requestWeaponSwitch(slot) {
+    if (this.grenadeMode.equipped) {
+      this.exitGrenadeMode();
+      if (slot === this.local.slot) {
+        soundEngine.playWeaponDraw(this.local.weaponId);
+        return;
+      }
+    }
     if (this.local.dead || slot === this.local.slot) return;
     if (this.mode === 'survival' && !this.local.weaponsState?.[slot]?.id) return;
     this.adsActive = false;
@@ -960,6 +1251,7 @@ export class FPSGameClient {
   }
 
   requestReload() {
+    if (this.grenadeMode.equipped) this.exitGrenadeMode();
     if (this.local.dead || this.local.dropPhase !== 'ground') return;
     const st = this.getLocalWeaponStats();
     if (st.isMelee || this.local.ammo >= st.magSize || this.local.reserveAmmo <= 0) return;
@@ -971,13 +1263,36 @@ export class FPSGameClient {
   }
 
   requestThrowGrenade() {
-    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen || this.local.grenades <= 0) return;
+    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen) return;
+    // Pressing G equips the grenade in your hand so you can aim direction & hold Left-Click to charge throw power!
+    if (!this.grenadeMode.equipped) {
+      this.enterGrenadeMode(this.local.selectedGrenade);
+    } else if (!this.grenadeMode.charging) {
+      this.cycleGrenadeType();
+    }
+  }
+
+  releaseChargedGrenade() {
+    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen) {
+      this.exitGrenadeMode();
+      return;
+    }
+    const gType = this.local.selectedGrenade || 'frag';
+    const power = Math.max(0.35, Math.min(1.0, this.grenadeMode.power || 0.72));
+    const underhand = Boolean(this.grenadeMode.underhand);
+
+    this.grenadeMode.charging = false;
     soundEngine.playGrenadeThrow();
     this.net.send({
       type: 'throw_grenade',
+      grenadeType: gType,
       yaw: this.local.yaw,
-      pitch: this.local.pitch
+      pitch: this.local.pitch,
+      power,
+      underhand
     });
+    this.exitGrenadeMode();
+    this.drawProgress = 0.25;
   }
 
   findBestAimAssistTarget(maxAngle = 0.65, maxDist = 120) {
@@ -1086,7 +1401,7 @@ export class FPSGameClient {
   }
 
   tryFireWeapon(heavyMelee = false) {
-    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen) return;
+    if (!this.active || this.local.dead || this.local.dropPhase !== 'ground' || this.uiModalOpen || this.grenadeMode.equipped) return;
     const now = performance.now();
     if (now < this.local.reloadingEnd) return;
 
@@ -1138,9 +1453,27 @@ export class FPSGameClient {
     this.local.pitch = Math.min(1.50, this.local.pitch + pitchKick);
     this.recoilAccumPitch = Math.min(0.068, this.recoilAccumPitch + pitchKick);
     this.local.yaw += (Math.random() - 0.5) * st.recoilYaw * recoilScale * 1.4;
-    this.vmKickZ = st.isMelee ? -0.11 : (this.adsActive ? 0.015 : 0.036);
-    this.vmKickPitch = st.isMelee ? -0.26 : (this.adsActive ? 0.016 : 0.048);
+    this.vmKickZ = st.isMelee ? -0.06 : (this.adsActive ? 0.015 : 0.036);
+    this.vmKickPitch = st.isMelee ? -0.10 : (this.adsActive ? 0.016 : 0.048);
     this.vmKickRoll = st.isMelee ? 0 : (Math.random() - 0.5) * (this.adsActive ? 0.016 : 0.048);
+
+    // True FPS Forward Sweeping Melee Slash Combo + 3D Crescent Blade Arc!
+    if (st.isMelee) {
+      this.meleeSlash.active = true;
+      this.meleeSlash.progress = 0;
+      this.meleeSlash.heavy = Boolean(heavyMelee);
+      this.meleeSlash.duration = heavyMelee ? 0.42 : Math.min(0.36, (st.fireIntervalMs || 460) * 0.00072);
+      if (!heavyMelee) {
+        this.meleeSlash.combo = (this.meleeSlash.combo + 1) % 2;
+      }
+      this.cameraShake = Math.min(0.018, this.cameraShake + (heavyMelee ? 0.009 : 0.0045));
+      const arcColor = st.id === 'karambit' ? '#fca5a5' : (st.id === 'katana' ? '#e0f2fe' : (st.id === 'balisong' ? '#38bdf8' : '#f1f5f9'));
+      this.vfx.spawnMeleeSlashArc(this.camera, {
+        combo: this.meleeSlash.combo,
+        heavy: Boolean(heavyMelee),
+        color: arcColor
+      });
+    }
 
     // Tactile weapon recoil VFX: Volumetric Muzzle Flash, 3D Shell Ejection, Smoke Wisp & Micro Screen Shake
     if (!st.isMelee && this.fpRig) {
@@ -1221,11 +1554,17 @@ export class FPSGameClient {
       this.local.weaponId = msg.weaponId || this.local.meleeId;
       this.local.ammo = msg.ammo;
       this.local.reserveAmmo = msg.reserveAmmo;
-      this.local.grenades = msg.grenades ?? (this.mode === 'survival' ? 0 : 1);
+      this.local.grenades = msg.grenades ?? (this.mode === 'survival' ? 0 : 8);
+      if (msg.grenadeBelt) {
+        this.local.grenadeBelt = { ...msg.grenadeBelt };
+      } else if (this.mode !== 'survival') {
+        this.local.grenadeBelt = createDefaultGrenadeBelt(this.mode === 'practice');
+      }
       this.local.reloadingEnd = 0;
       this.adsActive = false;
       this.adsBlend = 0;
       this.sniperZoomStage = 0;
+      this.exitGrenadeMode();
 
       this.rebuildFirstPersonRig(this.local.weaponId);
       if (this.fpRig && this.local.dropPhase !== 'ground') this.fpRig.visible = false;
@@ -1256,6 +1595,7 @@ export class FPSGameClient {
       this.adsActive = false;
       this.adsBlend = 0;
       this.sniperZoomStage = 0;
+      this.exitGrenadeMode();
       soundEngine.cancelReloadSequence();
       soundEngine.playWeaponDraw(msg.weaponId);
       this.drawProgress = 0.0;
@@ -1279,6 +1619,7 @@ export class FPSGameClient {
       this.adsActive = false;
       this.adsBlend = 0;
       this.sniperZoomStage = 0;
+      this.exitGrenadeMode();
       soundEngine.playReloadSequence(msg.durationMs, msg.weaponId || this.local.weaponId);
       this.fpRig?.userData?.gun?.userData?.glbController?.play('reload');
     }
@@ -1334,8 +1675,18 @@ export class FPSGameClient {
   onGrenadeThrown(msg) {
     if (msg.ownerId === this.localId) {
       this.local.grenades = msg.grenadesLeft ?? 0;
+      if (msg.grenadeBelt) this.local.grenadeBelt = { ...msg.grenadeBelt };
       this.refreshHudWeapon();
     }
+  }
+
+  onFlashBlind(msg) {
+    const intensity = Math.max(0.25, Math.min(1.0, Number(msg.intensity) || 0.9));
+    const durationMs = Math.max(600, Math.min(4500, Number(msg.durationMs) || 3000));
+    this._lastFlashBlindAt = performance.now();
+    this.hud.triggerFlashBlind(intensity, durationMs);
+    soundEngine.playGrenadeDetonation('flash', msg.dist || 0, intensity);
+    this.cameraShake = Math.min(0.08, this.cameraShake + intensity * 0.045);
   }
 
   onGrenadeExploded(msg) {
@@ -1344,16 +1695,35 @@ export class FPSGameClient {
       this.scene.remove(gm);
       this.grenadeMeshes.delete(msg.id);
     }
+    const gType = msg.grenadeType || 'frag';
     const dist = Math.hypot(msg.x - this.local.x, msg.z - this.local.z);
-    soundEngine.playExplosion(dist);
 
-    // Cinematic multi-layer explosion: flash core, fireballs, shockwave ring, smoke plume, shrapnel & dynamic light
-    this.vfx.spawnExplosion(msg);
-
-    // Distance-attenuated camera explosion shockwave shake
-    if (dist < 28) {
-      const shakePower = Math.max(0.008, (1 - dist / 28) * 0.085);
-      this.cameraShake = Math.min(0.11, this.cameraShake + shakePower);
+    if (gType === 'flash') {
+      this.vfx.spawnFlashbang(msg);
+      // If we weren't directly hit by flash_blind just now, still play distant magnesium pop
+      if (performance.now() - (this._lastFlashBlindAt || 0) > 150) {
+        soundEngine.playGrenadeDetonation('flash', dist, 0);
+      }
+    } else if (gType === 'smoke') {
+      this.vfx.spawnSmokeCloud(msg, msg.durationMs || 12000);
+      soundEngine.playGrenadeDetonation('smoke', dist, 0);
+    } else if (gType === 'ap') {
+      this.vfx.spawnArmorPierceBlast(msg);
+      soundEngine.playGrenadeDetonation('ap', dist, 0);
+      if (dist < 24) {
+        const shakePower = Math.max(0.008, (1 - dist / 24) * 0.075);
+        this.cameraShake = Math.min(0.10, this.cameraShake + shakePower);
+      }
+    } else if (gType === 'molotov') {
+      this.vfx.spawnMolotovFire(msg, msg.radius || 4.8, msg.durationMs || 6000);
+      soundEngine.playGrenadeDetonation('molotov', dist, 0);
+    } else {
+      soundEngine.playGrenadeDetonation('frag', dist, 0);
+      this.vfx.spawnExplosion(msg);
+      if (dist < 28) {
+        const shakePower = Math.max(0.008, (1 - dist / 28) * 0.085);
+        this.cameraShake = Math.min(0.11, this.cameraShake + shakePower);
+      }
     }
   }
 
@@ -1367,6 +1737,9 @@ export class FPSGameClient {
     this.local.armor = msg.armor;
     this.hud.updateVitals(this.local.hp, this.local.maxHp, this.local.armor, this.local.maxArmor);
     this.hud.flashDamageTaken(msg.isStorm);
+    if (msg.armorBroken) {
+      this.hud.showStatusAlert('⚡ GIÁP ĐÃ BỊ PHÁ VỠ!', 'armor');
+    }
     soundEngine.playDamageTaken();
   }
 
@@ -1384,6 +1757,7 @@ export class FPSGameClient {
       this.adsActive = false;
       this.adsBlend = 0;
       this.sniperZoomStage = 0;
+      this.exitGrenadeMode();
       soundEngine.cancelReloadSequence();
       if (this.fpRig) this.fpRig.visible = false;
     } else if (msg.victimId) {
@@ -1589,18 +1963,19 @@ export class FPSGameClient {
       }
     }
 
-    // Sync live grenade projectiles
+    // Sync live grenade projectiles (with distinct 3D models per grenade type!)
     const activeGrenIds = new Set();
     for (const g of msg.grenades || []) {
       activeGrenIds.add(g.id);
       let gm = this.grenadeMeshes.get(g.id);
       if (!gm) {
-        gm = createGrenadeMesh();
+        gm = createGrenadeMesh(g.t || 'frag');
         this.scene.add(gm);
         this.grenadeMeshes.set(g.id, gm);
       }
       gm.position.set(g.x, g.y, g.z);
       gm.rotation.x += 0.25;
+      gm.rotation.z += 0.14;
     }
     for (const [gid, gm] of this.grenadeMeshes.entries()) {
       if (!activeGrenIds.has(gid)) {
@@ -2340,10 +2715,49 @@ export class FPSGameClient {
     const spreadPx = 4 + horizSpeed * 1.2 + (this.local.onGround ? 0 : 6) + this.vmKickZ * 38;
     this.hud.updateCrosshair(spreadPx, this.sniperZoomStage > 0, wantsAds, wStats.opticId, this.adsBlend, zoomFactor);
 
+    // Live Grenade Aiming, Power Charging & Real-Time 3D Parabolic Trajectory Arc
+    if (this.grenadeMode.equipped) {
+      if (this.local.dead || this.local.dropPhase !== 'ground') {
+        this.exitGrenadeMode();
+      } else {
+        if (this.grenadeMode.charging) {
+          const heldSec = Math.max(0, (now - this.grenadeMode.chargeStart) / 1000);
+          // Smooth charge from 36% -> 100% in 0.90s so players can dial short, medium, or max-power throws!
+          this.grenadeMode.power = Math.min(1.0, 0.36 + (heldSec / 0.90) * 0.64);
+        }
+        if (this.fpGrenadeRig) {
+          this.fpGrenadeRig.visible = true;
+          const cFrac = this.grenadeMode.charging ? ((this.grenadeMode.power - 0.36) / 0.64) : 0;
+          const uh = this.grenadeMode.underhand;
+          const shake = this.grenadeMode.charging ? Math.sin(now * 0.045) * 0.004 * cFrac : 0;
+          this.fpGrenadeRig.position.set(
+            0.22 + cFrac * (uh ? -0.02 : 0.08) + this.swayX + bobX + shake,
+            -0.21 + (uh ? -0.07 : 0.06 * cFrac) + this.swayY + bobY * 0.6,
+            -0.34 + cFrac * 0.14
+          );
+          this.fpGrenadeRig.rotation.set(
+            (uh ? -0.35 : 0.42) * cFrac,
+            -0.18 * cFrac,
+            -0.25 * cFrac
+          );
+        }
+        this._updateGrenadeTrajectoryPreview();
+        this.hud.updateGrenadeChargeHUD({
+          visible: true,
+          grenadeType: this.local.selectedGrenade,
+          power: this.grenadeMode.charging ? this.grenadeMode.power : 0.72,
+          charging: this.grenadeMode.charging,
+          underhand: this.grenadeMode.underhand
+        });
+      }
+    } else if (this._trajGroup?.visible) {
+      this._trajGroup.visible = false;
+    }
+
     if (this.fpRig) {
       const gunData = this.fpRig.userData.gun?.userData;
       const isAcogScoped = wantsAds && wStats.opticId === 'acog' && this.adsBlend > 0.62;
-      this.fpRig.visible = this.sniperZoomStage === 0 && !isAcogScoped;
+      this.fpRig.visible = !this.grenadeMode.equipped && this.sniperZoomStage === 0 && !isAcogScoped;
 
       if (this.fpRig.userData?.flashGroup) updateMuzzleFlash(this.fpRig.userData.flashGroup, dt);
       gunData?.glbController?.update(dt);
@@ -2447,9 +2861,83 @@ export class FPSGameClient {
         }
 
         this.hud.updateReloadProgress(0);
-        this.fpRig.rotation.y = 0.025 * (1 - b);
-        this.fpRig.rotation.z += (((sprint ? 0.18 : 0) * (1 - b) + this.vmKickRoll) - this.fpRig.rotation.z) * expSmooth(12, dt);
-        this.fpRig.rotation.x = this.vmKickPitch + drawPitch - (sprint ? 0.18 * (1 - b) : 0);
+        if (wStats.isMelee && this.meleeSlash?.active) {
+          this.meleeSlash.progress += dt / Math.max(0.18, this.meleeSlash.duration);
+          const p = Math.min(1, this.meleeSlash.progress);
+          if (p >= 1) {
+            this.meleeSlash.active = false;
+          }
+          // 3-Stage Whip FPS Forward Slash Animation: Wind-up (0..0.18) -> Explosive Forward Sweep (0.18..0.55) -> Follow-through Recovery (0.55..1.0)
+          let sx = 0, sy = 0, sz = 0, rx = 0, ry = 0, rz = 0;
+          if (this.meleeSlash.heavy) {
+            // Heavy Right-Click Overhead Downward Cleave!
+            if (p < 0.24) {
+              const t = p / 0.24;
+              const e = t * t;
+              sx = 0.05 * e; sy = 0.18 * e; sz = 0.08 * e;
+              rx = 0.72 * e; ry = -0.18 * e; rz = -0.25 * e;
+            } else if (p < 0.56) {
+              const t = (p - 0.24) / 0.32;
+              const e = 1 - Math.pow(1 - t, 3);
+              sx = 0.05 - 0.19 * e;
+              sy = 0.18 - 0.34 * e;
+              sz = 0.08 - 0.36 * e;
+              rx = 0.72 - 1.65 * e;
+              ry = -0.18 + 0.42 * e;
+              rz = -0.25 + 0.65 * e;
+            } else {
+              const t = (p - 0.56) / 0.44;
+              const e = 1 - Math.pow(1 - t, 2);
+              sx = -0.14 * (1 - e);
+              sy = -0.16 * (1 - e);
+              sz = -0.28 * (1 - e);
+              rx = -0.93 * (1 - e);
+              ry = 0.24 * (1 - e);
+              rz = 0.40 * (1 - e);
+            }
+          } else {
+            // Alternating Sweeping Diagonal Forward Slashes (Right->Left & Left->Right Backhand!)
+            const dir = this.meleeSlash.combo % 2 === 0 ? 1 : -1;
+            if (p < 0.18) {
+              const t = p / 0.18;
+              const e = t * t;
+              sx = dir * 0.14 * e;
+              sy = 0.09 * e;
+              sz = 0.05 * e;
+              rx = 0.25 * e;
+              ry = -dir * 0.45 * e;
+              rz = -dir * 0.55 * e;
+            } else if (p < 0.54) {
+              const t = (p - 0.18) / 0.36;
+              const e = 1 - Math.pow(1 - t, 3);
+              sx = dir * (0.14 - 0.44 * e);
+              sy = 0.09 - 0.18 * e;
+              sz = 0.05 - 0.32 * e;
+              rx = 0.25 - 0.92 * e;
+              ry = dir * (-0.45 + 1.55 * e);
+              rz = dir * (-0.55 + 1.45 * e);
+            } else {
+              const t = (p - 0.54) / 0.46;
+              const e = 1 - Math.pow(1 - t, 2);
+              sx = dir * -0.30 * (1 - e);
+              sy = -0.09 * (1 - e);
+              sz = -0.27 * (1 - e);
+              rx = -0.67 * (1 - e);
+              ry = dir * 1.10 * (1 - e);
+              rz = dir * 0.90 * (1 - e);
+            }
+          }
+          this.fpRig.position.x += sx;
+          this.fpRig.position.y += sy;
+          this.fpRig.position.z += sz;
+          this.fpRig.rotation.x = rx + drawPitch;
+          this.fpRig.rotation.y = ry;
+          this.fpRig.rotation.z = rz;
+        } else {
+          this.fpRig.rotation.y = 0.025 * (1 - b);
+          this.fpRig.rotation.z += (((sprint ? 0.18 : 0) * (1 - b) + this.vmKickRoll) - this.fpRig.rotation.z) * expSmooth(12, dt);
+          this.fpRig.rotation.x = this.vmKickPitch + drawPitch - (sprint ? 0.18 * (1 - b) : 0);
+        }
         if (gunData?.magMesh && gunData?.magBasePos) {
           gunData.magMesh.position.copy(gunData.magBasePos);
           gunData.magMesh.rotation.x = 0;

@@ -1933,6 +1933,7 @@ function bindNetworkEvents() {
   net.on('shot_fired', (msg) => fpsClient.onShotFired(msg));
   net.on('grenade_thrown', (msg) => fpsClient.onGrenadeThrown(msg));
   net.on('grenade_exploded', (msg) => fpsClient.onGrenadeExploded(msg));
+  net.on('flash_blind', (msg) => fpsClient.onFlashBlind(msg));
   net.on('hit_confirm', (msg) => fpsClient.onHitConfirm(msg));
   net.on('damage_taken', (msg) => fpsClient.onDamageTaken(msg));
   net.on('kill_event', (msg) => fpsClient.onKillEvent(msg));
@@ -2604,6 +2605,9 @@ function bindUIEvents() {
   document.getElementById('btn-leave-match')?.addEventListener('click', () => net.send({ type: 'leave_room' }));
   document.getElementById('hud-btn-reload')?.addEventListener('click', () => fpsClient.requestReload());
   document.getElementById('hud-btn-grenade')?.addEventListener('click', () => fpsClient.requestThrowGrenade());
+  document.querySelectorAll('#hud-grenade-belt .gren-pill').forEach((btn) => {
+    btn.addEventListener('click', () => fpsClient.selectGrenadeType(btn.dataset.grenade));
+  });
   document.getElementById('hud-btn-swap-primary')?.addEventListener('click', () => {
     if (fpsClient.mode === 'survival') fpsClient.toggleBackpackModal();
     else fpsClient.toggleBuyWeaponModal();

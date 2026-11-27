@@ -1,6 +1,8 @@
 // High-Performance Tactical HUD v2.0: Zero-Reflow DOM Diffing, 5km Terrain Minimap/BigMap, Parachute Guide & PUBG Backpack
 import {
   WEAPONS,
+  GRENADE_TYPES,
+  GRENADE_ORDER,
   BR_BACKPACKS,
   BR_VESTS,
   BR_HELMETS,
@@ -24,6 +26,16 @@ export class MatchHUD {
     this.ammoResEl = document.getElementById('hud-ammo-res');
     this.weaponNameEl = document.getElementById('hud-weapon-name');
     this.grenadeCountEl = document.getElementById('hud-grenade-count');
+    this.grenadeActiveNameEl = document.getElementById('hud-grenade-active-name');
+    this.grenadeBadgeEl = document.getElementById('hud-grenade-badge');
+    this.grenadeBeltEl = document.getElementById('hud-grenade-belt');
+    this.grenadePills = [...document.querySelectorAll('#hud-grenade-belt .gren-pill')];
+    this.flashOverlayEl = document.getElementById('hud-flash-overlay');
+    this.statusAlertEl = document.getElementById('hud-status-alert');
+    this.grenadeChargeWrap = document.getElementById('hud-grenade-charge-wrap');
+    this.grenadeChargeTitle = document.getElementById('hud-gc-title');
+    this.grenadeChargePct = document.getElementById('hud-gc-pct');
+    this.grenadeChargeFill = document.getElementById('hud-gc-fill');
     this.reloadBarWrap = document.getElementById('hud-reload-wrap');
     this.reloadBarFill = document.getElementById('hud-reload-fill');
 
@@ -135,7 +147,7 @@ export class MatchHUD {
     }
   }
 
-  updateWeaponHUD(slot, weaponId, ammo, reserveAmmo, primaryId = 'ak47', secondaryId = 'deagle', meleeId = 'knife', grenades = 1) {
+  updateWeaponHUD(slot, weaponId, ammo, reserveAmmo, primaryId = 'ak47', secondaryId = 'deagle', meleeId = 'knife', grenades = 1, grenadeBelt = null, selectedGrenade = 'frag') {
     const w = WEAPONS[weaponId] || WEAPONS[meleeId] || WEAPONS.knife;
     if (weaponId !== this._cache.weaponId) {
       this._cache.weaponId = weaponId;
@@ -159,9 +171,24 @@ export class MatchHUD {
       }
     }
 
-    if (grenades !== this._cache.grenades) {
-      this._cache.grenades = grenades;
-      if (this.grenadeCountEl) this.grenadeCountEl.textContent = String(grenades ?? 0);
+    const gCfg = GRENADE_TYPES[selectedGrenade] || GRENADE_TYPES.frag;
+    const activeGCount = grenadeBelt ? (grenadeBelt[selectedGrenade] ?? 0) : (grenades ?? 0);
+    const gSig = `${selectedGrenade}:${activeGCount}:${grenadeBelt ? GRENADE_ORDER.map((id) => grenadeBelt[id] ?? 0).join(',') : grenades}`;
+    if (gSig !== this._cache.grenades) {
+      this._cache.grenades = gSig;
+      if (this.grenadeCountEl) this.grenadeCountEl.textContent = String(activeGCount);
+      if (this.grenadeActiveNameEl) this.grenadeActiveNameEl.textContent = gCfg.shortName;
+      if (this.grenadeBadgeEl) this.grenadeBadgeEl.style.borderColor = gCfg.color;
+      if (this.grenadePills?.length) {
+        for (const pill of this.grenadePills) {
+          const gid = pill.dataset.grenade;
+          const cnt = grenadeBelt ? (grenadeBelt[gid] ?? 0) : (gid === 'frag' ? (grenades ?? 0) : 0);
+          const countNode = document.getElementById(`hud-g-${gid}`);
+          if (countNode) countNode.textContent = String(cnt);
+          pill.classList.toggle('active', gid === selectedGrenade);
+          pill.classList.toggle('empty', cnt <= 0);
+        }
+      }
     }
 
     const pKey = primaryId || '__EMPTY__';
@@ -317,18 +344,84 @@ export class MatchHUD {
     if (killed) this.hitmarkerEl.classList.add('kill');
 
     if (this.hitDmgEl) {
-      this.hitDmgEl.textContent = hitZone === 'shield'
-        ? 'KHIÊN BẢO VỆ'
-        : (isHead ? `HS -${damage}` : `-${damage}`);
+      if (hitZone === 'shield') this.hitDmgEl.textContent = 'KHIÊN BẢO VỆ';
+      else if (hitZone === 'armor_break') this.hitDmgEl.textContent = `⚡ PHÁ GIÁP -${damage}`;
+      else if (hitZone === 'flash') this.hitDmgEl.textContent = '☀ CHOÁNG ĐỊCH!';
+      else if (hitZone === 'burn') this.hitDmgEl.textContent = `🔥 -${damage}`;
+      else this.hitDmgEl.textContent = isHead ? `HS -${damage}` : `-${damage}`;
       this.hitDmgEl.classList.remove('hidden');
-      this.hitDmgEl.classList.toggle('crit', isHead || killed);
+      this.hitDmgEl.classList.toggle('crit', isHead || killed || hitZone === 'armor_break');
     }
 
     clearTimeout(this.hitmarkerTimeout);
     this.hitmarkerTimeout = setTimeout(() => {
       this.hitmarkerEl.classList.add('hidden');
       this.hitDmgEl?.classList.add('hidden');
-    }, 240);
+    }, 260);
+  }
+
+  triggerFlashBlind(intensity = 1.0, durationMs = 3200) {
+    if (!this.flashOverlayEl) return;
+    const peakOp = Math.min(1, Math.max(0.45, intensity * 1.05));
+    const holdMs = Math.round(durationMs * 0.40);
+    const fadeMs = Math.max(400, durationMs - holdMs);
+
+    clearTimeout(this._flashHoldTimer);
+    clearTimeout(this._flashHideTimer);
+
+    this.flashOverlayEl.classList.remove('hidden');
+    this.flashOverlayEl.style.transition = 'none';
+    this.flashOverlayEl.style.opacity = String(peakOp);
+    // Force single paint for instant pure-white blinding pop
+    void this.flashOverlayEl.offsetWidth;
+
+    this._flashHoldTimer = setTimeout(() => {
+      if (!this.flashOverlayEl) return;
+      this.flashOverlayEl.style.transition = `opacity ${fadeMs}ms cubic-bezier(0.22, 0.85, 0.35, 1)`;
+      this.flashOverlayEl.style.opacity = '0';
+      this._flashHideTimer = setTimeout(() => {
+        this.flashOverlayEl?.classList.add('hidden');
+      }, fadeMs + 40);
+    }, holdMs);
+  }
+
+  showStatusAlert(text, variant = 'armor') {
+    if (!this.statusAlertEl) return;
+    this.statusAlertEl.textContent = text;
+    this.statusAlertEl.className = `hud-status-alert ${variant}`;
+    clearTimeout(this._statusAlertTimer);
+    this._statusAlertTimer = setTimeout(() => {
+      this.statusAlertEl?.classList.add('hidden');
+    }, 1500);
+  }
+
+  updateGrenadeChargeHUD({ visible = false, grenadeType = 'frag', power = 0.4, charging = false, underhand = false } = {}) {
+    if (!this.grenadeChargeWrap) return;
+    if (!visible) {
+      if (!this.grenadeChargeWrap.classList.contains('hidden')) {
+        this.grenadeChargeWrap.classList.add('hidden');
+      }
+      return;
+    }
+    this.grenadeChargeWrap.classList.remove('hidden');
+    const gCfg = GRENADE_TYPES[grenadeType] || GRENADE_TYPES.frag;
+    const pct = Math.round(Math.max(0, Math.min(1, power)) * 100);
+    const modeTxt = underhand ? 'NÉM GẦN / LĂN' : 'NÉM XA';
+    const title = `${gCfg.name.toUpperCase()} • ${modeTxt}`;
+    if (this._cache.gcTitle !== title && this.grenadeChargeTitle) {
+      this._cache.gcTitle = title;
+      this.grenadeChargeTitle.textContent = title;
+      this.grenadeChargeWrap.style.borderTopColor = gCfg.color;
+    }
+    const pctTxt = charging ? `${pct}%` : 'SẴN SÀNG';
+    if (this._cache.gcPct !== pctTxt && this.grenadeChargePct) {
+      this._cache.gcPct = pctTxt;
+      this.grenadeChargePct.textContent = pctTxt;
+    }
+    if (this._cache.gcFill !== pct && this.grenadeChargeFill) {
+      this._cache.gcFill = pct;
+      this.grenadeChargeFill.style.width = `${pct}%`;
+    }
   }
 
   showKillStreak(streak = 1, isHeadshot = false, isFirstBlood = false, victimName = '') {
@@ -370,7 +463,11 @@ export class MatchHUD {
     if (!this.killFeedEl) return;
     const item = document.createElement('div');
     item.className = 'killfeed-item';
-    const wName = WEAPONS[weaponId]?.name || (weaponId === 'grenade' ? 'FRAG' : (weaponId === 'storm' ? 'BO ĐỘC' : 'C4'));
+    const wName = WEAPONS[weaponId]?.name
+      || (weaponId === 'grenade' ? 'LỰU ĐẠN NỔ'
+        : (weaponId === 'ap' ? 'PHÁ GIÁP EMP'
+          : (weaponId === 'molotov' ? 'BOM CHÁY'
+            : (weaponId === 'storm' ? 'BO ĐỘC' : 'C4'))));
     const kClass = killerTeam === 'alpha' ? 'team-alpha-txt' : (killerTeam === 'bravo' ? 'team-bravo-txt' : '');
     const vClass = victimTeam === 'alpha' ? 'team-alpha-txt' : (victimTeam === 'bravo' ? 'team-bravo-txt' : '');
     const hsBadge = headshot ? '<span class="kf-hs">HS</span>' : '';

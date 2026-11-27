@@ -282,6 +282,16 @@ export function updateBotAI(bot, room, dt, now) {
     }
   }
 
+  // Flashbang blindness: disorient bot temporarily so flash grenades work tactically!
+  if (bot.blindedUntil && now < bot.blindedUntil) {
+    input.forward = 0.25;
+    input.right = Math.sin(now * 0.008) > 0 ? 0.6 : -0.6;
+    input.yaw = bot.yaw + Math.sin(now * 0.011) * dt * 2.4;
+    input.pitch = Math.max(-0.5, Math.min(0.5, bot.pitch + Math.cos(now * 0.009) * dt * 0.8));
+    bot.input = input;
+    return;
+  }
+
   // 2. Scan for Visible Enemies (staggered every 3rd tick + distance culled so 50-player BR stays smooth)
   const botEye = {
     x: bot.x,
@@ -316,7 +326,7 @@ export function updateBotAI(bot, room, dt, now) {
       y: other.y + (other.crouching ? 0.75 : 1.25),
       z: other.z
     };
-    if (hasLineOfSight(botEye, otherChest, map)) {
+    if (hasLineOfSight(botEye, otherChest, map) && !room.isSightBlockedBySmoke?.(botEye, otherChest)) {
       const priority = dist + yawDelta * 6;
       if (priority < bestScore) {
         bestScore = priority;

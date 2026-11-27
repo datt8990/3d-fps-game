@@ -3,6 +3,9 @@ import {
   SERVER_TICK_MS,
   PHYSICS,
   GRENADE_CONFIG,
+  GRENADE_TYPES,
+  GRENADE_ORDER,
+  createDefaultGrenadeBelt,
   GAME_MODES,
   OPERATORS,
   WEAPONS,
@@ -86,6 +89,8 @@ export class GameRoomCore {
 
     this.bombState = this.createInitialBombState();
     this.grenades = [];
+    this.smokeZones = [];
+    this.fireZones = [];
     this.storm = null;
     this.lootCrates = [];
     this.dropPlane = null;
@@ -605,6 +610,8 @@ export class GameRoomCore {
     this.roundPhase = 'live';
     this.firstBloodAwarded = false;
     this.grenades = [];
+    this.smokeZones = [];
+    this.fireZones = [];
     this.dropPlane = null;
     this.airdropSpawned = false;
     this.storm = null;
@@ -687,6 +694,7 @@ export class GameRoomCore {
       ammo: p.ammo,
       reserveAmmo: p.reserveAmmo,
       grenades: p.grenades,
+      grenadeBelt: p.grenadeBelt,
       dropPhase: p.dropPhase,
       hasBomb: p.hasBomb
     });
@@ -992,6 +1000,7 @@ export class GameRoomCore {
       player.secondary = null;
       player.ammo = 0;
       player.reserveAmmo = 0;
+      player.grenadeBelt = { frag: 0, flash: 0, smoke: 0, ap: 0, molotov: 0 };
       player.grenades = 0;
       player.reloadingUntil = 0;
       player.gear = { vestTier: 0, helmetTier: 0, helmetArmor: 0, helmetMax: 0, bagTier: 0 };
@@ -1021,7 +1030,8 @@ export class GameRoomCore {
     player.weaponId = player.primary;
     player.ammo = pStats.magSize;
     player.reserveAmmo = pStats.reserveAmmo;
-    player.grenades = this.mode === 'practice' ? 5 : GRENADE_CONFIG.maxPerSpawn;
+    player.grenadeBelt = createDefaultGrenadeBelt(this.mode === 'practice');
+    player.grenades = GRENADE_ORDER.reduce((sum, id) => sum + (player.grenadeBelt[id] || 0), 0);
     player.reloadingUntil = 0;
   }
 
@@ -1552,6 +1562,7 @@ export class GameRoomCore {
       ammo: player.ammo,
       reserveAmmo: player.reserveAmmo,
       grenades: player.grenades,
+      grenadeBelt: player.grenadeBelt,
       hp: player.hp,
       armor: player.armor,
       maxArmor: player.maxArmor,
@@ -1894,6 +1905,41 @@ export class GameRoomCore {
       }
     }
 
+    // FPS Forward Cleave Arc for Melee Slashes: sweeps a generous 38° arc in front so slashing feels crisp & responsive!
+    if (wStats.isMelee) {
+      const lookDir = directionFromAngles(yaw, pitch);
+      const maxReach = (wStats.range || 3.4) + (heavyMelee ? 0.25 : 0);
+      const cleaveMinDot = heavyMelee ? 0.80 : 0.76; // ~37°-40° half-cone in front
+      for (const cand of this.getLivingCombatants()) {
+        if (cand.id === shooter.id) continue;
+        if (this.modeConfig.teamBased && cand.team === shooter.team) continue;
+        if (cand.dropPhase && cand.dropPhase !== 'ground') continue;
+        if (aggregatedHits.has(cand.id)) continue;
+
+        const targetCenter = { x: cand.x, y: cand.y + (cand.crouching ? 0.72 : 1.15), z: cand.z };
+        const dx = targetCenter.x - origin.x;
+        const dy = targetCenter.y - origin.y;
+        const dz = targetCenter.z - origin.z;
+        const dist = Math.hypot(dx, dy, dz);
+        if (dist > maxReach + PHYSICS.PLAYER_RADIUS) continue;
+
+        const invD = dist > 0.001 ? 1 / dist : 1;
+        const dot = (dx * lookDir.x + dy * lookDir.y + dz * lookDir.z) * invD;
+        if (dot < cleaveMinDot && dist > 1.25) continue;
+
+        if (hasLineOfSight(origin, targetCenter, this.map)) {
+          const hitHead = origin.y + lookDir.y * dist >= cand.y + (cand.crouching ? 0.92 : 1.48);
+          aggregatedHits.set(cand.id, {
+            target: cand,
+            count: 1,
+            headHit: hitHead,
+            dist,
+            zone: hitHead ? 'head' : 'body'
+          });
+        }
+      }
+    }
+
     this.broadcast({
       type: 'shot_fired',
       shooterId: shooter.id,
@@ -1923,60 +1969,92 @@ export class GameRoomCore {
   handleThrowGrenade(playerId, payload = {}) {
     if (this.status !== 'playing' || this.roundPhase !== 'live') return;
     const p = this.combatants.get(playerId);
-    if (!p || p.dead || p.grenades <= 0) return;
+    if (!p || p.dead) return;
     if (p.dropPhase && p.dropPhase !== 'ground') return;
     const now = Date.now();
-    if (now - (p.lastGrenadeAt || 0) < 900) return;
+    if (now - (p.lastGrenadeAt || 0) < 750) return;
 
-    p.grenades -= 1;
-    if (this.mode === 'survival' && p.backpack) {
-      p.backpack.frag_grenade = Math.max(0, (p.backpack.frag_grenade || 1) - 1);
-      this.syncPlayerBrAmmo(p);
-      this.sendInventorySync(p);
+    const reqType = GRENADE_TYPES[payload.grenadeType] ? payload.grenadeType : 'frag';
+    let grenadeType = reqType;
+
+    if (this.mode === 'survival') {
+      if ((p.grenades || 0) <= 0) return;
+      p.grenades -= 1;
+      if (p.backpack) {
+        p.backpack.frag_grenade = Math.max(0, (p.backpack.frag_grenade || 1) - 1);
+        this.syncPlayerBrAmmo(p);
+        this.sendInventorySync(p);
+      }
+    } else {
+      if (!p.grenadeBelt) p.grenadeBelt = createDefaultGrenadeBelt(this.mode === 'practice');
+      if ((p.grenadeBelt[grenadeType] || 0) <= 0) {
+        // Fallback to any available grenade in belt
+        const avail = GRENADE_ORDER.find((id) => (p.grenadeBelt[id] || 0) > 0);
+        if (!avail) return;
+        grenadeType = avail;
+      }
+      if (this.mode !== 'practice') {
+        p.grenadeBelt[grenadeType] = Math.max(0, (p.grenadeBelt[grenadeType] || 1) - 1);
+      }
+      p.grenades = GRENADE_ORDER.reduce((sum, id) => sum + (p.grenadeBelt[id] || 0), 0);
     }
+
     p.lastGrenadeAt = now;
     p.spawnProtectedUntil = 0;
 
+    const gCfg = GRENADE_TYPES[grenadeType] || GRENADE_TYPES.frag;
     const yaw = Number.isFinite(Number(payload.yaw)) ? Number(payload.yaw) : p.yaw;
-    const pitch = Math.max(-1.3, Math.min(1.3, Number.isFinite(Number(payload.pitch)) ? Number(payload.pitch) : p.pitch));
+    const pitch = Math.max(-1.35, Math.min(1.35, Number.isFinite(Number(payload.pitch)) ? Number(payload.pitch) : p.pitch));
+    const power = Math.max(0.32, Math.min(1.0, Number.isFinite(Number(payload.power)) ? Number(payload.power) : 0.88));
+    const underhand = Boolean(payload.underhand);
     const dir = directionFromAngles(yaw, pitch);
     const eyeH = p.crouching ? PHYSICS.EYE_CROUCH : PHYSICS.EYE_STAND;
+    const speedBase = underhand ? GRENADE_CONFIG.throwSpeed * 0.50 : GRENADE_CONFIG.throwSpeed;
+    const launchSpeed = speedBase * power;
+    const upBoost = (underhand ? 1.65 : GRENADE_CONFIG.upwardBoost) * (0.48 + 0.52 * power);
 
     const gren = {
       id: 'gr_' + randHex(5),
+      grenadeType,
       ownerId: p.id,
       ownerName: p.name,
       ownerTeam: p.team,
       x: p.x + dir.x * 0.45,
       y: p.y + eyeH - 0.1,
       z: p.z + dir.z * 0.45,
-      vx: dir.x * GRENADE_CONFIG.throwSpeed + p.vx * 0.35,
-      vy: dir.y * GRENADE_CONFIG.throwSpeed + GRENADE_CONFIG.upwardBoost,
-      vz: dir.z * GRENADE_CONFIG.throwSpeed + p.vz * 0.35,
-      explodeAt: now + GRENADE_CONFIG.fuseMs
+      vx: dir.x * launchSpeed + p.vx * 0.35,
+      vy: dir.y * launchSpeed + upBoost,
+      vz: dir.z * launchSpeed + p.vz * 0.35,
+      thrownAt: now,
+      explodeAt: now + (gCfg.fuseMs || GRENADE_CONFIG.fuseMs)
     };
     this.grenades.push(gren);
 
     this.broadcast({
       type: 'grenade_thrown',
       id: gren.id,
+      grenadeType,
       ownerId: p.id,
       x: gren.x, y: gren.y, z: gren.z,
       vx: gren.vx, vy: gren.vy, vz: gren.vz,
-      grenadesLeft: p.grenades
+      grenadesLeft: p.grenades,
+      grenadeBelt: p.grenadeBelt
     });
   }
 
   tickGrenades(dt, now) {
     for (let i = this.grenades.length - 1; i >= 0; i--) {
       const g = this.grenades[i];
+      const gCfg = GRENADE_TYPES[g.grenadeType] || GRENADE_TYPES.frag;
       g.vy -= GRENADE_CONFIG.gravity * dt;
 
+      let impacted = false;
       const stepDist = Math.hypot(g.vx * dt, g.vy * dt, g.vz * dt);
       if (stepDist > 0.001) {
         const dir = { x: (g.vx * dt) / stepDist, y: (g.vy * dt) / stepDist, z: (g.vz * dt) / stepDist };
         const hit = raycastMap({ x: g.x, y: g.y, z: g.z }, dir, stepDist + 0.12, this.map);
         if (hit) {
+          impacted = true;
           if (hit.normal.x !== 0) g.vx = -g.vx * GRENADE_CONFIG.bounceRestitution;
           if (hit.normal.y !== 0) {
             g.vy = -g.vy * GRENADE_CONFIG.bounceRestitution;
@@ -1988,11 +2066,23 @@ export class GameRoomCore {
       }
 
       g.x += g.vx * dt;
-      g.y = Math.max(0.08, g.y + g.vy * dt);
+      const floorY = this.map.terrain ? this.map.terrain.floorAt(g.x, g.z) + 0.08 : 0.08;
+      if (g.y + g.vy * dt <= floorY) {
+        g.y = floorY;
+        impacted = true;
+        if (Math.abs(g.vy) < 1.2) g.vy = 0;
+        else {
+          g.vy = -g.vy * GRENADE_CONFIG.bounceRestitution;
+          g.vx *= 0.75;
+          g.vz *= 0.75;
+        }
+      } else {
+        g.y += g.vy * dt;
+      }
       g.z += g.vz * dt;
-      if (g.y <= 0.09 && Math.abs(g.vy) < 1.2) g.vy = 0;
 
-      if (now >= g.explodeAt) {
+      const molotovBreak = Boolean(gCfg.impactDetonate && impacted && (now - (g.thrownAt || 0) > 140));
+      if (now >= g.explodeAt || molotovBreak) {
         this.detonateGrenade(g, now);
         this.grenades.splice(i, 1);
       }
@@ -2000,26 +2090,116 @@ export class GameRoomCore {
   }
 
   detonateGrenade(g, now) {
+    const grenadeType = g.grenadeType || 'frag';
+    const gCfg = GRENADE_TYPES[grenadeType] || GRENADE_TYPES.frag;
+    const radius = gCfg.blastRadius || GRENADE_CONFIG.blastRadius;
+
     this.broadcast({
       type: 'grenade_exploded',
       id: g.id,
-      x: g.x, y: g.y, z: g.z
+      grenadeType,
+      x: g.x, y: g.y, z: g.z,
+      radius,
+      durationMs: gCfg.durationMs || 0
     });
 
     const attacker = this.combatants.get(g.ownerId) || { id: g.ownerId, name: g.ownerName, team: g.ownerTeam };
     const blastOrigin = { x: g.x, y: g.y + 0.35, z: g.z };
 
+    // 1. SMOKE GRENADE: spawns an active smoke concealment cloud that blocks enemy bot LOS!
+    if (grenadeType === 'smoke') {
+      this.smokeZones.push({
+        x: g.x, y: g.y + 1.2, z: g.z,
+        radius: radius * 0.85,
+        expiresAt: now + (gCfg.durationMs || 12000)
+      });
+      return;
+    }
+
+    // 2. FLASHBANG (M84): blinds all combatants with LOS (intensity scales by distance & look direction!)
+    if (grenadeType === 'flash') {
+      for (const victim of this.getLivingCombatants()) {
+        const eyePos = { x: victim.x, y: victim.y + (victim.crouching ? PHYSICS.EYE_CROUCH : PHYSICS.EYE_STAND), z: victim.z };
+        const dx = blastOrigin.x - eyePos.x;
+        const dy = blastOrigin.y - eyePos.y;
+        const dz = blastOrigin.z - eyePos.z;
+        const d = Math.hypot(dx, dy, dz);
+        if (d > radius) continue;
+        if (!hasLineOfSight(blastOrigin, eyePos, this.map)) continue;
+
+        const lookDir = directionFromAngles(victim.yaw || 0, victim.pitch || 0);
+        const invD = d > 0.001 ? 1 / d : 1;
+        const lookDot = (dx * lookDir.x + dy * lookDir.y + dz * lookDir.z) * invD;
+        // Looking directly at flash -> 100% blind; facing away -> 35% brief flash
+        const lookMult = lookDot > 0.25 ? 1.0 : (lookDot > -0.25 ? 0.68 : 0.35);
+        const distMult = Math.max(0.25, 1 - (d / radius) * 0.72);
+        const intensity = Math.min(1.0, distMult * lookMult);
+        const durationMs = Math.round((gCfg.blindDurationMs || 3600) * intensity);
+
+        if (durationMs < 350) continue;
+        if (victim.isBot) {
+          victim.blindedUntil = Math.max(victim.blindedUntil || 0, now + durationMs);
+        } else {
+          this.sendTo(victim.id, {
+            type: 'flash_blind',
+            intensity,
+            durationMs,
+            dist: d
+          });
+        }
+        if (attacker.id && attacker.id !== victim.id && !(this.modeConfig.teamBased && victim.team === g.ownerTeam)) {
+          this.sendTo(attacker.id, {
+            type: 'hit_confirm',
+            targetId: victim.id,
+            damage: 0,
+            hitZone: 'flash',
+            killed: false
+          });
+        }
+      }
+      return;
+    }
+
+    // 3. MOLOTOV / INCENDIARY: spawns a burning fire zone + immediate splash damage
+    if (grenadeType === 'molotov') {
+      this.fireZones.push({
+        x: g.x, y: g.y, z: g.z,
+        radius,
+        ownerId: g.ownerId,
+        ownerName: g.ownerName,
+        ownerTeam: g.ownerTeam,
+        expiresAt: now + (gCfg.durationMs || 6000),
+        lastTickAt: now
+      });
+    }
+
+    // 4. FRAG (HE), ARMOR-PIERCING (EMP/AP), and initial MOLOTOV splash damage
     for (const victim of this.getLivingCombatants()) {
       if (this.modeConfig.teamBased && victim.team === g.ownerTeam && victim.id !== g.ownerId) continue;
       const d = Math.hypot(victim.x - g.x, victim.y + 0.9 - g.y, victim.z - g.z);
-      if (d > GRENADE_CONFIG.blastRadius) continue;
+      if (d > radius) continue;
 
       const targetChest = { x: victim.x, y: victim.y + 1.0, z: victim.z };
       const los = hasLineOfSight(blastOrigin, targetChest, this.map);
       if (!los && d > 2.8) continue;
 
-      const dmg = Math.round(GRENADE_CONFIG.maxDamage * (1 - d / GRENADE_CONFIG.blastRadius) * (los ? 1.0 : 0.45));
-      if (dmg <= 2) continue;
+      const falloff = Math.max(0.15, 1 - d / radius) * (los ? 1.0 : 0.45);
+      const dmg = Math.round((gCfg.maxDamage || GRENADE_CONFIG.maxDamage) * falloff);
+      let armorShredded = 0;
+
+      if (grenadeType === 'ap') {
+        // Armor-Piercing Breach Grenade: shatters up to 150 Kevlar + BR Helmet armor!
+        const shred = Math.round((gCfg.armorShred || 150) * Math.max(0.45, falloff));
+        if (victim.armor > 0) {
+          armorShredded = Math.min(victim.armor, shred);
+          victim.armor = Math.max(0, victim.armor - armorShredded);
+        }
+        if (victim.gear?.helmetArmor > 0) {
+          victim.gear.helmetArmor = Math.max(0, victim.gear.helmetArmor - shred);
+        }
+      }
+
+      if (dmg <= 2 && armorShredded <= 0) continue;
 
       victim.lastDamagedAt = now;
       victim.hp = Math.max(0, victim.hp - dmg);
@@ -2028,7 +2208,7 @@ export class GameRoomCore {
           type: 'hit_confirm',
           targetId: victim.id,
           damage: dmg,
-          hitZone: 'body',
+          hitZone: armorShredded > 0 ? 'armor_break' : 'body',
           killed: victim.hp <= 0
         });
       }
@@ -2037,14 +2217,80 @@ export class GameRoomCore {
         fromX: g.x,
         fromZ: g.z,
         damage: dmg,
+        armorBroken: armorShredded > 0,
         hp: victim.hp,
         armor: victim.armor
       });
 
       if (victim.hp <= 0) {
-        this.handleKill(this.combatants.get(g.ownerId) || attacker, victim, 'grenade', false, now);
+        this.handleKill(this.combatants.get(g.ownerId) || attacker, victim, grenadeType === 'frag' ? 'grenade' : grenadeType, false, now);
       }
     }
+  }
+
+  tickTacticalZones(now) {
+    // Expire old smoke clouds
+    for (let i = this.smokeZones.length - 1; i >= 0; i--) {
+      if (now >= this.smokeZones[i].expiresAt) this.smokeZones.splice(i, 1);
+    }
+    // Tick burning Molotov fire zones (DoT every 350ms)
+    for (let i = this.fireZones.length - 1; i >= 0; i--) {
+      const fz = this.fireZones[i];
+      if (now >= fz.expiresAt) {
+        this.fireZones.splice(i, 1);
+        continue;
+      }
+      if (now - fz.lastTickAt < 350) continue;
+      fz.lastTickAt = now;
+
+      const attacker = this.combatants.get(fz.ownerId) || { id: fz.ownerId, name: fz.ownerName, team: fz.ownerTeam };
+      const tickDmg = Math.round((GRENADE_TYPES.molotov.dps || 18) * 0.35);
+      for (const victim of this.getLivingCombatants()) {
+        if (this.modeConfig.teamBased && victim.team === fz.ownerTeam && victim.id !== fz.ownerId) continue;
+        const dXZ = Math.hypot(victim.x - fz.x, victim.z - fz.z);
+        if (dXZ > fz.radius || Math.abs(victim.y - fz.y) > 2.4) continue;
+        victim.lastDamagedAt = now;
+        victim.hp = Math.max(0, victim.hp - tickDmg);
+        if (attacker.id && attacker.id !== victim.id) {
+          this.sendTo(attacker.id, {
+            type: 'hit_confirm',
+            targetId: victim.id,
+            damage: tickDmg,
+            hitZone: 'burn',
+            killed: victim.hp <= 0
+          });
+        }
+        this.sendTo(victim.id, {
+          type: 'damage_taken',
+          fromX: fz.x,
+          fromZ: fz.z,
+          damage: tickDmg,
+          hp: victim.hp,
+          armor: victim.armor
+        });
+        if (victim.hp <= 0) {
+          this.handleKill(attacker, victim, 'molotov', false, now);
+        }
+      }
+    }
+  }
+
+  isSightBlockedBySmoke(p1, p2) {
+    if (!this.smokeZones || this.smokeZones.length === 0) return false;
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const dz = p2.z - p1.z;
+    const lenSq = dx * dx + dy * dy + dz * dz;
+    if (lenSq < 0.001) return false;
+    for (let i = 0; i < this.smokeZones.length; i++) {
+      const sz = this.smokeZones[i];
+      const t = Math.max(0, Math.min(1, ((sz.x - p1.x) * dx + (sz.y - p1.y) * dy + (sz.z - p1.z) * dz) / lenSq));
+      const cx = p1.x + dx * t - sz.x;
+      const cy = p1.y + dy * t - sz.y;
+      const cz = p1.z + dz * t - sz.z;
+      if (cx * cx + cy * cy + cz * cz <= sz.radius * sz.radius) return true;
+    }
+    return false;
   }
 
   handleRadioCommand(playerId, radioKey) {
@@ -2428,6 +2674,9 @@ export class GameRoomCore {
       if (this.grenades.length > 0) {
         this.tickGrenades(dt, now);
       }
+      if (this.smokeZones.length > 0 || this.fireZones.length > 0) {
+        this.tickTacticalZones(now);
+      }
 
       if (this.mode === 'bomb') {
         this.tickBombMode(dt, now);
@@ -2592,6 +2841,8 @@ export class GameRoomCore {
     this.roundEndsAt = now + this.modeConfig.roundDurationSec * 1000;
     this.bombState = this.createInitialBombState();
     this.grenades = [];
+    this.smokeZones = [];
+    this.fireZones = [];
 
     for (const p of this.combatants.values()) {
       p.hasBomb = false;
@@ -2952,6 +3203,7 @@ export class GameRoomCore {
     if (this.grenades.length > 0) {
       basePayload.grenades = this.grenades.map((g) => ({
         id: g.id,
+        t: g.grenadeType || 'frag',
         x: r2(g.x),
         y: r2(g.y),
         z: r2(g.z)

@@ -60,7 +60,61 @@ const GUN_PROFILES = {
   magnum:    { crackF: 3600, blastS: 8000, blastE: 360, blastD: 0.25, subG: 0.96, subD: 0.13, rev: 0.80, mechF: 2500, punch: 1.02, post: 'hammer', brass: false },
   fiveseven: { crackF: 4500, blastS: 7600, blastE: 700, blastD: 0.11, subG: 0.48, subD: 0.06, rev: 0.42, mechF: 3600, punch: 0.66, brass: true },
   m1911:     { crackF: 3150, blastS: 6800, blastE: 470, blastD: 0.16, subG: 0.72, subD: 0.09, rev: 0.56, mechF: 2700, punch: 0.82, brass: true },
-  beretta92: { crackF: 4100, blastS: 7100, blastE: 620, blastD: 0.11, subG: 0.48, subD: 0.06, rev: 0.40, mechF: 3450, punch: 0.64, brass: true }
+  beretta92: { crackF: 4100, blastS: 7100, blastE: 620, blastD: 0.11, subG: 0.48, subD: 0.06, rev: 0.40, mechF: 3450, punch: 0.64, brass: true },
+
+  // === 50 NEW REAL-WORLD WEAPON ACOUSTIC PROFILES ===
+  ak74m:      { crackF: 3750, blastS: 7100, blastE: 540, blastD: 0.155, subG: 0.68, subD: 0.085, rev: 0.54, mechF: 2550, punch: 0.82 },
+  an94:       { crackF: 4250, blastS: 7600, blastE: 600, blastD: 0.14,  subG: 0.62, subD: 0.075, rev: 0.50, mechF: 3200, punch: 0.78 },
+  qbz95:      { crackF: 4050, blastS: 7300, blastE: 610, blastD: 0.14,  subG: 0.60, subD: 0.075, rev: 0.48, mechF: 3050, punch: 0.74 },
+  bren2:      { crackF: 4100, blastS: 7500, blastE: 590, blastD: 0.145, subG: 0.62, subD: 0.08,  rev: 0.51, mechF: 2950, punch: 0.77 },
+  f2000:      { crackF: 4450, blastS: 7800, blastE: 680, blastD: 0.125, subG: 0.52, subD: 0.065, rev: 0.45, mechF: 3450, punch: 0.70 },
+  sg553:      { crackF: 3900, blastS: 7300, blastE: 550, blastD: 0.155, subG: 0.66, subD: 0.085, rev: 0.53, mechF: 2850, punch: 0.80 },
+  tar21:      { crackF: 4200, blastS: 7500, blastE: 640, blastD: 0.135, subG: 0.56, subD: 0.07,  rev: 0.47, mechF: 3250, punch: 0.73 },
+  type89:     { crackF: 4050, blastS: 7400, blastE: 600, blastD: 0.145, subG: 0.60, subD: 0.075, rev: 0.49, mechF: 3000, punch: 0.75 },
+  acr:        { crackF: 3800, blastS: 7400, blastE: 530, blastD: 0.16,  subG: 0.72, subD: 0.09,  rev: 0.56, mechF: 2800, punch: 0.84 },
+  l85a2:      { crackF: 4150, blastS: 7500, blastE: 590, blastD: 0.15,  subG: 0.62, subD: 0.08,  rev: 0.52, mechF: 2900, punch: 0.76 },
+  hk417:      { crackF: 2900, blastS: 6200, blastE: 400, blastD: 0.22,  subG: 0.92, subD: 0.125, rev: 0.68, mechF: 1900, punch: 0.98 },
+  m416_cqb:   { crackF: 4300, blastS: 7700, blastE: 640, blastD: 0.13,  subG: 0.58, subD: 0.07,  rev: 0.48, mechF: 3200, punch: 0.75 },
+
+  vityaz:     { crackF: 3600, blastS: 6400, blastE: 580, blastD: 0.11,  subG: 0.48, subD: 0.06,  rev: 0.38, mechF: 3100, punch: 0.62 },
+  mpx:        { crackF: 4150, blastS: 7100, blastE: 660, blastD: 0.095, subG: 0.42, subD: 0.05,  rev: 0.36, mechF: 3550, punch: 0.58 },
+  scorpion:   { crackF: 4350, blastS: 7300, blastE: 710, blastD: 0.08,  subG: 0.38, subD: 0.045, rev: 0.33, mechF: 4000, punch: 0.54 },
+  mp9:        { crackF: 4500, blastS: 7600, blastE: 750, blastD: 0.085, subG: 0.38, subD: 0.045, rev: 0.34, mechF: 3900, punch: 0.55 },
+  ppsh41:     { crackF: 3950, blastS: 6800, blastE: 630, blastD: 0.09,  subG: 0.44, subD: 0.052, rev: 0.37, mechF: 3700, punch: 0.59 },
+  mp40:       { crackF: 3100, blastS: 5800, blastE: 500, blastD: 0.125, subG: 0.56, subD: 0.07,  rev: 0.42, mechF: 2500, punch: 0.68 },
+  sten:       { crackF: 1800, blastS: 2350, blastE: 350, blastD: 0.085, subG: 0.35, subD: 0.05,  rev: 0.16, mechF: 3400, punch: 0.42, nativeSuppressed: true },
+  k1a:        { crackF: 4250, blastS: 7400, blastE: 650, blastD: 0.12,  subG: 0.52, subD: 0.065, rev: 0.44, mechF: 3350, punch: 0.68 },
+  mx4:        { crackF: 4100, blastS: 6900, blastE: 670, blastD: 0.09,  subG: 0.42, subD: 0.05,  rev: 0.35, mechF: 3650, punch: 0.57 },
+  qcw05:      { crackF: 1700, blastS: 2250, blastE: 330, blastD: 0.08,  subG: 0.33, subD: 0.048, rev: 0.15, mechF: 3550, punch: 0.40, nativeSuppressed: true },
+
+  m60e4:      { crackF: 2950, blastS: 6300, blastE: 390, blastD: 0.22,  subG: 0.94, subD: 0.125, rev: 0.70, mechF: 1950, punch: 0.98, post: 'belt' },
+  rpd:        { crackF: 3250, blastS: 6600, blastE: 450, blastD: 0.19,  subG: 0.84, subD: 0.11,  rev: 0.64, mechF: 2250, punch: 0.90, post: 'belt' },
+  mg42:       { crackF: 3700, blastS: 7200, blastE: 480, blastD: 0.145, subG: 0.78, subD: 0.09,  rev: 0.58, mechF: 3300, punch: 0.90, post: 'belt' },
+  stoner63:   { crackF: 3850, blastS: 7300, blastE: 520, blastD: 0.165, subG: 0.74, subD: 0.095, rev: 0.58, mechF: 2700, punch: 0.85, post: 'belt' },
+  l86:        { crackF: 4050, blastS: 7400, blastE: 560, blastD: 0.16,  subG: 0.68, subD: 0.085, rev: 0.54, mechF: 2800, punch: 0.82 },
+  dp28:       { crackF: 2900, blastS: 6200, blastE: 400, blastD: 0.22,  subG: 0.92, subD: 0.12,  rev: 0.68, mechF: 2050, punch: 0.95 },
+
+  ksg12:      { crackF: 2550, blastS: 5900, blastE: 260, blastD: 0.28,  subG: 1.08, subD: 0.165, rev: 0.80, mechF: 1650, punch: 1.08, post: 'pump' },
+  saiga12:    { crackF: 2450, blastS: 5600, blastE: 275, blastD: 0.24,  subG: 0.98, subD: 0.14,  rev: 0.70, mechF: 1850, punch: 1.00 },
+  striker12:  { crackF: 2400, blastS: 5400, blastE: 280, blastD: 0.23,  subG: 0.96, subD: 0.135, rev: 0.68, mechF: 1800, punch: 0.98 },
+  m1887:      { crackF: 2500, blastS: 6100, blastE: 235, blastD: 0.31,  subG: 1.15, subD: 0.18,  rev: 0.85, mechF: 1600, punch: 1.14, post: 'pump' },
+  mossberg590:{ crackF: 2600, blastS: 6000, blastE: 255, blastD: 0.285, subG: 1.08, subD: 0.165, rev: 0.80, mechF: 1600, punch: 1.08, post: 'pump' },
+  origin12:   { crackF: 2350, blastS: 5300, blastE: 280, blastD: 0.215, subG: 0.94, subD: 0.13,  rev: 0.65, mechF: 1900, punch: 0.96 },
+
+  vss:        { crackF: 1750, blastS: 2300, blastE: 330, blastD: 0.09,  subG: 0.38, subD: 0.055, rev: 0.18, mechF: 3150, punch: 0.46, nativeSuppressed: true },
+  mosin:      { crackF: 4050, blastS: 8500, blastE: 280, blastD: 0.35,  subG: 1.06, subD: 0.19,  rev: 0.89, mechF: 2350, punch: 1.10, post: 'bolt' },
+  psg1:       { crackF: 3650, blastS: 7900, blastE: 330, blastD: 0.29,  subG: 0.95, subD: 0.155, rev: 0.78, mechF: 2500, punch: 1.00 },
+  msr:        { crackF: 4100, blastS: 8900, blastE: 225, blastD: 0.40,  subG: 1.18, subD: 0.23,  rev: 0.96, mechF: 2200, punch: 1.18, post: 'bolt' },
+  dsr1:       { crackF: 4000, blastS: 8800, blastE: 220, blastD: 0.41,  subG: 1.18, subD: 0.23,  rev: 0.96, mechF: 2150, punch: 1.18, post: 'bolt' },
+  m110:       { crackF: 1950, blastS: 2700, blastE: 360, blastD: 0.11,  subG: 0.46, subD: 0.065, rev: 0.22, mechF: 2850, punch: 0.54, nativeSuppressed: true },
+  sks:        { crackF: 3500, blastS: 7200, blastE: 410, blastD: 0.21,  subG: 0.82, subD: 0.115, rev: 0.65, mechF: 2450, punch: 0.90 },
+  ntw20:      { crackF: 2800, blastS: 9600, blastE: 140, blastD: 0.56,  subG: 1.38, subD: 0.32,  rev: 1.12, mechF: 1500, punch: 1.35, post: 'bolt' },
+
+  p226:       { crackF: 4050, blastS: 7000, blastE: 600, blastD: 0.115, subG: 0.50, subD: 0.062, rev: 0.42, mechF: 3400, punch: 0.66, brass: true },
+  makarov:    { crackF: 4300, blastS: 6900, blastE: 650, blastD: 0.10,  subG: 0.46, subD: 0.055, rev: 0.38, mechF: 3650, punch: 0.62, brass: true },
+  cz75:       { crackF: 4150, blastS: 7100, blastE: 630, blastD: 0.095, subG: 0.45, subD: 0.055, rev: 0.37, mechF: 3600, punch: 0.61 },
+  luger:      { crackF: 3950, blastS: 7200, blastE: 560, blastD: 0.125, subG: 0.56, subD: 0.07,  rev: 0.45, mechF: 3250, punch: 0.72, brass: true },
+  ragingbull: { crackF: 3450, blastS: 8400, blastE: 310, blastD: 0.29,  subG: 1.06, subD: 0.15,  rev: 0.86, mechF: 2300, punch: 1.10, post: 'hammer', brass: false }
 };
 
 class SoundEngine {
@@ -352,7 +406,8 @@ class SoundEngine {
     if (atten <= 0.045) return;
 
     if (WEAPONS[weaponId]?.isMelee) {
-      this.playKnifeSlash(atten, weaponId === 'karambit' || weaponId === 'katana');
+      const heavyBlade = ['katana', 'kukri', 'tomahawk', 'karambit'].includes(weaponId);
+      this.playKnifeSlash(atten, heavyBlade);
       return;
     }
 
@@ -488,27 +543,42 @@ class SoundEngine {
     osc.stop(now + dur + 0.01);
   }
 
-  playKnifeSlash(atten = 1, isKarambit = false) {
+  playKnifeSlash(atten = 1, isHeavyOrLong = false) {
     const ctx = this.ensureContext();
     if (!ctx) return;
     const now = ctx.currentTime;
+    // 1. Sharp directional air-slice whoosh (sweeps high -> low like real blade whip)
     const noise = ctx.createBufferSource();
     noise.buffer = this.whiteBuffer;
     const filter = ctx.createBiquadFilter();
     filter.type = 'bandpass';
-    filter.Q.value = 3.6;
-    filter.frequency.setValueAtTime(isKarambit ? 1350 : 920, now);
-    filter.frequency.exponentialRampToValueAtTime(isKarambit ? 4100 : 3200, now + 0.06);
-    filter.frequency.exponentialRampToValueAtTime(580, now + 0.15);
+    filter.Q.value = isHeavyOrLong ? 2.8 : 3.8;
+    filter.frequency.setValueAtTime(isHeavyOrLong ? 980 : 1450, now);
+    filter.frequency.exponentialRampToValueAtTime(isHeavyOrLong ? 3400 : 4800, now + 0.055);
+    filter.frequency.exponentialRampToValueAtTime(420, now + (isHeavyOrLong ? 0.22 : 0.15));
 
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.48 * atten, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+    g.gain.setValueAtTime(0.01, now);
+    g.gain.linearRampToValueAtTime((isHeavyOrLong ? 0.68 : 0.54) * atten, now + 0.035);
+    g.gain.exponentialRampToValueAtTime(0.001, now + (isHeavyOrLong ? 0.24 : 0.17));
     noise.connect(filter);
     filter.connect(g);
     g.connect(this.masterGain);
     noise.start(now);
-    noise.stop(now + 0.17);
+    noise.stop(now + (isHeavyOrLong ? 0.25 : 0.18));
+
+    // 2. Subtle forged-steel blade resonance whistle
+    const ring = ctx.createOscillator();
+    ring.type = 'triangle';
+    ring.frequency.setValueAtTime(isHeavyOrLong ? 2400 : 3200, now + 0.02);
+    ring.frequency.exponentialRampToValueAtTime(isHeavyOrLong ? 1150 : 1800, now + 0.14);
+    const rg = ctx.createGain();
+    rg.gain.setValueAtTime(0.08 * atten, now + 0.02);
+    rg.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    ring.connect(rg);
+    rg.connect(this.masterGain);
+    ring.start(now + 0.02);
+    ring.stop(now + 0.16);
   }
 
   playWeaponDraw(weaponId = 'ak47') {
@@ -534,9 +604,14 @@ class SoundEngine {
     setTimeout(() => this._playMechTick(2200, 0.025, 0.20), 65);
   }
 
+  playGrenadePinPull() {
+    this._playMechTick(3600, 0.032, 0.28);
+    setTimeout(() => this._playFoleySlide(2200, 4400, 0.07, 0.20, 3.8), 45);
+  }
+
   playGrenadeThrow() {
-    this._playMechTick(3100, 0.035, 0.26);
-    setTimeout(() => this.playKnifeSlash(0.55, false), 65);
+    this._playMechTick(2800, 0.03, 0.22);
+    setTimeout(() => this.playKnifeSlash(0.58, false), 35);
   }
 
   playBoltCycle() {
@@ -999,6 +1074,161 @@ class SoundEngine {
     }
     noise.start(now);
     noise.stop(now + 1.12);
+  }
+
+  /**
+   * Distinct real-world tactical grenade audio signatures:
+   * - frag: Concussive HE explosion
+   * - flash: Sharp M84 magnesium bang + piercing tinnitus ear-ringing!
+   * - smoke: Pressurized M18 canister pop + sustained gas hiss
+   * - ap: Electric Thermite EMP discharge + Kevlar/steel armor shatter
+   * - molotov: Glass bottle shatter + roaring flame ignition
+   */
+  playGrenadeDetonation(grenadeType = 'frag', distance = 0, blindIntensity = 0) {
+    if (grenadeType === 'frag') {
+      this.playExplosion(distance);
+      return;
+    }
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    const atten = distance <= 2 ? 1.0 : Math.max(0.14, 1 / (1 + distance * 0.045));
+    const now = ctx.currentTime;
+
+    if (grenadeType === 'flash') {
+      // Sharp magnesium percussive bang (very tight, high-energy transient)
+      const bang = ctx.createBufferSource();
+      bang.buffer = this.whiteBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(3400, now);
+      bp.frequency.exponentialRampToValueAtTime(520, now + 0.14);
+      bp.Q.value = 1.1;
+      const bg = ctx.createGain();
+      bg.gain.setValueAtTime(1.25 * atten, now);
+      bg.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+      bang.connect(bp); bp.connect(bg); bg.connect(this.shaper);
+      bang.start(now); bang.stop(now + 0.26);
+
+      // Tight chest thump
+      const thump = ctx.createOscillator();
+      thump.type = 'sine';
+      thump.frequency.setValueAtTime(185, now);
+      thump.frequency.exponentialRampToValueAtTime(52, now + 0.18);
+      const tg = ctx.createGain();
+      tg.gain.setValueAtTime(0.75 * atten, now);
+      tg.gain.exponentialRampToValueAtTime(0.001, now + 0.20);
+      thump.connect(tg); tg.connect(this.shaper);
+      thump.start(now); thump.stop(now + 0.22);
+
+      // Authentic FPS Flashbang Tinnitus Ear-Ringing when player is blinded!
+      if (blindIntensity > 0.12) {
+        const ringDur = 1.2 + blindIntensity * 2.6;
+        for (const freq of [3880, 4040]) {
+          const osc = ctx.createOscillator();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + 0.04);
+          osc.frequency.linearRampToValueAtTime(freq * 0.96, now + ringDur);
+          const rg = ctx.createGain();
+          rg.gain.setValueAtTime(0.001, now);
+          rg.gain.linearRampToValueAtTime(0.16 * blindIntensity, now + 0.08);
+          rg.gain.setValueAtTime(0.14 * blindIntensity, now + ringDur * 0.45);
+          rg.gain.exponentialRampToValueAtTime(0.0008, now + ringDur);
+          osc.connect(rg); rg.connect(this.masterGain);
+          osc.start(now); osc.stop(now + ringDur + 0.05);
+        }
+      }
+      return;
+    }
+
+    if (grenadeType === 'smoke') {
+      // Initial striker pop
+      this.playMetallicClick(2400, 0.04, 0.35 * atten);
+      // Sustained pressurized gas release hiss (2.3s)
+      const hiss = ctx.createBufferSource();
+      hiss.buffer = this.whiteBuffer;
+      hiss.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(1400, now);
+      bp.frequency.exponentialRampToValueAtTime(3600, now + 0.45);
+      bp.frequency.exponentialRampToValueAtTime(1850, now + 2.3);
+      bp.Q.value = 1.6;
+      const hg = ctx.createGain();
+      hg.gain.setValueAtTime(0.01, now);
+      hg.gain.linearRampToValueAtTime(0.42 * atten, now + 0.12);
+      hg.gain.setValueAtTime(0.36 * atten, now + 1.2);
+      hg.gain.exponentialRampToValueAtTime(0.001, now + 2.4);
+      hiss.connect(bp); bp.connect(hg); hg.connect(this.masterGain);
+      hiss.start(now); hiss.stop(now + 2.45);
+      return;
+    }
+
+    if (grenadeType === 'ap') {
+      // Thermite EMP Armor-Breaker: deep bass discharge sweep + crackling electric plasma + metallic armor shatter
+      const emp = ctx.createOscillator();
+      emp.type = 'sawtooth';
+      emp.frequency.setValueAtTime(340, now);
+      emp.frequency.exponentialRampToValueAtTime(38, now + 0.48);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(1800, now);
+      lp.frequency.exponentialRampToValueAtTime(140, now + 0.50);
+      const eg = ctx.createGain();
+      eg.gain.setValueAtTime(0.95 * atten, now);
+      eg.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
+      emp.connect(lp); lp.connect(eg); eg.connect(this.shaper);
+      emp.start(now); emp.stop(now + 0.55);
+
+      // Sharp electric shatter burst
+      const crack = ctx.createBufferSource();
+      crack.buffer = this.whiteBuffer;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.setValueAtTime(2200, now);
+      const cg = ctx.createGain();
+      cg.gain.setValueAtTime(0.85 * atten, now);
+      cg.gain.exponentialRampToValueAtTime(0.001, now + 0.34);
+      crack.connect(hp); hp.connect(cg); cg.connect(this.shaper);
+      crack.start(now); crack.stop(now + 0.36);
+
+      // Metallic armor plates shattering
+      for (let k = 0; k < 3; k++) {
+        setTimeout(() => this.playMetallicClick(2100 + k * 720, 0.055, 0.32 * atten), k * 38);
+      }
+      return;
+    }
+
+    if (grenadeType === 'molotov') {
+      // 1. Crystalline glass bottle shatter bursts
+      for (let k = 0; k < 5; k++) {
+        const osc = ctx.createOscillator();
+        osc.type = 'triangle';
+        const f = 3100 + Math.random() * 3400;
+        const t0 = now + k * 0.018;
+        osc.frequency.setValueAtTime(f, t0);
+        osc.frequency.exponentialRampToValueAtTime(f * 0.6, t0 + 0.05);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.24 * atten, t0);
+        g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.06);
+        osc.connect(g); g.connect(this.masterGain);
+        osc.start(t0); osc.stop(t0 + 0.07);
+      }
+      // 2. Fuel ignition whoosh + roaring flames
+      const flame = ctx.createBufferSource();
+      flame.buffer = this.brownBuffer;
+      flame.loop = true;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'bandpass';
+      lp.frequency.setValueAtTime(850, now);
+      lp.frequency.exponentialRampToValueAtTime(420, now + 1.8);
+      lp.Q.value = 0.7;
+      const fg = ctx.createGain();
+      fg.gain.setValueAtTime(0.95 * atten, now + 0.02);
+      fg.gain.exponentialRampToValueAtTime(0.28 * atten, now + 0.55);
+      fg.gain.exponentialRampToValueAtTime(0.001, now + 2.2);
+      flame.connect(lp); lp.connect(fg); fg.connect(this.shaper);
+      flame.start(now); flame.stop(now + 2.25);
+    }
   }
 
   playUiTone(freq = 640, dur = 0.07) {
