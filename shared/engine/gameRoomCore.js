@@ -7,6 +7,8 @@ import {
   GRENADE_ORDER,
   createDefaultGrenadeBelt,
   GAME_MODES,
+  resolveMapForMode,
+  resolveEffectiveModeConfig,
   OPERATORS,
   WEAPONS,
   RADIO_COMMANDS,
@@ -52,10 +54,14 @@ export class GameRoomCore {
     this.code = (options.code || generateRoomCode()).toUpperCase();
     this.id = options.id || `rm_${this.code}`;
     this.name = (options.name || `Phòng Chiến Thuật #${this.code}`).slice(0, 34);
-    this.mode = GAME_MODES[options.mode] ? options.mode : 'tdm';
-    this.modeConfig = GAME_MODES[this.mode];
-    const defaultMapId = this.mode === 'survival' && !options.mapId && MAPS.br_island ? 'br_island' : 'warehouse';
-    this.mapId = MAPS[options.mapId] ? options.mapId : defaultMapId;
+    const eff = resolveEffectiveModeConfig(options.mode || 'tdm', options.rankedSubMode || 'tdm');
+    this.selectedMode = eff.selectedMode;
+    this.rankedSubMode = eff.rankedSubMode;
+    this.isRanked = eff.isRanked;
+    this.mode = eff.effectiveMode;
+    this.modeConfig = eff.modeConfig;
+    const resolvedMapId = resolveMapForMode(this.selectedMode, options.mapId || null, this.rankedSubMode);
+    this.mapId = MAPS[resolvedMapId] ? resolvedMapId : 'warehouse';
     this.map = MAPS[this.mapId];
     this.maxPlayers = Math.min(50, Math.max(2, Number(options.maxPlayers) || this.modeConfig.maxPlayers));
     this.fillBots = options.fillBots !== undefined ? Boolean(options.fillBots) : true;
@@ -146,6 +152,8 @@ export class GameRoomCore {
       name: this.name,
       hostName: this.combatants.get(this.hostId)?.name || 'Hệ Thống',
       mode: this.mode,
+      selectedMode: this.selectedMode,
+      rankedSubMode: this.rankedSubMode,
       modeName: this.modeConfig.shortName,
       mapId: this.mapId,
       mapName: this.map.name,
@@ -518,15 +526,17 @@ export class GameRoomCore {
 
   updateRoomSettings(playerId, settings = {}) {
     if (playerId !== this.hostId || this.status !== 'waiting') return;
-    if (settings.mode && GAME_MODES[settings.mode]) {
-      this.mode = settings.mode;
-      this.modeConfig = GAME_MODES[this.mode];
+    if ((settings.mode && GAME_MODES[settings.mode]) || settings.rankedSubMode) {
+      const nextSelected = settings.mode && GAME_MODES[settings.mode] ? settings.mode : this.selectedMode;
+      const nextSub = settings.rankedSubMode || this.rankedSubMode || 'tdm';
+      const eff = resolveEffectiveModeConfig(nextSelected, nextSub);
+      this.selectedMode = eff.selectedMode;
+      this.rankedSubMode = eff.rankedSubMode;
+      this.isRanked = eff.isRanked;
+      this.mode = eff.effectiveMode;
+      this.modeConfig = eff.modeConfig;
       if (settings.maxPlayers === undefined) {
         this.maxPlayers = Math.max(this.getHumanPlayers().length, this.modeConfig.maxPlayers);
-      }
-      if (!settings.mapId && this.mode === 'survival' && MAPS.br_island) {
-        this.mapId = 'br_island';
-        this.map = MAPS.br_island;
       }
       let idx = 0;
       for (const p of this.combatants.values()) {
@@ -534,8 +544,10 @@ export class GameRoomCore {
         idx++;
       }
     }
-    if (settings.mapId && MAPS[settings.mapId]) {
-      this.mapId = settings.mapId;
+    const desiredMap = settings.mapId || this.mapId;
+    const validMapId = resolveMapForMode(this.selectedMode, desiredMap, this.rankedSubMode);
+    if (MAPS[validMapId]) {
+      this.mapId = validMapId;
       this.map = MAPS[this.mapId];
     }
     if (settings.maxPlayers !== undefined) {
@@ -3286,6 +3298,9 @@ export class GameRoomCore {
       hostId: this.hostId,
       status: this.status,
       mode: this.mode,
+      selectedMode: this.selectedMode,
+      rankedSubMode: this.rankedSubMode,
+      isRanked: Boolean(this.modeConfig.isRanked),
       modeConfig: this.modeConfig,
       mapId: this.mapId,
       mapName: this.map.name,

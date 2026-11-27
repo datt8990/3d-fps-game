@@ -3406,3 +3406,52 @@ kbd {
   padding: 0 4px;
   font-size: 9.5px;
 }
+
+/* Ranked Sub-Mode Selector Bar inside Mode Selector Modal */
+.ranked-submode-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.ranked-sub-pill {
+  padding: 9px 11px;
+  text-align: left;
+  background: rgba(12, 18, 30, 0.92);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-left: 3px solid rgba(251, 191, 36, 0.45);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+  color: #e2e8f0;
+  cursor: pointer;
+}
+.ranked-sub-pill:hover {
+  border-color: rgba(251, 191, 36, 0.72);
+  background: rgba(251, 191, 36, 0.10);
+}
+.ranked-sub-pill.active {
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.24), rgba(15, 23, 42, 0.95));
+  border-color: var(--gold);
+  border-left: 4px solid var(--gold);
+  color: #ffffff;
+}
+.ranked-sub-pill .rsp-tag {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: var(--gold);
+}
+.ranked-sub-pill .rsp-name {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 800;
+  margin-top: 2px;
+}
+.ranked-sub-pill .rsp-desc {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+@media (max-width: 720px) {
+  .ranked-submode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

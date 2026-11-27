@@ -2,6 +2,7 @@
 // - Mode 1: Native WebSocket (/ws) on Local / Dedicated Node Server
 // - Mode 2: Serverless REST + WebRTC DataChannel P2P (PeerJS + GameRoomCore) on Vercel Cloud!
 import { GameRoomCore, generateRoomCode } from '/shared/engine/gameRoomCore.js';
+import { resolveMapForMode, resolveEffectiveModeConfig } from '/shared/constants.js';
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -428,35 +429,44 @@ export class NetworkClient {
         }
 
         const p2pMode = msg.mode || 'tdm';
-        const p2pMap = msg.mapId || (p2pMode === 'survival' ? 'br_island' : 'warehouse');
-        const p2pMax = p2pMode === 'survival' ? 50 : 10;
+        const p2pRankedSub = msg.rankedSubMode || null;
+        const p2pEff = resolveEffectiveModeConfig(p2pMode, p2pRankedSub);
+        const p2pMap = resolveMapForMode(p2pMode, msg.mapId || null, p2pRankedSub);
+        const p2pMax = p2pEff.effectiveMode === 'survival' ? 50 : (p2pEff.modeConfig?.maxPlayers || 10);
 
         // Check Serverless Matchmaking for an active human room first!
         const mm = await this.apiCall('/api/matchmaking/find', 'POST', {
           mode: p2pMode,
+          rankedSubMode: p2pRankedSub,
           mapId: p2pMap
         }).catch(() => ({ action: 'host_new' }));
 
         if (mm?.action === 'join' && mm.room?.code) {
           this.joinRemoteP2PRoom(mm.room.code, () => {
             this.createHostedP2PRoom({
-              name: p2pMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`,
+              name: p2pEff.isRanked
+                ? `${p2pEff.modeConfig.shortName} #${Math.floor(100 + Math.random() * 900)}`
+                : (p2pEff.effectiveMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`),
               mode: p2pMode,
+              rankedSubMode: p2pRankedSub,
               mapId: p2pMap,
               maxPlayers: p2pMax,
               fillBots: true,
-              botDifficulty: p2pMode === 'ranked' ? 'hard' : 'normal',
+              botDifficulty: p2pEff.isRanked ? 'hard' : 'normal',
               autoStart: true
             });
           });
         } else {
           this.createHostedP2PRoom({
-            name: p2pMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`,
+            name: p2pEff.isRanked
+              ? `${p2pEff.modeConfig.shortName} #${Math.floor(100 + Math.random() * 900)}`
+              : (p2pEff.effectiveMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`),
             mode: p2pMode,
+            rankedSubMode: p2pRankedSub,
             mapId: p2pMap,
             maxPlayers: p2pMax,
             fillBots: true,
-            botDifficulty: p2pMode === 'ranked' ? 'hard' : 'normal',
+            botDifficulty: p2pEff.isRanked ? 'hard' : 'normal',
             autoStart: true
           });
         }
@@ -724,7 +734,8 @@ export class NetworkClient {
         peerHostId,
         name: options.name || `Phòng của ${this.currentUser?.username || 'Chiến Binh'}`,
         mode: options.mode || 'tdm',
-        mapId: options.mapId || 'warehouse',
+        rankedSubMode: options.rankedSubMode || null,
+        mapId: options.mapId || null,
         maxPlayers: options.maxPlayers || 10,
         fillBots: options.fillBots !== false,
         botDifficulty: options.botDifficulty || 'normal',

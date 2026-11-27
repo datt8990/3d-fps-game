@@ -288,13 +288,15 @@ wss.on('connection', (ws) => {
         leaveCurrentRoom(client);
         matchmaker.removeClient(client.id, true);
         const mode = msg.mode || 'tdm';
+        const rankedSubMode = msg.rankedSubMode || null;
         const room = createRoom({
           name: msg.name || `Phòng của ${client.username}`,
           mode,
-          mapId: msg.mapId || (mode === 'survival' ? 'br_island' : 'warehouse'),
-          maxPlayers: msg.maxPlayers || (mode === 'survival' ? 50 : 10),
+          rankedSubMode,
+          mapId: msg.mapId || null,
+          maxPlayers: msg.maxPlayers || ((mode === 'survival' || rankedSubMode === 'survival') ? 50 : 10),
           fillBots: msg.fillBots !== false,
-          botDifficulty: msg.botDifficulty || 'normal',
+          botDifficulty: msg.botDifficulty || (mode === 'ranked' ? 'hard' : 'normal'),
           hostId: client.id
         });
         if (msg.initialPrimary && client.userId) {
@@ -343,7 +345,11 @@ wss.on('connection', (ws) => {
 
       case 'queue_join':
       case 'quick_match': {
-        matchmaker.enqueueClient(client, { mode: msg.mode || 'tdm', mapId: msg.mapId || null });
+        matchmaker.enqueueClient(client, {
+          mode: msg.mode || 'tdm',
+          rankedSubMode: msg.rankedSubMode || null,
+          mapId: msg.mapId || null
+        });
         break;
       }
 

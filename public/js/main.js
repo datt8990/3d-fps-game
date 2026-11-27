@@ -1,6 +1,10 @@
 // Master Application Bootstrap v2.0: Full Arsenal, Friends & Squad Invites, Room Codes & Dual-Transport (WS + Cloud P2P)
 import {
   GAME_MODES,
+  RANKED_SUBMODES,
+  getAllowedMapsForMode,
+  resolveMapForMode,
+  resolveEffectiveModeConfig,
   OPERATORS,
   OUTFITS,
   WEAPON_SUBCLASSES,
@@ -23,6 +27,7 @@ const state = {
   profileBackup: localStorage.getItem('bs_profile_backup') || '',
   activeTab: 'home',
   selectedQuickMode: 'tdm',
+  selectedRankedSubMode: 'tdm',
   selectedQuickMap: 'warehouse',
   selectedArmorySubclass: 'all',
   selectedArmoryWeapon: 'ak47',
@@ -375,12 +380,25 @@ function sync3DShowcase() {
   });
 }
 
+function populateMapsForMode(selectEl, mode, rankedSubMode = 'tdm', preferredMapId = null) {
+  if (!selectEl) return 'warehouse';
+  const allowedIds = getAllowedMapsForMode(mode, rankedSubMode);
+  const filtered = MAP_LIST.filter((m) => allowedIds.includes(m.id));
+  const list = filtered.length > 0 ? filtered : MAP_LIST;
+  const resolved = resolveMapForMode(mode, preferredMapId || selectEl.value, rankedSubMode);
+  selectEl.innerHTML = list.map((m) => `<option value="${m.id}">${m.name} — ${m.subtitle}</option>`).join('');
+  selectEl.value = resolved;
+  return resolved;
+}
+
 function populateStaticSelects() {
-  const mapSelectIds = ['quick-map-select', 'cr-map', 'room-edit-map'];
-  for (const id of mapSelectIds) {
+  const rankedSubOptions = RANKED_SUBMODES.map((r) => `<option value="${r.id}">Rank: ${r.name}</option>`).join('');
+  for (const id of ['ranked-tab-submode', 'cr-ranked-sub', 'room-edit-ranked']) {
     const sel = document.getElementById(id);
-    if (!sel) continue;
-    sel.innerHTML = MAP_LIST.map((m) => `<option value="${m.id}">${m.name} — ${m.subtitle}</option>`).join('');
+    if (sel) {
+      sel.innerHTML = rankedSubOptions;
+      sel.value = state.selectedRankedSubMode || 'tdm';
+    }
   }
 
   const modeSelectIds = ['cr-mode', 'room-edit-mode'];
@@ -392,6 +410,10 @@ function populateStaticSelects() {
       .map((m) => `<option value="${m.id}">${m.shortName} (${m.name})</option>`)
       .join('');
   }
+
+  populateMapsForMode(document.getElementById('quick-map-select'), state.selectedQuickMode, state.selectedRankedSubMode, state.selectedQuickMap);
+  populateMapsForMode(document.getElementById('cr-map'), document.getElementById('cr-mode')?.value || 'tdm', state.selectedRankedSubMode);
+  populateMapsForMode(document.getElementById('room-edit-map'), document.getElementById('room-edit-mode')?.value || 'tdm', state.selectedRankedSubMode);
 }
 
 // ============================================================================
@@ -440,8 +462,11 @@ function getModeSpecLine(m) {
 }
 
 function renderActiveModeTrigger() {
-  const mode = GAME_MODES[state.selectedQuickMode] || GAME_MODES.tdm;
-  const mapObj = MAP_LIST.find((x) => x.id === state.selectedQuickMap) || MAP_LIST[0];
+  const eff = resolveEffectiveModeConfig(state.selectedQuickMode, state.selectedRankedSubMode);
+  const mode = eff.modeConfig;
+  const validMap = resolveMapForMode(state.selectedQuickMode, state.selectedQuickMap, state.selectedRankedSubMode);
+  state.selectedQuickMap = validMap;
+  const mapObj = MAP_LIST.find((x) => x.id === validMap) || MAP_LIST[0];
   const trigger = document.getElementById('btn-open-mode-modal');
   const emblemEl = document.getElementById('active-mode-emblem');
   const tagEl = document.getElementById('active-mode-tag');
@@ -449,15 +474,16 @@ function renderActiveModeTrigger() {
   const subEl = document.getElementById('active-map-line');
   const summaryEl = document.getElementById('mode-modal-summary');
 
+  const iconKey = eff.isRanked ? 'ranked' : (mode.icon || 'tdm');
   if (trigger) trigger.style.setProperty('--mode-accent', mode.accent || '#ff4d1c');
-  if (emblemEl) emblemEl.innerHTML = MODE_SVG[mode.icon] || MODE_SVG.tdm;
+  if (emblemEl) emblemEl.innerHTML = MODE_SVG[iconKey] || MODE_SVG.tdm;
   if (tagEl) tagEl.textContent = mode.tag || mode.shortName;
   if (nameEl) nameEl.textContent = mode.name.toUpperCase();
   if (subEl) subEl.textContent = `${mapObj?.name || 'Nhà Kho'} • ${getModeSpecLine(mode)}`;
 
   if (summaryEl) {
     summaryEl.innerHTML = `
-      <span class="mms-badge" style="border-color:${mode.accent || '#ff4d1c'};color:${mode.accent || '#ff4d1c'};">${mode.tag || mode.shortName}</span>
+      <span class="mms-badge" style="border-color:${mode.accent || '#ff4d1c'};color:${mode.accent || '#ff4d1c'};">${escapeHtml(mode.tag || mode.shortName)}</span>
       <strong>${escapeHtml(mode.name)}</strong>
       <span class="muted">•</span>
       <span style="color:var(--cyan);font-weight:700;">${escapeHtml(mapObj?.name || 'Nhà Kho')}</span>
@@ -465,24 +491,68 @@ function renderActiveModeTrigger() {
   }
 }
 
+function renderRankedSubModeBar() {
+  const section = document.getElementById('ranked-submode-section');
+  const pillsWrap = document.getElementById('ranked-submode-pills');
+  if (!section || !pillsWrap) return;
+  const isRanked = state.selectedQuickMode === 'ranked';
+  section.classList.toggle('hidden', !isRanked);
+  if (!isRanked) return;
+
+  pillsWrap.innerHTML = RANKED_SUBMODES.map((sub) => {
+    const active = state.selectedRankedSubMode === sub.id;
+    return `
+      <button type="button" class="ranked-sub-pill ${active ? 'active' : ''}" data-rsub="${sub.id}">
+        <div class="rsp-tag">${escapeHtml(sub.tag)}</div>
+        <div class="rsp-name">${escapeHtml(sub.name)}</div>
+        <div class="rsp-desc">${escapeHtml(sub.desc)}</div>
+      </button>
+    `;
+  }).join('');
+
+  pillsWrap.querySelectorAll('.ranked-sub-pill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.selectedRankedSubMode = btn.dataset.rsub;
+      const tabSel = document.getElementById('ranked-tab-submode');
+      if (tabSel) tabSel.value = state.selectedRankedSubMode;
+      state.selectedQuickMap = populateMapsForMode(
+        document.getElementById('quick-map-select'),
+        'ranked',
+        state.selectedRankedSubMode,
+        state.selectedQuickMap
+      );
+      soundEngine.playUiTone(840, 0.05);
+      renderQuickModes();
+    });
+  });
+}
+
 function renderModeMapCards() {
   const container = document.getElementById('mode-map-cards');
   const hintEl = document.getElementById('mode-map-hint');
   if (!container) return;
-  const isSurvival = state.selectedQuickMode === 'survival';
+
+  const allowedIds = getAllowedMapsForMode(state.selectedQuickMode, state.selectedRankedSubMode);
+  const compatibleMaps = MAP_LIST.filter((m) => allowedIds.includes(m.id));
+  state.selectedQuickMap = populateMapsForMode(
+    document.getElementById('quick-map-select'),
+    state.selectedQuickMode,
+    state.selectedRankedSubMode,
+    state.selectedQuickMap
+  );
+
+  const eff = resolveEffectiveModeConfig(state.selectedQuickMode, state.selectedRankedSubMode);
   if (hintEl) {
-    hintEl.textContent = isSurvival
-      ? 'Chế độ Sinh Tồn 50 Người triển khai trên bản đồ mở Đảo Sinh Tồn 1.5km'
-      : 'Chọn bản đồ chiến thuật 3D (hoặc chọn Đảo Sinh Tồn để chuyển sang BR 50)';
+    hintEl.textContent = eff.effectiveMode === 'survival'
+      ? 'Bản đồ tương thích: Đảo Sinh Tồn 1.5km×1.5km (50 Người nhảy dù C-130)'
+      : `Hiển thị ${compatibleMaps.length} bản đồ chiến thuật 3D tương thích với chế độ ${eff.modeConfig.shortName}`;
   }
 
-  container.innerHTML = MAP_LIST.map((m, idx) => {
+  container.innerHTML = compatibleMaps.map((m, idx) => {
     const meta = MAP_VISUAL_META[m.id] || MAP_VISUAL_META.warehouse;
     const selected = state.selectedQuickMap === m.id;
-    const isBrMap = m.id === 'br_island';
-    const dimMismatch = isSurvival && !isBrMap;
     return `
-      <button type="button" class="map-tile ${selected ? 'selected' : ''} ${dimMismatch ? 'dimmed' : ''}" data-map="${m.id}" style="--map-accent:${meta.accent};--stagger:${idx};">
+      <button type="button" class="map-tile ${selected ? 'selected' : ''}" data-map="${m.id}" style="--map-accent:${meta.accent};--stagger:${idx};">
         <div class="map-tile-art">${meta.svg}</div>
         <div class="map-tile-info">
           <div class="map-tile-head">
@@ -502,13 +572,9 @@ function renderModeMapCards() {
       state.selectedQuickMap = mapId;
       const mapSelect = document.getElementById('quick-map-select');
       if (mapSelect) mapSelect.value = mapId;
-      if (mapId === 'br_island' && state.selectedQuickMode !== 'survival') {
-        state.selectedQuickMode = 'survival';
-      } else if (mapId !== 'br_island' && state.selectedQuickMode === 'survival') {
-        state.selectedQuickMode = 'tdm';
-      }
       soundEngine.playUiTone(820, 0.05);
-      renderQuickModes();
+      renderModeMapCards();
+      renderActiveModeTrigger();
     });
   });
 }
@@ -533,7 +599,7 @@ function renderQuickModes() {
               <div class="mode-tile-title">${escapeHtml(m.name)}</div>
               <div class="mode-tile-short">${escapeHtml(m.shortName)}</div>
               <div class="mode-tile-desc">${escapeHtml(m.description)}</div>
-              <div class="mode-tile-spec">${escapeHtml(getModeSpecLine(m))}</div>
+              <div class="mode-tile-spec">${escapeHtml(m.id === 'ranked' ? '4 Thể thức: 5v5 / C4 / Solo / BR' : getModeSpecLine(m))}</div>
             </div>
           </button>
         `;
@@ -542,19 +608,18 @@ function renderQuickModes() {
     container.querySelectorAll('.mode-tile').forEach((card) => {
       card.addEventListener('click', () => {
         state.selectedQuickMode = card.dataset.mode;
-        const mapSelect = document.getElementById('quick-map-select');
-        if (card.dataset.mode === 'survival') {
-          state.selectedQuickMap = 'br_island';
-          if (mapSelect) mapSelect.value = 'br_island';
-        } else if (state.selectedQuickMap === 'br_island') {
-          state.selectedQuickMap = 'warehouse';
-          if (mapSelect) mapSelect.value = 'warehouse';
-        }
+        state.selectedQuickMap = populateMapsForMode(
+          document.getElementById('quick-map-select'),
+          state.selectedQuickMode,
+          state.selectedRankedSubMode,
+          state.selectedQuickMap
+        );
         soundEngine.playUiTone(740, 0.05);
         renderQuickModes();
       });
     });
   }
+  renderRankedSubModeBar();
   renderModeMapCards();
   renderActiveModeTrigger();
 }
@@ -1588,14 +1653,23 @@ function renderWaitingRoom(room) {
   const isHost = room.hostId === net.clientId;
   const modeSel = document.getElementById('room-edit-mode');
   const mapSel = document.getElementById('room-edit-map');
+  const rankedWrap = document.getElementById('room-edit-ranked-wrap');
+  const rankedSel = document.getElementById('room-edit-ranked');
   const maxSel = document.getElementById('room-edit-max');
   const diffSel = document.getElementById('room-edit-botdiff');
   const fillChk = document.getElementById('room-edit-fillbots');
   const startBtn = document.getElementById('btn-start-match');
   const switchTeamBtn = document.getElementById('btn-switch-team');
 
-  if (modeSel) { modeSel.value = room.mode; modeSel.disabled = !isHost; }
-  if (mapSel) { mapSel.value = room.mapId; mapSel.disabled = !isHost; }
+  const displayMode = room.selectedMode || (room.isRanked ? 'ranked' : room.mode);
+  const displaySub = room.rankedSubMode || (room.isRanked ? room.mode : 'tdm');
+  if (modeSel) { modeSel.value = displayMode; modeSel.disabled = !isHost; }
+  if (rankedWrap) rankedWrap.classList.toggle('hidden', displayMode !== 'ranked');
+  if (rankedSel) { rankedSel.value = displaySub; rankedSel.disabled = !isHost; }
+  if (mapSel) {
+    populateMapsForMode(mapSel, displayMode, displaySub, room.mapId);
+    mapSel.disabled = !isHost;
+  }
   if (maxSel) { maxSel.value = String(room.maxPlayers || 10); maxSel.disabled = !isHost; }
   if (diffSel) { diffSel.value = room.botDifficulty; diffSel.disabled = !isHost; }
   if (fillChk) { fillChk.checked = room.fillBots; fillChk.disabled = !isHost; }
@@ -2194,7 +2268,8 @@ function bindUIEvents() {
     net.send({
       type: 'queue_join',
       mode: state.selectedQuickMode,
-      mapId: state.selectedQuickMap
+      rankedSubMode: state.selectedQuickMode === 'ranked' ? state.selectedRankedSubMode : null,
+      mapId: resolveMapForMode(state.selectedQuickMode, state.selectedQuickMap, state.selectedRankedSubMode)
     });
   });
   document.getElementById('mode-selector-modal')?.addEventListener('click', (e) => {
@@ -2230,7 +2305,8 @@ function bindUIEvents() {
     net.send({
       type: 'queue_join',
       mode: state.selectedQuickMode,
-      mapId: state.selectedQuickMap
+      rankedSubMode: state.selectedQuickMode === 'ranked' ? state.selectedRankedSubMode : null,
+      mapId: resolveMapForMode(state.selectedQuickMode, state.selectedQuickMap, state.selectedRankedSubMode)
     });
   });
   document.getElementById('btn-queue-force-start')?.addEventListener('click', () => {
@@ -2266,15 +2342,28 @@ function bindUIEvents() {
     net.send({ type: 'quick_match', mode: 'practice', mapId: 'warehouse' });
   });
   document.getElementById('btn-go-rooms')?.addEventListener('click', () => switchTab('rooms'));
+  document.getElementById('ranked-tab-submode')?.addEventListener('change', (e) => {
+    state.selectedRankedSubMode = e.target.value;
+    if (state.selectedQuickMode === 'ranked') renderQuickModes();
+  });
   document.getElementById('btn-queue-ranked')?.addEventListener('click', () => {
     soundEngine.ensureContext();
-    net.send({ type: 'queue_join', mode: 'ranked', mapId: 'urban_city' });
+    const rSub = document.getElementById('ranked-tab-submode')?.value || state.selectedRankedSubMode || 'tdm';
+    state.selectedRankedSubMode = rSub;
+    const preferredMap = rSub === 'survival' ? 'br_island' : 'urban_city';
+    net.send({
+      type: 'queue_join',
+      mode: 'ranked',
+      rankedSubMode: rSub,
+      mapId: resolveMapForMode('ranked', preferredMap, rSub)
+    });
   });
 
   const quickCreatePresetRoom = (presetType) => {
     soundEngine.ensureContext();
     const hostName = state.user?.username || 'Chiến Binh';
-    const mapId = state.selectedQuickMap || 'warehouse';
+    const modeForPreset = presetType === 'solo' ? 'ffa' : 'tdm';
+    const mapId = resolveMapForMode(modeForPreset, state.selectedQuickMap);
     if (presetType === 'solo') {
       net.send({
         type: 'create_room',
@@ -2316,11 +2405,27 @@ function bindUIEvents() {
   document.getElementById('btn-refresh-rooms')?.addEventListener('click', () => {
     net.send({ type: 'list_rooms' });
   });
+  const syncCreateRoomModeMaps = () => {
+    const modeVal = document.getElementById('cr-mode')?.value || 'tdm';
+    const subWrap = document.getElementById('cr-ranked-sub-wrap');
+    const subSel = document.getElementById('cr-ranked-sub');
+    const rSub = subSel?.value || state.selectedRankedSubMode || 'tdm';
+    if (subWrap) subWrap.classList.toggle('hidden', modeVal !== 'ranked');
+    populateMapsForMode(document.getElementById('cr-map'), modeVal, rSub);
+    const maxEl = document.getElementById('cr-max');
+    if (maxEl && (modeVal === 'survival' || (modeVal === 'ranked' && rSub === 'survival'))) {
+      maxEl.value = '50';
+    } else if (maxEl && maxEl.value === '50') {
+      maxEl.value = '10';
+    }
+  };
+
   document.getElementById('btn-open-create-room')?.addEventListener('click', () => {
     const nameInput = document.getElementById('cr-name');
     if (nameInput && !nameInput.value) {
       nameInput.value = `Phòng của ${state.user?.username || 'Chiến Binh'}`;
     }
+    syncCreateRoomModeMaps();
     document.getElementById('create-room-modal')?.classList.remove('hidden');
   });
   document.querySelectorAll('.cr-preset-btn').forEach((btn) => {
@@ -2329,11 +2434,14 @@ function bindUIEvents() {
       const maxEl = document.getElementById('cr-max');
       const nameEl = document.getElementById('cr-name');
       const hostName = state.user?.username || 'Chiến Binh';
-      if (modeEl && btn.dataset.presetMode) modeEl.value = btn.dataset.presetMode;
-      if (maxEl && btn.dataset.presetMax) maxEl.value = btn.dataset.presetMax;
+      const pMode = btn.dataset.mode || btn.dataset.presetMode;
+      const pMax = btn.dataset.max || btn.dataset.presetMax;
+      if (modeEl && pMode) modeEl.value = pMode;
+      if (maxEl && pMax) maxEl.value = pMax;
       if (nameEl && btn.dataset.presetLabel) {
         nameEl.value = `[${btn.dataset.presetLabel}] Phòng của ${hostName}`;
       }
+      syncCreateRoomModeMaps();
     });
   });
   document.getElementById('btn-cancel-create-room')?.addEventListener('click', () => {
@@ -2342,11 +2450,14 @@ function bindUIEvents() {
   document.getElementById('create-room-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
     document.getElementById('create-room-modal')?.classList.add('hidden');
+    const crMode = document.getElementById('cr-mode').value;
+    const crSub = crMode === 'ranked' ? (document.getElementById('cr-ranked-sub')?.value || 'tdm') : null;
     net.send({
       type: 'create_room',
       name: document.getElementById('cr-name').value.trim(),
-      mode: document.getElementById('cr-mode').value,
-      mapId: document.getElementById('cr-map').value,
+      mode: crMode,
+      rankedSubMode: crSub,
+      mapId: resolveMapForMode(crMode, document.getElementById('cr-map').value, crSub),
       maxPlayers: Number(document.getElementById('cr-max').value),
       botDifficulty: document.getElementById('cr-botdiff').value,
       fillBots: document.getElementById('cr-fillbots').checked
@@ -2360,28 +2471,33 @@ function bindUIEvents() {
     soundEngine.ensureContext();
     net.send({ type: 'start_match' });
   });
-  document.getElementById('cr-mode')?.addEventListener('change', (e) => {
-    if (e.target.value === 'survival') {
-      const mEl = document.getElementById('cr-map');
-      const maxEl = document.getElementById('cr-max');
-      if (mEl) mEl.value = 'br_island';
-      if (maxEl) maxEl.value = '50';
-    }
-  });
+  document.getElementById('cr-mode')?.addEventListener('change', syncCreateRoomModeMaps);
+  document.getElementById('cr-ranked-sub')?.addEventListener('change', syncCreateRoomModeMaps);
 
-  ['room-edit-mode', 'room-edit-map', 'room-edit-max', 'room-edit-botdiff', 'room-edit-fillbots'].forEach((id) => {
+  ['room-edit-mode', 'room-edit-ranked', 'room-edit-map', 'room-edit-max', 'room-edit-botdiff', 'room-edit-fillbots'].forEach((id) => {
     document.getElementById(id)?.addEventListener('change', () => {
-      if (id === 'room-edit-mode' && document.getElementById('room-edit-mode').value === 'survival') {
-        const mEl = document.getElementById('room-edit-map');
-        const maxEl = document.getElementById('room-edit-max');
-        if (mEl) mEl.value = 'br_island';
+      const mVal = document.getElementById('room-edit-mode').value;
+      const rSub = mVal === 'ranked' ? (document.getElementById('room-edit-ranked')?.value || 'tdm') : null;
+      const rWrap = document.getElementById('room-edit-ranked-wrap');
+      if (rWrap) rWrap.classList.toggle('hidden', mVal !== 'ranked');
+
+      const mapEl = document.getElementById('room-edit-map');
+      const maxEl = document.getElementById('room-edit-max');
+      const validMap = (id === 'room-edit-mode' || id === 'room-edit-ranked')
+        ? populateMapsForMode(mapEl, mVal, rSub, mapEl?.value)
+        : resolveMapForMode(mVal, mapEl?.value, rSub);
+
+      if ((id === 'room-edit-mode' || id === 'room-edit-ranked') && (mVal === 'survival' || rSub === 'survival')) {
         if (maxEl) maxEl.value = '50';
+      } else if ((id === 'room-edit-mode' || id === 'room-edit-ranked') && maxEl && maxEl.value === '50') {
+        maxEl.value = '10';
       }
       net.send({
         type: 'update_room',
-        mode: document.getElementById('room-edit-mode').value,
-        mapId: document.getElementById('room-edit-map').value,
-        maxPlayers: Number(document.getElementById('room-edit-max')?.value || 10),
+        mode: mVal,
+        rankedSubMode: rSub,
+        mapId: validMap,
+        maxPlayers: Number(maxEl?.value || 10),
         botDifficulty: document.getElementById('room-edit-botdiff').value,
         fillBots: document.getElementById('room-edit-fillbots').checked
       });

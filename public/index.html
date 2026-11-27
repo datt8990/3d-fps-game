@@ -390,6 +390,10 @@
                   <select id="room-edit-map" class="tactical-select"></select>
                 </div>
               </div>
+              <div id="room-edit-ranked-wrap" class="hidden" style="margin-top:6px;">
+                <label class="field-label" style="color:var(--gold);">Thể thức Đấu Rank (Tính RP)</label>
+                <select id="room-edit-ranked" class="tactical-select"></select>
+              </div>
               <div class="two-col">
                 <div>
                   <label class="field-label">Quy mô phòng</label>
@@ -514,12 +518,15 @@
           <div class="panel-header-row">
             <div>
               <h2 class="section-title">BẢNG XẾP HẠNG HUYỀN THOẠI</h2>
-              <p class="muted">Thi đấu chế độ Đấu Rank 5v5 để tích lũy RP từ Đồng Đoàn tới Huyền Thoại</p>
+              <p class="muted">Chọn thể thức Đấu Rank (Đấu Đội, Đặt Bom C4, Solo, Sinh Tồn) để tích lũy RP tới Huyền Thoại</p>
             </div>
-            <button id="btn-queue-ranked" class="btn-primary pulse-glow">
-              <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-              ĐẤU RANK NGAY
-            </button>
+            <div class="row-gap">
+              <select id="ranked-tab-submode" class="tactical-select" style="width:190px;border-left-color:var(--gold);"></select>
+              <button id="btn-queue-ranked" class="btn-primary pulse-glow">
+                <svg class="ui-ico sm" aria-hidden="true" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                ĐẤU RANK NGAY
+              </button>
+            </div>
           </div>
           <div class="table-scroll">
             <table class="tactical-table">
@@ -560,6 +567,14 @@
           <span class="muted" style="font-size:11.5px;">Chọn thể thức tác chiến phù hợp</span>
         </div>
         <div id="quick-mode-list" class="mode-tiles-grid"></div>
+
+        <div id="ranked-submode-section" class="ranked-submode-box hidden">
+          <div class="mode-section-head" style="margin-top:14px;">
+            <span class="panel-tag" style="margin:0;color:var(--gold);">★ CHỌN THỂ THỨC ĐẤU RANK (TÍNH ĐIỂM RP)</span>
+            <span class="muted" style="font-size:11.5px;">Bản đồ 3D tự lọc tương ứng với thể thức Rank</span>
+          </div>
+          <div id="ranked-submode-pills" class="ranked-submode-grid"></div>
+        </div>
 
         <div class="mode-section-head" style="margin-top:16px;">
           <span class="panel-tag" style="margin:0;">02 / BẢN ĐỒ TRIỂN KHAI 3D</span>
@@ -629,6 +644,11 @@
 
         <label class="field-label">Chế Độ Chơi</label>
         <select id="cr-mode" class="tactical-select"></select>
+
+        <div id="cr-ranked-sub-wrap" class="hidden">
+          <label class="field-label" style="color:var(--gold);">Thể Thức Đấu Rank (Tính Điểm RP)</label>
+          <select id="cr-ranked-sub" class="tactical-select"></select>
+        </div>
 
         <label class="field-label">Bản Đồ Chiến Đấu 3D</label>
         <select id="cr-map" class="tactical-select"></select>

@@ -180,6 +180,16 @@ export function computeBackpackWeight(backpack) {
   return Math.round(w * 10) / 10;
 }
 
+export const ARENA_MAP_IDS = ['warehouse', 'military_base', 'urban_city', 'jungle'];
+export const BR_MAP_IDS = ['br_island'];
+
+export const RANKED_SUBMODES = [
+  { id: 'tdm', name: 'Đấu Đội 5v5', tag: 'RANK 5V5', desc: '5v5 Chạm 35 hạ gục • Tính điểm RP' },
+  { id: 'bomb', name: 'Đặt Bom C4 5v5', tag: 'RANK C4', desc: '5v5 Chạm 4 hiệp C4 • Tính điểm RP' },
+  { id: 'ffa', name: 'Solo Tự Do', tag: 'RANK FFA', desc: '8P Tự do chạm 20 hạ gục • Tính điểm RP' },
+  { id: 'survival', name: 'Sinh Tồn BR 50', tag: 'RANK BR', desc: 'Đảo 1.5km • 50 Người sống sót • Tính điểm RP' }
+];
+
 export const GAME_MODES = {
   tdm: {
     id: 'tdm',
@@ -194,6 +204,7 @@ export const GAME_MODES = {
     scoreLimit: 40,
     matchDurationSec: 300,
     respawnDelaySec: 3,
+    allowedMaps: ARENA_MAP_IDS,
     isRanked: false
   },
   ffa: {
@@ -209,6 +220,7 @@ export const GAME_MODES = {
     scoreLimit: 20,
     matchDurationSec: 240,
     respawnDelaySec: 2.5,
+    allowedMaps: ARENA_MAP_IDS,
     isRanked: false
   },
   bomb: {
@@ -229,6 +241,7 @@ export const GAME_MODES = {
     matchDurationSec: 900,
     respawnDelaySec: 0,
     roundBased: true,
+    allowedMaps: ARENA_MAP_IDS,
     isRanked: false
   },
   survival: {
@@ -247,21 +260,23 @@ export const GAME_MODES = {
     hasStorm: true,
     hasLoot: true,
     hasDropPlane: true,
+    allowedMaps: BR_MAP_IDS,
     isRanked: false
   },
   ranked: {
     id: 'ranked',
-    name: 'Đấu Rank 5v5',
-    shortName: 'Xếp Hạng 5v5',
+    name: 'Đấu Xếp Hạng (Rank)',
+    shortName: 'Đấu Rank RP',
     tag: 'RANKED RP',
     accent: '#f5c542',
     icon: 'ranked',
-    description: 'Thi đấu cạnh tranh tính điểm Rank (RP). Khẳng định đẳng cấp vươn tới Huyền Thoại.',
+    description: 'Thi đấu cạnh tranh tính điểm Rank (RP) theo nhiều thể thức (Đấu Đội, Đặt Bom C4, Solo, Sinh Tồn).',
     maxPlayers: 10,
     teamBased: true,
     scoreLimit: 35,
     matchDurationSec: 300,
     respawnDelaySec: 3.5,
+    allowedMaps: ARENA_MAP_IDS,
     isRanked: true
   },
   practice: {
@@ -277,10 +292,59 @@ export const GAME_MODES = {
     scoreLimit: 50,
     matchDurationSec: 600,
     respawnDelaySec: 1.5,
+    allowedMaps: ARENA_MAP_IDS,
     isPractice: true,
     isRanked: false
   }
 };
+
+export function getAllowedMapsForMode(mode = 'tdm', rankedSubMode = 'tdm') {
+  const effective = mode === 'ranked'
+    ? (RANKED_SUBMODES.some((r) => r.id === rankedSubMode) ? rankedSubMode : 'tdm')
+    : (GAME_MODES[mode] ? mode : 'tdm');
+  return GAME_MODES[effective]?.allowedMaps || ARENA_MAP_IDS;
+}
+
+export function resolveMapForMode(mode = 'tdm', requestedMapId = null, rankedSubMode = 'tdm') {
+  const allowed = getAllowedMapsForMode(mode, rankedSubMode);
+  if (requestedMapId && allowed.includes(requestedMapId)) return requestedMapId;
+  return allowed[0];
+}
+
+export function resolveEffectiveModeConfig(mode = 'tdm', rankedSubMode = 'tdm') {
+  const isRanked = mode === 'ranked';
+  const sub = isRanked
+    ? (RANKED_SUBMODES.some((r) => r.id === rankedSubMode) ? rankedSubMode : 'tdm')
+    : (GAME_MODES[mode] ? mode : 'tdm');
+  const base = GAME_MODES[sub] || GAME_MODES.tdm;
+  if (!isRanked) {
+    return {
+      selectedMode: sub,
+      rankedSubMode: null,
+      effectiveMode: sub,
+      isRanked: false,
+      modeConfig: base
+    };
+  }
+  const subMeta = RANKED_SUBMODES.find((r) => r.id === sub) || RANKED_SUBMODES[0];
+  return {
+    selectedMode: 'ranked',
+    rankedSubMode: sub,
+    effectiveMode: sub,
+    isRanked: true,
+    modeConfig: {
+      ...base,
+      id: sub,
+      name: `Đấu Rank — ${subMeta.name}`,
+      shortName: `Rank ${subMeta.name}`,
+      tag: subMeta.tag,
+      accent: '#f5c542',
+      scoreLimit: sub === 'tdm' ? 35 : base.scoreLimit,
+      respawnDelaySec: sub === 'tdm' ? 3.5 : base.respawnDelaySec,
+      isRanked: true
+    }
+  };
+}
 
 export const OPERATORS = {
   vanguard: {
