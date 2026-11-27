@@ -2662,6 +2662,13 @@ function bindUIEvents() {
       fpsClient.applySettings({ quality: e.target.value });
     });
   }
+  const camViewSel = document.getElementById('set-camera-view');
+  if (camViewSel) {
+    camViewSel.value = fpsClient.cameraView || 'fpp';
+    camViewSel.addEventListener('change', (e) => {
+      fpsClient.applySettings({ cameraView: e.target.value });
+    });
+  }
 
   // FPS Cap Selector
   const fpsBtns = document.querySelectorAll('#set-fps-group .fps-cap-btn');

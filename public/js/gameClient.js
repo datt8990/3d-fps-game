@@ -111,6 +111,9 @@ export class FPSGameClient {
     this.dropPlaneData = null;
     this.dropPlaneMesh = null;
     this.localChuteRig = null;
+    this.localTpRig = null;
+    this.cameraView = localStorage.getItem('bs_camera_view') === 'tpp' ? 'tpp' : 'fpp';
+    this.tppBlend = this.cameraView === 'tpp' ? 1 : 0;
 
     this.localId = null;
     this.localMeta = null;
@@ -230,9 +233,26 @@ export class FPSGameClient {
     this.renderer.setPixelRatio(effective);
   }
 
-  applySettings({ sensitivity, quality, volume, fpsCap }) {
+  applySettings({ sensitivity, quality, volume, fpsCap, cameraView }) {
     if (sensitivity !== undefined) {
       this.sensitivity = 0.0006 + Number(sensitivity) * 0.0032;
+    }
+    if (cameraView === 'fpp' || cameraView === 'tpp') {
+      this.cameraView = cameraView;
+      localStorage.setItem('bs_camera_view', cameraView);
+      const sel = document.getElementById('set-camera-view');
+      if (sel && sel.value !== cameraView) sel.value = cameraView;
+      if (this.active) {
+        if (cameraView === 'tpp') {
+          this.ensureLocalTpRig();
+        } else if (this.localTpRig) {
+          this.localTpRig.group.visible = false;
+        }
+        this.hud.showStatusAlert?.(
+          cameraView === 'tpp' ? 'GÓC NHÌN THỨ 3 (TPP • QUA VAI)' : 'GÓC NHÌN THỨ 1 (FPP • CHUẨN FPS)',
+          'armor'
+        );
+      }
     }
     if (quality) {
       this.quality = quality;
@@ -737,6 +757,10 @@ export class FPSGameClient {
       else if (e.code === 'KeyR') this.requestReload();
       else if (e.code === 'KeyG') this.requestThrowGrenade();
       else if (e.code === 'KeyX') this.cycleGrenadeType();
+      else if (e.code === 'KeyP') {
+        this.applySettings({ cameraView: this.cameraView === 'tpp' ? 'fpp' : 'tpp' });
+        soundEngine.playUiTone(860, 0.05);
+      }
       else if (e.code === 'Digit4') this.selectGrenadeType('frag');
       else if (e.code === 'Digit5') this.selectGrenadeType('flash');
       else if (e.code === 'Digit6') this.selectGrenadeType('smoke');
@@ -1115,6 +1139,14 @@ export class FPSGameClient {
     this.dropPlaneData = null;
     this.dropPlaneMesh = null;
     this.localChuteRig = null;
+    if (this.localTpRig) {
+      this.localTpRig.disposed = true;
+      if (this.localTpRig.group) this.scene.remove(this.localTpRig.group);
+      this.localTpRig = null;
+    }
+    this.localTpRig = null;
+    this.cameraView = localStorage.getItem('bs_camera_view') === 'tpp' ? 'tpp' : 'fpp';
+    this.tppBlend = this.cameraView === 'tpp' ? 1 : 0;
     this.cameraShake = 0;
     this.shellPool?.clear();
     this.vfx?.clear();
@@ -1206,6 +1238,34 @@ export class FPSGameClient {
     this.fpRig = createFirstPersonRig(weaponId, skinId, att, outfitId, operatorId);
     this.fpRig.position.set(0.22, -0.22, -0.38);
     this.camera.add(this.fpRig);
+
+    if (this.cameraView === 'tpp') {
+      this.ensureLocalTpRig();
+    }
+    if (this.localTpRig) {
+      swapRigWeapon(this.localTpRig, weaponId, this.localMeta?.skins || {}, this.localMeta?.attachments || {});
+    }
+  }
+
+  ensureLocalTpRig() {
+    if (this.localTpRig || !this.active) return this.localTpRig;
+    const wId = this.local.weaponId || this.local.meleeId || 'knife';
+    const rig = createOperatorRig({
+      operator: this.localMeta?.operator || 'vanguard',
+      outfit: this.localMeta?.outfit || 'urban',
+      team: this.localMeta?.team || 'alpha',
+      weaponId: wId,
+      skins: this.localMeta?.skins || {},
+      attachments: this.localMeta?.attachments || {},
+      name: '',
+      isAlly: true
+    });
+    if (rig.nameSprite) rig.nameSprite.visible = false;
+    setRigShadowCast(rig, this.renderer.shadowMap.enabled && this.quality === 'high');
+    rig.group.visible = false;
+    this.scene.add(rig.group);
+    this.localTpRig = rig;
+    return rig;
   }
 
   triggerDropAction(action) {
@@ -1477,6 +1537,7 @@ export class FPSGameClient {
 
     // Tactile weapon recoil VFX: Volumetric Muzzle Flash, 3D Shell Ejection, Smoke Wisp & Micro Screen Shake
     if (!st.isMelee && this.fpRig) {
+      if (this.localTpRig) this.localTpRig.recoilKick = 0.24;
       const gunObj = this.fpRig.userData.gun;
       gunObj?.userData?.glbController?.play('fire');
 
@@ -2691,14 +2752,88 @@ export class FPSGameClient {
     const shakeY = this.cameraShake > 0 ? (Math.random() - 0.5) * this.cameraShake : 0;
     const shakeZ = this.cameraShake > 0 ? (Math.random() - 0.5) * this.cameraShake * 0.7 : 0;
 
-    this.camera.position.set(this.local.x, this.local.y + this.local.eyeHeight + bobY, this.local.z);
-    this.camera.rotation.y = this.local.yaw + shakeY;
-    this.camera.rotation.x = Math.max(-1.52, Math.min(1.52, this.local.pitch + shakeX));
-    this.camera.rotation.z = shakeZ;
-
     const scopeFovs = wStats.scopeFovs || [24, 10];
-    const wantsAds = this.adsActive && !wStats.isMelee;
+    const wantsAds = this.adsActive && !wStats.isMelee && !this.grenadeMode.equipped;
     this.adsBlend += ((wantsAds ? 1 : 0) - this.adsBlend) * expSmooth(16, dt);
+
+    // Smooth Over-the-Shoulder Third-Person Perspective (TPP) with exact wall-collision clamping & seamless ADS zoom!
+    const wantsTpp = this.cameraView === 'tpp' && this.local.dropPhase === 'ground' && this.sniperZoomStage === 0;
+    const targetTpp = wantsTpp ? Math.max(0, 1 - this.adsBlend * 1.15) : 0;
+    this.tppBlend += (targetTpp - this.tppBlend) * expSmooth(14, dt);
+    if (this.tppBlend < 0.005) this.tppBlend = 0;
+
+    const eyeAnchorX = this.local.x;
+    const eyeAnchorY = this.local.y + this.local.eyeHeight + bobY;
+    const eyeAnchorZ = this.local.z;
+
+    if (this.tppBlend > 0.005) {
+      if (!this.localTpRig) this.ensureLocalTpRig();
+      const lookDir = directionFromAngles(this.local.yaw, this.local.pitch);
+      const rightX = Math.cos(this.local.yaw);
+      const rightZ = -Math.sin(this.local.yaw);
+      const backDist = 2.65 * this.tppBlend;
+      const shoulderRight = 0.50 * this.tppBlend;
+      const shoulderUp = 0.16 * this.tppBlend;
+
+      let ox = -lookDir.x * backDist + rightX * shoulderRight;
+      let oy = -lookDir.y * backDist + shoulderUp;
+      let oz = -lookDir.z * backDist + rightZ * shoulderRight;
+      const desiredDist = Math.hypot(ox, oy, oz);
+
+      if (desiredDist > 0.05 && this.mapData) {
+        const hit = raycastMap(
+          { x: eyeAnchorX, y: eyeAnchorY, z: eyeAnchorZ },
+          { x: ox / desiredDist, y: oy / desiredDist, z: oz / desiredDist },
+          desiredDist + 0.24,
+          this.mapData
+        );
+        if (hit && hit.dist < desiredDist + 0.24) {
+          const safeScale = Math.max(0.18, (hit.dist - 0.24) / desiredDist);
+          ox *= safeScale;
+          oy *= safeScale;
+          oz *= safeScale;
+        }
+      }
+
+      const camX = eyeAnchorX + ox;
+      const floorUnderCam = this.mapData?.terrain ? this.mapData.terrain.floorAt(camX, eyeAnchorZ + oz) : 0;
+      const camY = Math.max(floorUnderCam + 0.28, eyeAnchorY + oy);
+      const camZ = eyeAnchorZ + oz;
+
+      this.camera.position.set(camX, camY, camZ);
+      this.camera.rotation.y = this.local.yaw + shakeY;
+      this.camera.rotation.x = Math.max(-1.52, Math.min(1.52, this.local.pitch + shakeX));
+      this.camera.rotation.z = shakeZ;
+
+      if (this.localTpRig) {
+        const showTpBody = this.tppBlend > 0.22;
+        this.localTpRig.group.visible = showTpBody;
+        if (showTpBody) {
+          this.localTpRig.group.position.set(this.local.x, this.local.y, this.local.z);
+          this.localTpRig.group.rotation.y = this.local.yaw;
+          animateOperatorRig(
+            this.localTpRig,
+            {
+              dead: this.local.dead,
+              crouch: this.local.crouching,
+              sprint,
+              moveSpeed: horizSpeed,
+              pitch: this.local.pitch,
+              showNameplate: false,
+              lod: 0
+            },
+            dt,
+            now * 0.001
+          );
+        }
+      }
+    } else {
+      this.camera.position.set(eyeAnchorX, eyeAnchorY, eyeAnchorZ);
+      this.camera.rotation.y = this.local.yaw + shakeY;
+      this.camera.rotation.x = Math.max(-1.52, Math.min(1.52, this.local.pitch + shakeX));
+      this.camera.rotation.z = shakeZ;
+      if (this.localTpRig) this.localTpRig.group.visible = false;
+    }
 
     let targetFov = this.baseFov;
     if (this.sniperZoomStage === 1) targetFov = scopeFovs[0];
@@ -2716,6 +2851,7 @@ export class FPSGameClient {
     this.hud.updateCrosshair(spreadPx, this.sniperZoomStage > 0, wantsAds, wStats.opticId, this.adsBlend, zoomFactor);
 
     // Live Grenade Aiming, Power Charging & Real-Time 3D Parabolic Trajectory Arc
+    const hideFpForTpp = this.tppBlend > 0.30;
     if (this.grenadeMode.equipped) {
       if (this.local.dead || this.local.dropPhase !== 'ground') {
         this.exitGrenadeMode();
@@ -2726,7 +2862,7 @@ export class FPSGameClient {
           this.grenadeMode.power = Math.min(1.0, 0.36 + (heldSec / 0.90) * 0.64);
         }
         if (this.fpGrenadeRig) {
-          this.fpGrenadeRig.visible = true;
+          this.fpGrenadeRig.visible = !hideFpForTpp;
           const cFrac = this.grenadeMode.charging ? ((this.grenadeMode.power - 0.36) / 0.64) : 0;
           const uh = this.grenadeMode.underhand;
           const shake = this.grenadeMode.charging ? Math.sin(now * 0.045) * 0.004 * cFrac : 0;
@@ -2757,7 +2893,7 @@ export class FPSGameClient {
     if (this.fpRig) {
       const gunData = this.fpRig.userData.gun?.userData;
       const isAcogScoped = wantsAds && wStats.opticId === 'acog' && this.adsBlend > 0.62;
-      this.fpRig.visible = !this.grenadeMode.equipped && this.sniperZoomStage === 0 && !isAcogScoped;
+      this.fpRig.visible = !hideFpForTpp && !this.grenadeMode.equipped && this.sniperZoomStage === 0 && !isAcogScoped;
 
       if (this.fpRig.userData?.flashGroup) updateMuzzleFlash(this.fpRig.userData.flashGroup, dt);
       gunData?.glbController?.update(dt);
