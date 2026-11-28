@@ -491,6 +491,23 @@ export class FPSGameClient {
     }
   }
 
+  clearHeldInputs() {
+    this.keys = {};
+    this.mouseDownLeft = false;
+  }
+
+  getCanonicalWasdKey(e) {
+    const code = e.code;
+    if (code === 'KeyW' || code === 'KeyS' || code === 'KeyA' || code === 'KeyD') return code;
+    const key = (e.key || '').toLowerCase();
+    const kc = e.keyCode || 0;
+    if (kc === 87 || 'wưừứửữự'.includes(key) && key.length === 1) return 'KeyW';
+    if (kc === 83 || key === 's') return 'KeyS';
+    if (kc === 65 || ('aăắằẳẵặâấầẩẫậáàảãạ'.includes(key) && key.length === 1)) return 'KeyA';
+    if (kc === 68 || ('dđ'.includes(key) && key.length === 1)) return 'KeyD';
+    return null;
+  }
+
   bindInputEvents() {
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -510,11 +527,18 @@ export class FPSGameClient {
           document.activeElement.blur?.();
         }
         window.focus();
+      } else {
+        // Release held movement/fire keys if pointer lock drops (Esc, Alt+Tab, OS popup) so WASD never sticks
+        this.clearHeldInputs();
       }
       const lockHint = document.getElementById('hud-lock-prompt');
       if (lockHint && this.active) {
         lockHint.classList.toggle('hidden', this.pointerLocked || this.uiModalOpen);
       }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.clearHeldInputs();
     });
 
     this.canvas.addEventListener('mousedown', (e) => {
@@ -690,6 +714,7 @@ export class FPSGameClient {
         if (this.uiModalOpen) return;
         document.activeElement.blur?.();
       }
+      if (this.uiModalOpen) return;
 
       // Radio Quick Callout Menu [Z] + [1..6]
       if (e.code === 'KeyZ') {
@@ -707,14 +732,26 @@ export class FPSGameClient {
         return;
       }
 
-      // Record key and normalize WASD (supports QWERTY, Vietnamese Telex/IME with ư/đ, Arrow keys)
-      const code = e.code;
+      // Ignore Alt/Meta shortcuts (e.g. Alt+Tab) so OS combos never leave movement keys latched
+      if (e.altKey || e.metaKey) return;
+
+      // Record key cleanly using physical code + Vietnamese IME fallback
+      const code = e.code && e.code !== 'Unidentified' ? e.code : '';
       const key = (e.key || '').toLowerCase();
-      this.keys[code] = true;
-      if (code === 'KeyW' || key === 'w' || key === 'ư' || e.keyCode === 87) this.keys['KeyW'] = true;
-      if (code === 'KeyS' || key === 's' || e.keyCode === 83) this.keys['KeyS'] = true;
-      if (code === 'KeyA' || key === 'a' || e.keyCode === 65) this.keys['KeyA'] = true;
-      if (code === 'KeyD' || key === 'd' || key === 'đ' || e.keyCode === 68) this.keys['KeyD'] = true;
+      const wasdKey = this.getCanonicalWasdKey(e);
+
+      // Prevent browser shortcuts (Ctrl+A Select All, Ctrl+S Save, Ctrl+D Bookmark, Ctrl+R Reload, Space scroll) from stealing keyup!
+      if (
+        wasdKey ||
+        code === 'Space' ||
+        code === 'ArrowUp' || code === 'ArrowDown' || code === 'ArrowLeft' || code === 'ArrowRight' ||
+        (e.ctrlKey && (code === 'KeyR' || code === 'KeyF' || code === 'KeyE' || code === 'KeyQ'))
+      ) {
+        e.preventDefault();
+      }
+
+      if (code) this.keys[code] = true;
+      if (wasdKey) this.keys[wasdKey] = true;
 
       // PUBG Auto-Run Toggle [=] or [NumEqual]
       if (e.code === 'Equal' || e.code === 'NumpadEqual' || e.key === '=' || e.key === '+') {
@@ -785,21 +822,17 @@ export class FPSGameClient {
     });
 
     window.addEventListener('keyup', (e) => {
-      const code = e.code;
-      const key = (e.key || '').toLowerCase();
-      this.keys[code] = false;
-      if (code === 'KeyW' || key === 'w' || key === 'ư' || e.keyCode === 87) this.keys['KeyW'] = false;
-      if (code === 'KeyS' || key === 's' || e.keyCode === 83) this.keys['KeyS'] = false;
-      if (code === 'KeyA' || key === 'a' || e.keyCode === 65) this.keys['KeyA'] = false;
-      if (code === 'KeyD' || key === 'd' || key === 'đ' || e.keyCode === 68) this.keys['KeyD'] = false;
+      const code = e.code && e.code !== 'Unidentified' ? e.code : '';
+      if (code) this.keys[code] = false;
+      const wasdKey = this.getCanonicalWasdKey(e);
+      if (wasdKey) this.keys[wasdKey] = false;
       if (e.code === 'Tab') {
         this.hud.toggleScoreboard(false);
       }
-    });
+    }, { capture: true });
 
     window.addEventListener('blur', () => {
-      this.keys = {};
-      this.mouseDownLeft = false;
+      this.clearHeldInputs();
     });
   }
 
@@ -814,6 +847,7 @@ export class FPSGameClient {
     const wrap = document.getElementById('ingame-chat-form');
     const input = document.getElementById('ingame-chat-input');
     if (!wrap || !input) return;
+    this.clearHeldInputs();
     this.uiModalOpen = true;
     document.exitPointerLock?.();
     wrap.classList.remove('hidden');
@@ -825,6 +859,7 @@ export class FPSGameClient {
     const input = document.getElementById('ingame-chat-input');
     if (wrap) wrap.classList.add('hidden');
     if (input) input.blur();
+    this.clearHeldInputs();
     this.uiModalOpen = false;
     if (this.active) this.requestLock();
   }
@@ -835,6 +870,7 @@ export class FPSGameClient {
     const willOpen = forceState !== undefined ? forceState : modal.classList.contains('hidden');
     modal.classList.toggle('hidden', !willOpen);
     this.uiModalOpen = willOpen;
+    this.clearHeldInputs();
     if (willOpen) {
       document.exitPointerLock?.();
     } else if (this.active) {
@@ -854,6 +890,7 @@ export class FPSGameClient {
     }
     modal.classList.toggle('hidden', !willOpen);
     this.uiModalOpen = willOpen;
+    this.clearHeldInputs();
     if (willOpen) {
       this.refreshBackpackUI();
       document.exitPointerLock?.();
@@ -874,6 +911,7 @@ export class FPSGameClient {
     }
     modal.classList.toggle('hidden', !willOpen);
     this.uiModalOpen = willOpen;
+    this.clearHeldInputs();
     if (willOpen) {
       this.hud.drawBigMap?.(
         this.mapData,
@@ -2535,10 +2573,10 @@ export class FPSGameClient {
       return;
     }
 
-    const isFwd = Boolean(this.keys['KeyW'] || this.keys['ArrowUp'] || this.keys['w'] || this.keys['ư']);
-    const isBack = Boolean(this.keys['KeyS'] || this.keys['ArrowDown'] || this.keys['s']);
-    const isRight = Boolean(this.keys['KeyD'] || this.keys['ArrowRight'] || this.keys['d'] || this.keys['đ']);
-    const isLeft = Boolean(this.keys['KeyA'] || this.keys['ArrowLeft'] || this.keys['a']);
+    const isFwd = Boolean(this.keys['KeyW'] || this.keys['ArrowUp']);
+    const isBack = Boolean(this.keys['KeyS'] || this.keys['ArrowDown']);
+    const isRight = Boolean(this.keys['KeyD'] || this.keys['ArrowRight']);
+    const isLeft = Boolean(this.keys['KeyA'] || this.keys['ArrowLeft']);
 
     const keyForward = (isFwd ? 1 : 0) - (isBack ? 1 : 0);
     if (keyForward < 0 && this.autoRun) {

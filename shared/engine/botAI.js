@@ -163,7 +163,9 @@ function pickTacticalGoalWaypoint(bot, room, waypoints) {
   // In team modes, push toward midfield or enemy half / objectives rather than staying in own spawn
   const candidates = waypoints.filter((w) => {
     if (Math.hypot(w.x - bot.x, w.z - bot.z) < 8) return false;
-    if (room.modeConfig.teamBased) {
+    if (room.mode === 'survival' && room.storm) {
+      if (Math.hypot(w.x - room.storm.x, w.z - room.storm.z) > room.storm.radius * 0.88) return false;
+    } else if (room.modeConfig.teamBased) {
       if (bot.team === 'alpha') return w.z > -12; // Push South toward Mid & Bravo
       if (bot.team === 'bravo') return w.z < 12;  // Push North toward Mid & Alpha
     }
@@ -211,28 +213,52 @@ export function updateBotAI(bot, room, dt, now) {
     interact: false
   };
 
-  // Battle Royale Plane Jump & Parachute Glide AI
+  // Battle Royale Plane Jump & Parachute Glide AI (Stratified island-wide scatter across ALL regions & compounds!)
   if (room.mode === 'survival' && bot.dropPhase && bot.dropPhase !== 'ground') {
     if (bot.dropPhase === 'plane') {
       if (!ai.jumpAt) {
         const dp = room.dropPlane;
-        const flightMs = dp ? Math.max(2500, dp.endAt - dp.startAt - 1200) : 7000;
-        const jumpFrac = Math.random();
-        ai.jumpAt = (dp?.startAt || now) + 500 + jumpFrac * flightMs;
-        // Aim at a named compound / loot spawn relatively close to where the plane will be when jumping!
-        const estX = dp ? (dp.startX + (dp.endX - dp.startX) * jumpFrac) : 0;
-        const estZ = dp ? (dp.startZ + (dp.endZ - dp.startZ) * jumpFrac) : 0;
-        const pool = (room.lootCrates && room.lootCrates.length) ? room.lootCrates : map.waypoints;
-        let pick = pool[Math.floor(Math.random() * pool.length)] || { x: estX, z: estZ };
-        let bestClose = Infinity;
-        for (let k = 0; k < Math.min(18, pool.length); k++) {
-          const cand = pool[Math.floor(Math.random() * pool.length)];
-          if (!cand) continue;
-          const d = Math.hypot(cand.x - estX, cand.z - estZ);
-          if (d < bestClose) { bestClose = d; pick = cand; }
+        const flightMs = dp ? Math.max(2500, dp.endAt - dp.startAt - 1000) : 7000;
+        const botSeq = parseInt(String(bot.id || '').replace(/\D+/g, ''), 10) || Math.floor(Math.random() * 50);
+
+        // Build island-wide stratified zones: 10 Named POIs + outer structures + rural waypoints across 1.5km x 1.5km
+        const zones = [];
+        for (const np of map.namedPlaces || []) {
+          zones.push({ x: np.x, z: np.z, r: Math.max(45, (np.r || 65) * 0.82) });
         }
-        ai.dropTargetX = pick.x + (Math.random() - 0.5) * 18;
-        ai.dropTargetZ = pick.z + (Math.random() - 0.5) * 18;
+        for (let i = 0; i < (map.structures || []).length; i += 4) {
+          const st = map.structures[i];
+          if (st?.cx !== undefined && st?.cz !== undefined) {
+            zones.push({ x: st.cx, z: st.cz, r: 26 });
+          }
+        }
+        for (let i = 0; i < (map.waypoints || []).length; i += 3) {
+          const wp = map.waypoints[i];
+          if (wp) zones.push({ x: wp.x, z: wp.z, r: 42 });
+        }
+
+        const pickedZone = zones.length > 0
+          ? zones[(botSeq * 7 + Math.floor(Math.random() * 3)) % zones.length]
+          : { x: (Math.random() - 0.5) * 900, z: (Math.random() - 0.5) * 900, r: 60 };
+
+        const ang = ((botSeq * 2.39996) + Math.random() * 1.4) % (Math.PI * 2);
+        const rad = Math.sqrt(Math.random()) * pickedZone.r;
+        const maxBound = (map.bounds?.halfW || 750) - 65;
+        ai.dropTargetX = Math.max(-maxBound, Math.min(maxBound, pickedZone.x + Math.cos(ang) * rad));
+        ai.dropTargetZ = Math.max(-maxBound, Math.min(maxBound, pickedZone.z + Math.sin(ang) * rad));
+
+        // Jump at the closest point along the C-130 flight vector so the bot glides cleanly to its island-wide zone
+        let jumpFrac = Math.random();
+        if (dp) {
+          const fdx = dp.endX - dp.startX;
+          const fdz = dp.endZ - dp.startZ;
+          const lenSq = fdx * fdx + fdz * fdz;
+          if (lenSq > 1) {
+            const proj = ((ai.dropTargetX - dp.startX) * fdx + (ai.dropTargetZ - dp.startZ) * fdz) / lenSq;
+            jumpFrac = Math.max(0.05, Math.min(0.95, proj + (Math.random() - 0.5) * 0.12));
+          }
+        }
+        ai.jumpAt = (dp?.startAt || now) + 400 + jumpFrac * flightMs;
       }
       if (now >= ai.jumpAt && room.handleDropAction) {
         room.handleDropAction(bot.id, 'jump');

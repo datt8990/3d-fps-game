@@ -1054,6 +1054,62 @@ export class GameRoomCore {
 
   pickSpawnPoint(player) {
     const spawns = this.map.spawns;
+    const terrain = this.map.terrain || null;
+    const living = this.getLivingCombatants().filter((p) => p.id !== player.id);
+
+    // Scatter AI bots cleanly across the entire map (except C4 Bomb round-starts where team sides matter)
+    if (player?.isBot && this.mode !== 'bomb') {
+      const pool = [];
+      const seen = new Set();
+      const addCand = (pt, yaw = 0) => {
+        if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.z)) return;
+        const key = `${Math.round(pt.x)}_${Math.round(pt.z)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const y = Number.isFinite(pt.y) ? pt.y : (terrain ? terrain.floorAt(pt.x, pt.z) : 0);
+        if (terrain && terrain.depthAt(pt.x, pt.z) > 0.6) return;
+        if (!canStandAt(pt.x, y, pt.z, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS + 0.12, this.map.blocks)) return;
+        pool.push({ x: pt.x, y, z: pt.z, yaw: pt.yaw ?? yaw });
+      };
+
+      for (const wp of this.map.waypoints || []) addCand(wp, Math.random() * Math.PI * 2);
+      for (const s of spawns.ffa || []) addCand(s);
+      for (const s of spawns.alpha || []) addCand(s);
+      for (const s of spawns.bravo || []) addCand(s);
+
+      if (pool.length > 0) {
+        const minEnemyGap = terrain ? 45 : 15;
+        const scored = [];
+        for (let i = 0; i < pool.length; i++) {
+          const c = pool[i];
+          let minAll = Infinity;
+          let minEnemy = Infinity;
+          for (let j = 0; j < living.length; j++) {
+            const o = living[j];
+            const d = Math.hypot(o.x - c.x, o.z - c.z);
+            if (d < minAll) minAll = d;
+            if ((!this.modeConfig.teamBased || o.team !== player.team) && d < minEnemy) {
+              minEnemy = d;
+            }
+          }
+          const teamBiasPenalty = (this.modeConfig.teamBased && this.mode !== 'survival')
+            ? ((player.team === 'alpha' && c.z > 14) || (player.team === 'bravo' && c.z < -14) ? -8 : 0)
+            : 0;
+          const tooCloseEnemy = minEnemy < minEnemyGap ? -1000 : 0;
+          scored.push({ c, score: minAll + teamBiasPenalty + tooCloseEnemy + Math.random() * 6 });
+        }
+        scored.sort((a, b) => b.score - a.score);
+        const topPick = scored[Math.floor(Math.random() * Math.min(4, scored.length))].c;
+        const jx = topPick.x + (Math.random() - 0.5) * 0.6;
+        const jz = topPick.z + (Math.random() - 0.5) * 0.6;
+        const jy = terrain ? terrain.floorAt(jx, jz) : topPick.y;
+        if (canStandAt(jx, jy, jz, PHYSICS.HEIGHT_STAND, PHYSICS.PLAYER_RADIUS + 0.1, this.map.blocks)) {
+          return { x: jx, y: jy, z: jz, yaw: topPick.yaw || Math.random() * Math.PI * 2 };
+        }
+        return topPick;
+      }
+    }
+
     let base;
     if (this.modeConfig.teamBased && (player.team === 'alpha' || player.team === 'bravo')) {
       const list = spawns[player.team] || spawns.alpha;
@@ -1067,8 +1123,7 @@ export class GameRoomCore {
       let bestMinDist = -1;
       for (const candidate of list) {
         let minDist = Infinity;
-        for (const other of this.getLivingCombatants()) {
-          if (other.id === player.id) continue;
+        for (const other of living) {
           const d = Math.hypot(other.x - candidate.x, other.z - candidate.z);
           if (d < minDist) minDist = d;
         }

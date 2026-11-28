@@ -666,14 +666,18 @@ function buildBrIslandMap() {
         }
       }
 
-      // Left & Right side walls with wide 3.0m jump-through window cutouts (0.80m sill .. 2.86m lintel = 2.06m gap)
+      // Left & Right side walls: West (-X) always has wide jump-through window; East (+X) has window on Floor 2 & solid stairwell wall on Floor 1 (prevents stair push-out)
       const sideSegD = (d - windowW) * 0.5;
       for (const xSide of [-1, 1]) {
         const wx = cx + xSide * (hw - t * 0.5);
-        blocks.push({ x: wx, y: y0, z: cz - (windowW * 0.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
-        blocks.push({ x: wx, y: y0, z: cz + (windowW * 0.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
-        blocks.push({ x: wx, y: y0, z: cz, w: t, h: sillH, d: windowW, mat: resolvedMat });
-        blocks.push({ x: wx, y: y0 + lintelY, z: cz, w: t, h: fh - lintelY, d: windowW, mat: resolvedMat });
+        if (fl === 0 && xSide === 1 && floors > 1) {
+          blocks.push({ x: wx, y: y0, z: cz, w: t, h: fh, d, mat: resolvedMat });
+        } else {
+          blocks.push({ x: wx, y: y0, z: cz - (windowW * 0.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
+          blocks.push({ x: wx, y: y0, z: cz + (windowW * 0.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
+          blocks.push({ x: wx, y: y0, z: cz, w: t, h: sillH, d: windowW, mat: resolvedMat });
+          blocks.push({ x: wx, y: y0 + lintelY, z: cz, w: t, h: fh - lintelY, d: windowW, mat: resolvedMat });
+        }
       }
 
       // Interior tactical cover crate/table
@@ -682,12 +686,18 @@ function buildBrIslandMap() {
       pushLoot(cx + hw * 0.1, y0, cz - hd * 0.25);
 
       if (fl === 0 && floors > 1) {
-        // Interior Staircase up to Floor 2 along East inner wall (leaves clear headroom!)
-        const stairX = cx + hw - 1.55;
-        blocks.push(...makeStairs(stairX, cz, 1.5, d - 3.6, fh, 'north', 'wood_plank', 11, y0));
-        // Floor 2 Deck split cleanly leaving the stairwell bay open on East side
-        const deckW = w - 2.6;
-        blocks.push({ x: cx - 1.3, y: y0 + fh - 0.22, z: cz, w: deckW, h: 0.22, d: d - 0.6, mat: 'wood_plank' });
+        // Interior Staircase flush against East solid wall (no wall gap) + full Floor 2 North landing (zero hole!)
+        const stairW = 1.70;
+        const stairX = cx + hw - t - stairW * 0.5; // flush with East inner wall
+        const runLen = Math.max(4.4, d - 4.2);
+        const stairZ = cz + 0.35;
+        blocks.push(...makeStairs(stairX, stairZ, stairW, runLen, fh, 'north', 'wood_plank', 11, y0));
+        // Main Floor 2 Deck flush against stairwell West edge (x = cx + hw - t - stairW)
+        const mainDeckW = w - (t + stairW + 0.3);
+        blocks.push({ x: cx - (t + stairW - 0.3) * 0.5, y: y0 + fh - 0.22, z: cz, w: mainDeckW, h: 0.22, d: d - 0.6, mat: 'wood_plank' });
+        // North Top Stairwell Landing connecting top step cleanly to Floor 2 & North wall
+        const landDepth = 2.15;
+        blocks.push({ x: stairX, y: y0 + fh - 0.22, z: cz - hd + 0.3 + landDepth * 0.5, w: stairW, h: 0.22, d: landDepth, mat: 'wood_plank' });
         // Walkable 2nd-Floor Front Balcony Deck (+Z) + jump-overable 0.80m railing collider
         const balW = Math.min(w - 2.2, 4.8);
         const balD = 1.45;

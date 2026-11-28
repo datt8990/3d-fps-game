@@ -309,21 +309,20 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
   // Enforce multi-block corner depenetration so nothing can ever clip through walls
   depenetratePlayerXZ(state, height, r, map);
 
-  // Move Y (floor + blocks, order-independent highest supporting surface)
+  // Move Y (blocks + terrain floor, order-independent highest supporting surface)
   let nextY = state.y + state.vy * clampedDt;
   state.onGround = false;
   const groundY = terrain ? terrain.floorAt(state.x, state.z) : 0;
   let bestFloorY = nextY <= groundY ? groundY : -Infinity;
-  if (
-    terrain && bestFloorY === -Infinity && wasOnGround && state.vy <= 0 &&
-    nextY - groundY <= 0.42 + Math.hypot(state.x - prevX, state.z - prevZ) * 1.05
-  ) {
-    bestFloorY = groundY;
-  }
+  let hasSupportingBlockUnder = false;
 
   for (let i = 0; i < blocks.length; i++) {
     const box = getBoxBounds(blocks[i]);
-    if (!overlapsXZ(state.x, state.z, r - 0.015, box)) continue;
+    if (!overlapsXZ(state.x, state.z, r, box)) continue;
+
+    if (terrain && box.maxY > groundY && box.maxY <= state.y + 0.12) {
+      hasSupportingBlockUnder = true;
+    }
 
     if (state.vy <= 0 && state.y >= box.maxY - 0.18 && nextY <= box.maxY + 0.005) {
       if (box.maxY > bestFloorY) {
@@ -333,6 +332,15 @@ export function stepPlayerPhysics(state, input, map, dt, weaponMoveMult = 1.0, o
       nextY = box.minY - height;
       state.vy = 0;
     }
+  }
+
+  // Only snap down to bare terrain slopes when NOT standing on a building floor/stair/platform
+  if (
+    terrain && bestFloorY === -Infinity && !hasSupportingBlockUnder && wasOnGround && state.vy <= 0 &&
+    state.y - groundY <= 0.55 &&
+    nextY - groundY <= 0.42 + Math.hypot(state.x - prevX, state.z - prevZ) * 1.05
+  ) {
+    bestFloorY = groundY;
   }
 
   if (bestFloorY > -Infinity) {
@@ -451,11 +459,22 @@ function resolveAxisX(prevX, nextX, state, height, r, blocks) {
 
     // Attempt step-up if obstacle top is within STEP_HEIGHT, OR smooth mid-air window/ledge vault when jumping
     const stepDiff = box.maxY - state.y;
-    const canStepGround = state.onGround && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT;
+    const canStepGround = (state.onGround || stepDiff <= 0.18) && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT;
     const canVaultAir = !state.onGround && state.vy > -3.5 && stepDiff > 0 && stepDiff <= 0.56;
     if ((canStepGround || canVaultAir) && canStandAt(nextX, box.maxY + 0.01, state.z, height, r, blocks)) {
       state.y = box.maxY + 0.01;
       if (canVaultAir) state.vy = Math.max(state.vy, 1.35);
+      continue;
+    }
+
+    // Never eject a player out the far side of a wide floor/stair slab they already overlap in XZ!
+    const alreadyInX = prevX + r > box.minX && prevX - r < box.maxX;
+    if (alreadyInX && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT + 0.08) {
+      if (canStandAt(prevX, box.maxY + 0.01, state.z, height, r, blocks)) {
+        state.y = box.maxY + 0.01;
+      }
+      nextX = prevX;
+      state.vx = 0;
       continue;
     }
 
@@ -479,11 +498,22 @@ function resolveAxisZ(prevZ, nextZ, state, height, r, blocks) {
     if (state.y >= box.maxY - 0.01 || state.y + height <= box.minY + 0.01) continue;
 
     const stepDiff = box.maxY - state.y;
-    const canStepGround = state.onGround && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT;
+    const canStepGround = (state.onGround || stepDiff <= 0.18) && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT;
     const canVaultAir = !state.onGround && state.vy > -3.5 && stepDiff > 0 && stepDiff <= 0.56;
     if ((canStepGround || canVaultAir) && canStandAt(state.x, box.maxY + 0.01, nextZ, height, r, blocks)) {
       state.y = box.maxY + 0.01;
       if (canVaultAir) state.vy = Math.max(state.vy, 1.35);
+      continue;
+    }
+
+    // Never eject a player out the far side of a wide floor/stair slab they already overlap in XZ!
+    const alreadyInZ = prevZ + r > box.minZ && prevZ - r < box.maxZ;
+    if (alreadyInZ && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT + 0.08) {
+      if (canStandAt(state.x, box.maxY + 0.01, prevZ, height, r, blocks)) {
+        state.y = box.maxY + 0.01;
+      }
+      nextZ = prevZ;
+      state.vz = 0;
       continue;
     }
 

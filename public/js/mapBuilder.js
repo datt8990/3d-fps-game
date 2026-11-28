@@ -1082,8 +1082,9 @@ function emitBrHouseDecor(col, s) {
   const halfWin = windowW * 0.5;
   for (let fl = 0; fl < floors; fl++) {
     const y0 = fy + fl * fh;
-    // Left & Right side windows (open y0+0.80..y0+2.86 = 2.06m clear vertical height!)
+    // Left & Right side windows (Floor-1 East behind staircase is solid masonry; Floor-1 West & Floor-2 both sides are open 2.06m windows)
     for (const xSide of [-1, 1]) {
+      if (fl === 0 && xSide === 1 && floors > 1) continue;
       const wx = cx + xSide * (hw - 0.22);
       const outX = cx + xSide * (hw + 0.05);
       // Molded projecting stone sill BELOW 0.80m opening
