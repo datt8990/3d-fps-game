@@ -61,6 +61,8 @@ export class NetworkClient {
     this.lastResyncRequestAt = 0;
     this.hostPruneTimer = null;
     this.guestHeartbeatTimer = null;
+    this.p2pQueueTimer = null;
+    this.p2pQueueState = null;
     this._unloadBeaconSent = false;
 
     if (typeof window !== 'undefined') {
@@ -441,35 +443,38 @@ export class NetworkClient {
           mapId: p2pMap
         }).catch(() => ({ action: 'host_new' }));
 
-        if (mm?.action === 'join' && mm.room?.code) {
-          this.joinRemoteP2PRoom(mm.room.code, () => {
-            this.createHostedP2PRoom({
-              name: p2pEff.isRanked
-                ? `${p2pEff.modeConfig.shortName} #${Math.floor(100 + Math.random() * 900)}`
-                : (p2pEff.effectiveMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`),
-              mode: p2pMode,
-              rankedSubMode: p2pRankedSub,
-              mapId: p2pMap,
-              maxPlayers: p2pMax,
-              fillBots: true,
-              botDifficulty: p2pEff.isRanked ? 'hard' : 'normal',
-              autoStart: true
-            });
-          });
-        } else {
+        const launchQueuedHost = () => {
           this.createHostedP2PRoom({
             name: p2pEff.isRanked
               ? `${p2pEff.modeConfig.shortName} #${Math.floor(100 + Math.random() * 900)}`
-              : (p2pEff.effectiveMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Chiến Trường #${Math.floor(100 + Math.random() * 900)}`),
+              : (p2pEff.effectiveMode === 'survival' ? `Sinh Tồn 50P #${Math.floor(100 + Math.random() * 900)}` : `Trận Ghép Người #${Math.floor(100 + Math.random() * 900)}`),
             mode: p2pMode,
             rankedSubMode: p2pRankedSub,
             mapId: p2pMap,
             maxPlayers: p2pMax,
             fillBots: true,
+            isMatchmaking: true,
             botDifficulty: p2pEff.isRanked ? 'hard' : 'normal',
-            autoStart: true
+            autoStart: false
           });
+          this.startP2PMatchmakingQueue(p2pMode, p2pRankedSub, p2pEff);
+        };
+
+        if (mm?.action === 'join' && mm.room?.code) {
+          this.joinRemoteP2PRoom(mm.room.code, launchQueuedHost);
+        } else {
+          launchQueuedHost();
         }
+        break;
+      }
+
+      case 'queue_force_start': {
+        this.finishP2PMatchmakingQueue();
+        break;
+      }
+
+      case 'queue_cancel': {
+        this.cancelP2PMatchmakingQueue(false);
         break;
       }
 
@@ -685,20 +690,27 @@ export class NetworkClient {
 
       this.relayClientIds.add(fromId);
       const wasWaiting = this.hostRoom.status === 'waiting';
-      const res = this.hostRoom.addHumanPlayer({
+      const joinOpts = {
         id: fromId,
         userId: msg.user?.id || null,
         username: msg.user?.username || 'Bạn_Chiến_Đấu',
         loadout: msg.user?.loadout || {},
         rp: msg.user?.rp || 1200
-      });
+      };
+      const res = !wasWaiting && this.hostRoom.getBots().length > 0
+        ? this.hostRoom.replaceBotWithHuman(joinOpts)
+        : this.hostRoom.addHumanPlayer(joinOpts);
       if (res.error) {
         this.enqueueHostRelay(fromId, { type: 'error_msg', text: res.error });
         this.relayClientIds.delete(fromId);
         return;
       }
       if (wasWaiting) {
-        this.enqueueHostRelay(fromId, { type: 'joined_room', room: this.hostRoom.getLobbyPayload() });
+        if (this.hostRoom.isMatchmaking && this.p2pQueueState) {
+          this.onP2PQueueHumanJoined(fromId);
+        } else {
+          this.enqueueHostRelay(fromId, { type: 'joined_room', room: this.hostRoom.getLobbyPayload() });
+        }
       }
       return;
     }
@@ -739,6 +751,7 @@ export class NetworkClient {
         maxPlayers: options.maxPlayers || 10,
         fillBots: options.fillBots !== false,
         botDifficulty: options.botDifficulty || 'normal',
+        isMatchmaking: Boolean(options.isMatchmaking),
         hostId: this.clientId
       },
       {
@@ -832,7 +845,9 @@ export class NetworkClient {
       rp: this.currentUser?.rp || 1200
     });
 
-    this.emit('joined_room', { room: this.hostRoom.getLobbyPayload() });
+    if (!options.isMatchmaking) {
+      this.emit('joined_room', { room: this.hostRoom.getLobbyPayload() });
+    }
     this.startPingLoop();
 
     // Start Cloud Room Relay + Direct WebRTC Signaling + Ghost-Player Reaper
@@ -864,6 +879,110 @@ export class NetworkClient {
 
     if (options.autoStart) {
       this.hostRoom.startMatch(this.clientId);
+    }
+  }
+
+  startP2PMatchmakingQueue(mode, rankedSubMode, eff) {
+    if (this.p2pQueueTimer) {
+      clearInterval(this.p2pQueueTimer);
+      this.p2pQueueTimer = null;
+    }
+    const now = Date.now();
+    this.p2pQueueState = {
+      mode,
+      rankedSubMode,
+      modeName: eff?.modeConfig?.shortName || mode,
+      expiresAt: now + 30000,
+      maxWaitSec: 30
+    };
+    this.broadcastP2PQueueStatus();
+    if (this.hostHeartbeatTimer) {
+      clearInterval(this.hostHeartbeatTimer);
+      this.hostHeartbeatTimer = setInterval(() => this.publishRoomHeartbeat(), 3000);
+    }
+    this.p2pQueueTimer = setInterval(() => {
+      if (!this.hostRoom || !this.p2pQueueState) {
+        clearInterval(this.p2pQueueTimer);
+        this.p2pQueueTimer = null;
+        return;
+      }
+      if (Date.now() >= this.p2pQueueState.expiresAt) {
+        this.finishP2PMatchmakingQueue();
+      } else {
+        this.broadcastP2PQueueStatus();
+      }
+    }, 1000);
+  }
+
+  broadcastP2PQueueStatus(targetId = null) {
+    if (!this.p2pQueueState || !this.hostRoom) return;
+    const searchingHumans = this.hostRoom.getHumanPlayers().length;
+    const waitLeftSec = Math.max(0, Math.ceil((this.p2pQueueState.expiresAt - Date.now()) / 1000));
+    const payload = {
+      type: 'queue_status',
+      mode: this.p2pQueueState.mode,
+      rankedSubMode: this.p2pQueueState.rankedSubMode,
+      modeName: this.p2pQueueState.modeName,
+      searchingHumans,
+      waitLeftSec,
+      maxWaitSec: this.p2pQueueState.maxWaitSec
+    };
+    if (targetId && targetId !== this.clientId) {
+      this.hostRoom.sendTo(targetId, payload);
+      return;
+    }
+    this.emit('queue_status', payload);
+    for (const hp of this.hostRoom.getHumanPlayers()) {
+      if (hp.id !== this.clientId) {
+        this.hostRoom.sendTo(hp.id, payload);
+      }
+    }
+  }
+
+  onP2PQueueHumanJoined(guestId) {
+    if (!this.p2pQueueState || !this.hostRoom) return;
+    const humans = this.hostRoom.getHumanPlayers().length;
+    const fastLaunchThreshold = this.hostRoom.mode === 'survival' ? 10 : Math.min(6, this.hostRoom.maxPlayers || 6);
+    if (humans >= fastLaunchThreshold) {
+      this.finishP2PMatchmakingQueue();
+      return;
+    }
+    if (humans >= 2) {
+      this.p2pQueueState.expiresAt = Math.min(this.p2pQueueState.expiresAt, Date.now() + 5000);
+    }
+    this.broadcastP2PQueueStatus(guestId);
+    this.broadcastP2PQueueStatus();
+  }
+
+  finishP2PMatchmakingQueue() {
+    if (this.p2pQueueTimer) {
+      clearInterval(this.p2pQueueTimer);
+      this.p2pQueueTimer = null;
+    }
+    const wasQueue = Boolean(this.p2pQueueState);
+    this.p2pQueueState = null;
+    if (this.hostRoom && this.hostRoom.status === 'waiting') {
+      if (this.hostHeartbeatTimer) {
+        clearInterval(this.hostHeartbeatTimer);
+        this.hostHeartbeatTimer = setInterval(() => this.publishRoomHeartbeat(), 7000);
+      }
+      this.hostRoom.startMatch(this.clientId);
+      this.publishRoomHeartbeat();
+    } else if (wasQueue && this.relayRoomCode) {
+      this.sendToRemoteHost({ type: 'queue_force_start' });
+    }
+  }
+
+  async cancelP2PMatchmakingQueue(silent = false) {
+    if (this.p2pQueueTimer) {
+      clearInterval(this.p2pQueueTimer);
+      this.p2pQueueTimer = null;
+    }
+    const mode = this.p2pQueueState?.mode || 'tdm';
+    this.p2pQueueState = null;
+    await this.cleanupP2PSession();
+    if (!silent) {
+      this.emit('queue_cancelled', { mode });
     }
   }
 
@@ -901,7 +1020,11 @@ export class NetworkClient {
           return;
         }
         if (wasWaiting) {
-          conn.send({ type: 'joined_room', room: this.hostRoom.getLobbyPayload() });
+          if (this.hostRoom.isMatchmaking && this.p2pQueueState) {
+            this.onP2PQueueHumanJoined(remotePlayerId);
+          } else {
+            conn.send({ type: 'joined_room', room: this.hostRoom.getLobbyPayload() });
+          }
         }
         return;
       }
@@ -945,6 +1068,7 @@ export class NetworkClient {
       case 'switch_team': this.hostRoom.switchPlayerTeam(playerId); break;
       case 'update_room': this.hostRoom.updateRoomSettings(playerId, msg); break;
       case 'start_match': this.hostRoom.startMatch(playerId); break;
+      case 'queue_force_start': if (this.p2pQueueState) this.finishP2PMatchmakingQueue(); break;
       case 'resync_match': this.hostRoom.resyncPlayerToMatch(playerId); break;
       case 'room_chat': this.hostRoom.addChatMessage(playerId, msg.text, msg.scope); break;
       case 'radio': this.hostRoom.handleRadioCommand(playerId, msg.key); break;
@@ -1284,6 +1408,11 @@ export class NetworkClient {
     this.relayConsecutiveErrors = 0;
     this.lastMatchStartedKey = null;
     this.rtcChunkBuffers.clear();
+    if (this.p2pQueueTimer) {
+      clearInterval(this.p2pQueueTimer);
+      this.p2pQueueTimer = null;
+    }
+    this.p2pQueueState = null;
     if (this._joinGuardTimer) {
       clearTimeout(this._joinGuardTimer);
       this._joinGuardTimer = null;

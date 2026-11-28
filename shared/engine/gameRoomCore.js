@@ -923,7 +923,7 @@ export class GameRoomCore {
 
     const lootPoints = [...(this.map.lootSpawns || [])];
     let tries = 0;
-    while (lootPoints.length < 40 && tries < 240) {
+    while (lootPoints.length < 90 && tries < 280) {
       tries++;
       const rx = (Math.random() * 2 - 1) * (hw - 8);
       const rz = (Math.random() * 2 - 1) * (hd - 8);
@@ -936,29 +936,37 @@ export class GameRoomCore {
     const primaryPool = Object.values(WEAPONS).filter((w) => w.category === 'primary');
     const secondaryPool = Object.values(WEAPONS).filter((w) => w.category === 'secondary');
     const ammoKeys = Object.keys(BR_AMMO_TYPES);
-    const medKeys = ['bandage', 'firstaid', 'bandage', 'energy', 'medkit'];
+    const medKeys = ['firstaid', 'bandage', 'energy', 'firstaid', 'medkit', 'energy'];
 
+    // Balanced rich PUBG-style loot clusters across all 10 POIs (weapons + ammo, meds, vests, helmets, bags, grenades)
     this.lootCrates = [];
     for (let idx = 0; idx < lootPoints.length; idx++) {
       const sp = lootPoints[idx];
       const baseY = sp.y ?? (this.map.terrain ? this.map.terrain.floorAt(sp.x, sp.z) : 0);
       const r = idx % 10;
 
-      if (r <= 4) {
-        // Firearm + companion ammo box right next to it (PUBG floor loot style!)
-        const useSec = r === 4 && secondaryPool.length > 0;
+      if (r <= 3) {
+        // Firearm + companion matching ammo box right beside it
+        const useSec = r === 3 && secondaryPool.length > 0;
         const pool = useSec ? secondaryPool : primaryPool;
         const w = pool[Math.floor(Math.random() * pool.length)];
         const ammoType = getWeaponAmmoType(w.id);
         this.lootCrates.push(this.createLootCrate({ kind: 'weapon', weaponId: w.id }, sp.x, baseY, sp.z));
         this.lootCrates.push(
           this.createLootCrate(
-            { kind: 'ammo', ammoType, qty: w.magSize },
+            { kind: 'ammo', ammoType, qty: Math.max(24, w.magSize) },
             sp.x + 0.85,
             baseY,
             sp.z + 0.55
           )
         );
+      } else if (r === 4 || r === 8) {
+        // Abundant meds & energy drinks inside houses & compounds (evenly mixes firstaid, bandage, energy, medkit)
+        const medId = medKeys[Math.floor(idx / 2) % medKeys.length];
+        this.lootCrates.push(this.createLootCrate({ kind: 'med', medId }, sp.x, baseY, sp.z));
+        if (idx % 3 === 0) {
+          this.lootCrates.push(this.createLootCrate({ kind: 'med', medId: 'energy' }, sp.x - 0.65, baseY, sp.z + 0.45));
+        }
       } else if (r === 5) {
         const tier = (idx % 7 === 0) ? 3 : ((idx % 3 === 0) ? 2 : 1);
         this.lootCrates.push(this.createLootCrate({ kind: 'vest', tier }, sp.x, baseY, sp.z));
@@ -968,12 +976,9 @@ export class GameRoomCore {
       } else if (r === 7) {
         const tier = (idx % 5 === 0) ? 3 : ((idx % 2 === 0) ? 2 : 1);
         this.lootCrates.push(this.createLootCrate({ kind: 'bag', tier }, sp.x, baseY, sp.z));
-      } else if (r === 8) {
-        const medId = medKeys[idx % medKeys.length];
-        this.lootCrates.push(this.createLootCrate({ kind: 'med', medId }, sp.x, baseY, sp.z));
       } else {
         const ammoType = ammoKeys[idx % ammoKeys.length];
-        this.lootCrates.push(this.createLootCrate({ kind: 'ammo', ammoType }, sp.x - 0.5, baseY, sp.z));
+        this.lootCrates.push(this.createLootCrate({ kind: 'ammo', ammoType }, sp.x - 0.55, baseY, sp.z));
         this.lootCrates.push(this.createLootCrate({ kind: 'grenade', qty: 1 }, sp.x + 0.6, baseY, sp.z + 0.4));
       }
     }

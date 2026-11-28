@@ -561,36 +561,39 @@ function buildBrIslandMap() {
   ];
 
   const namedPlaces = [
-    { id: 'pochinki', name: 'Thị Trấn Pochinki', x: -75, z: 95, r: 75 },
-    { id: 'military', name: 'Căn Cứ Quân Sự', x: 130, z: 390, r: 85 },
-    { id: 'georgopol', name: 'Cảng Container', x: -360, z: -260, r: 75 },
-    { id: 'yasnaya', name: 'Thung Lũng Yasnaya', x: 260, z: -360, r: 70 },
-    { id: 'research', name: 'Trạm Núi Đông', x: 290, z: -80, r: 55 },
-    { id: 'riverside', name: 'Làng Bờ Sông', x: -210, z: -30, r: 55 },
-    { id: 'northfort', name: 'Đồn Biên Phòng Bắc', x: 100, z: -460, r: 50 },
-    { id: 'lakecamp', name: 'Trại Hồ Tây Nam', x: -400, z: 420, r: 45 }
+    { id: 'pochinki', name: 'Thành Phố Pochinki', x: -75, z: 95, r: 96 },
+    { id: 'military', name: 'Căn Cứ Quân Sự', x: 130, z: 390, r: 105 },
+    { id: 'georgopol', name: 'Bến Cảng Container', x: -360, z: -260, r: 96 },
+    { id: 'pineridge', name: 'Đồi Thông & Tháp Canh', x: -315, z: 255, r: 78 },
+    { id: 'powerplant', name: 'Nhà Máy Điện Đông', x: 365, z: 130, r: 80 },
+    { id: 'yasnaya', name: 'Thành Phố Yasnaya', x: 260, z: -360, r: 86 },
+    { id: 'research', name: 'Trạm Radar Núi Đông', x: 290, z: -80, r: 66 },
+    { id: 'riverside', name: 'Làng Ven Sông', x: -210, z: -30, r: 68 },
+    { id: 'northfort', name: 'Đồn Biên Phòng Bắc', x: 100, z: -460, r: 68 },
+    { id: 'lakecamp', name: 'Rừng Hồ Tây Nam', x: -400, z: 420, r: 62 }
   ];
 
-  const flats = namedPlaces.map((p) => ({ x: p.x, z: p.z, r: p.r, blend: 30, tint: 0.85 }));
+  const flats = namedPlaces.map((p) => ({ x: p.x, z: p.z, r: p.r, blend: 32, tint: 0.88 }));
   // Additional roadside plateaus for outposts / watchtower clusters
   const extraOutposts = [
-    { x: -50, z: -170, r: 25 },
-    { x: 170, z: 170, r: 26 },
-    { x: -230, z: 260, r: 25 },
-    { x: 410, z: -320, r: 24 },
-    { x: 390, z: 90, r: 24 },
-    { x: -510, z: 40, r: 25 }
+    { x: -50, z: -170, r: 28 },
+    { x: 165, z: 180, r: 28 },
+    { x: -190, z: 270, r: 26 },
+    { x: 420, z: -300, r: 26 },
+    { x: 35, z: -280, r: 26 },
+    { x: -510, z: 40, r: 28 }
   ];
   for (const op of extraOutposts) {
-    flats.push({ x: op.x, z: op.z, r: op.r, blend: 20, tint: 0.6 });
+    flats.push({ x: op.x, z: op.z, r: op.r, blend: 20, tint: 0.65 });
   }
 
   const roads = [
-    { width: 5.5, pts: [[-360, -260], [-210, -30], [-75, 95], [170, 170], [130, 390]] },
-    { width: 5.0, pts: [[-400, 420], [-230, 260], [-75, 95], [-50, -170], [100, -460]] },
-    { width: 5.0, pts: [[-210, -30], [290, -80], [260, -360], [100, -460]] },
-    { width: 4.8, pts: [[260, -360], [410, -320], [390, 90], [170, 170]] },
-    { width: 4.8, pts: [[-510, 40], [-360, -260]] }
+    { width: 6.0, pts: [[-360, -260], [-210, -30], [-75, 95], [165, 180], [130, 390]] },
+    { width: 5.4, pts: [[-400, 420], [-315, 255], [-190, 270], [-75, 95], [-50, -170], [100, -460]] },
+    { width: 5.4, pts: [[-210, -30], [290, -80], [260, -360], [100, -460]] },
+    { width: 5.2, pts: [[260, -360], [420, -300], [365, 130], [165, 180], [130, 390]] },
+    { width: 5.0, pts: [[-510, 40], [-360, -260]] },
+    { width: 4.8, pts: [[-315, 255], [-510, 40]] }
   ];
 
   const terrain = buildTerrain({
@@ -617,75 +620,98 @@ function buildBrIslandMap() {
     lootSpawns.push({ x: Number(x.toFixed(1)), y: Number(y.toFixed(2)), z: Number(z.toFixed(1)) });
   };
 
-  // Helper: Walkable Multi-Room / Multi-Floor House with Open Doorways, Sniper Windows & Stairs
+  // Helper: Walkable Multi-Room / Multi-Floor House with Jumpable Windows, Walk-Out Balcony & Stairs
   function addHouse(cx, cz, floors = 2, w = 12, d = 10, wallMat = 'building_brick') {
     const idx = houseSeq++;
     const fy = Number(terrain.heightAt(cx, cz).toFixed(2));
     const t = 0.55;
-    const fh = 3.6;
+    const fh = 3.9;
     const hw = w * 0.5;
     const hd = d * 0.5;
     const doorW = 2.6;
-    const resolvedMat = wallMat === 'crate_wood'
-      ? 'wood_plank'
-      : (wallMat === 'building_brick' && idx % 3 === 1 ? 'stucco_house' : (wallMat === 'city_wall' && idx % 2 === 0 ? 'stucco_sage' : wallMat));
+    const windowW = 3.0;
+    const sillH = 0.80;
+    const lintelY = 2.86; // 2.06m vertical clearance (> HEIGHT_STAND 1.80m) so players cleanly jump/vault windows!
 
-    // Foundation Plinth anchored below terrain slope so zero gaps appear on gentle hills
-    blocks.push({ x: cx, y: fy - 2.6, z: cz, w: w + 0.6, h: 2.6, d: d + 0.6, mat: 'concrete' });
+    const townPalette = ['house_brick', 'stucco_house', 'stucco_sage', 'house_siding'];
+    let resolvedMat = wallMat;
+    if (wallMat === 'crate_wood') {
+      resolvedMat = 'wood_plank';
+    } else if (wallMat === 'building_brick' || wallMat === 'city_wall' || wallMat === 'building_glass') {
+      resolvedMat = townPalette[idx % townPalette.length];
+    }
+
+    // Foundation Plinth anchored below terrain slope (+0.04 interior floor cap so grass never pokes through)
+    blocks.push({ x: cx, y: fy - 2.6, z: cz, w: w + 0.6, h: 2.64, d: d + 0.6, mat: 'concrete' });
 
     for (let fl = 0; fl < floors; fl++) {
       const y0 = fy + fl * fh;
       const sideSegW = (w - doorW) * 0.5;
 
-      // Front & Back walls with centered 2.6m doors (ground floor) or windows (2nd floor)
+      // Front (+Z) & Back (-Z) walls with centered 2.6m doors (ground floor), 2nd-floor balcony door (+Z) & jumpable window (-Z)
       for (const zSide of [-1, 1]) {
         const wz = cz + zSide * (hd - t * 0.5);
         blocks.push({ x: cx - (doorW * 0.5 + sideSegW * 0.5), y: y0, z: wz, w: sideSegW, h: fh, d: t, mat: resolvedMat });
         blocks.push({ x: cx + (doorW * 0.5 + sideSegW * 0.5), y: y0, z: wz, w: sideSegW, h: fh, d: t, mat: resolvedMat });
         if (fl === 0) {
-          // Over-doorway lintel (walkthrough clearance 2.5m)
-          blocks.push({ x: cx, y: y0 + 2.55, z: wz, w: doorW, h: fh - 2.55, d: t, mat: resolvedMat });
+          // Ground floor doorway lintel (walkthrough clearance 2.75m)
+          blocks.push({ x: cx, y: y0 + 2.75, z: wz, w: doorW, h: fh - 2.75, d: t, mat: resolvedMat });
+        } else if (zSide === 1) {
+          // 2nd Floor Front (+Z): full-height walk-out balcony doorway
+          blocks.push({ x: cx, y: y0 + lintelY, z: wz, w: doorW, h: fh - lintelY, d: t, mat: resolvedMat });
         } else {
-          // 2nd Floor shootable balcony/window sill + top lintel
-          blocks.push({ x: cx, y: y0, z: wz, w: doorW, h: 1.05, d: t, mat: resolvedMat });
-          blocks.push({ x: cx, y: y0 + 2.35, z: wz, w: doorW, h: fh - 2.35, d: t, mat: resolvedMat });
+          // 2nd Floor Back (-Z): wide jump-through window (0.80m sill .. 2.86m lintel)
+          blocks.push({ x: cx, y: y0, z: wz, w: doorW, h: sillH, d: t, mat: resolvedMat });
+          blocks.push({ x: cx, y: y0 + lintelY, z: wz, w: doorW, h: fh - lintelY, d: t, mat: resolvedMat });
         }
       }
 
-      // Left & Right side walls with wide tactical window cutouts
-      const sideSegD = (d - 3.0) * 0.5;
+      // Left & Right side walls with wide 3.0m jump-through window cutouts (0.80m sill .. 2.86m lintel = 2.06m gap)
+      const sideSegD = (d - windowW) * 0.5;
       for (const xSide of [-1, 1]) {
         const wx = cx + xSide * (hw - t * 0.5);
-        blocks.push({ x: wx, y: y0, z: cz - (1.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
-        blocks.push({ x: wx, y: y0, z: cz + (1.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
-        blocks.push({ x: wx, y: y0, z: cz, w: t, h: 1.02, d: 3.0, mat: resolvedMat });
-        blocks.push({ x: wx, y: y0 + 2.35, z: cz, w: t, h: fh - 2.35, d: 3.0, mat: resolvedMat });
+        blocks.push({ x: wx, y: y0, z: cz - (windowW * 0.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
+        blocks.push({ x: wx, y: y0, z: cz + (windowW * 0.5 + sideSegD * 0.5), w: t, h: fh, d: sideSegD, mat: resolvedMat });
+        blocks.push({ x: wx, y: y0, z: cz, w: t, h: sillH, d: windowW, mat: resolvedMat });
+        blocks.push({ x: wx, y: y0 + lintelY, z: cz, w: t, h: fh - lintelY, d: windowW, mat: resolvedMat });
       }
 
       // Interior tactical cover crate/table
-      blocks.push({ x: cx - hw * 0.35, y: y0, z: cz - hd * 0.15, w: 1.3, h: 0.95, d: 1.3, mat: 'crate_wood' });
+      blocks.push({ x: cx - hw * 0.36, y: y0, z: cz - hd * 0.16, w: 1.3, h: 0.92, d: 1.3, mat: 'crate_wood' });
       pushLoot(cx - hw * 0.15, y0, cz + hd * 0.15);
       pushLoot(cx + hw * 0.1, y0, cz - hd * 0.25);
 
       if (fl === 0 && floors > 1) {
         // Interior Staircase up to Floor 2 along East inner wall (leaves clear headroom!)
         const stairX = cx + hw - 1.55;
-        blocks.push(...makeStairs(stairX, cz, 1.5, d - 3.6, fh, 'north', 'wood_plank', 10, y0));
+        blocks.push(...makeStairs(stairX, cz, 1.5, d - 3.6, fh, 'north', 'wood_plank', 11, y0));
         // Floor 2 Deck split cleanly leaving the stairwell bay open on East side
         const deckW = w - 2.6;
         blocks.push({ x: cx - 1.3, y: y0 + fh - 0.22, z: cz, w: deckW, h: 0.22, d: d - 0.6, mat: 'wood_plank' });
+        // Walkable 2nd-Floor Front Balcony Deck (+Z) + jump-overable 0.80m railing collider
+        const balW = Math.min(w - 2.2, 4.8);
+        const balD = 1.45;
+        const balZ = cz + hd + balD * 0.5;
+        blocks.push({ x: cx, y: y0 + fh - 0.22, z: balZ, w: balW, h: 0.22, d: balD, mat: 'concrete' });
+        blocks.push({ x: cx, y: y0 + fh, z: cz + hd + balD - 0.12, w: balW, h: 0.80, d: 0.22, mat: 'concrete', noVisual: true });
       }
     }
 
     // Sloped / Flat Protective Overhanging Roof (collider ceiling)
     const roofY = fy + floors * fh;
-    const isModernFlat = resolvedMat === 'building_glass' || resolvedMat === 'bunker_concrete';
-    blocks.push({ x: cx, y: roofY, z: cz, w: w + 0.8, h: 0.35, d: d + 0.8, mat: isModernFlat ? 'metal_dark' : 'roof_metal' });
+    const isFlatRoof = resolvedMat === 'bunker_concrete';
+    const roofStyle = isFlatRoof
+      ? 'flat'
+      : ((resolvedMat === 'military_wall' || resolvedMat === 'warehouse_wall')
+        ? 'metal'
+        : (idx % 3 === 1 ? 'slate' : 'tile'));
+    blocks.push({ x: cx, y: roofY, z: cz, w: w + 0.8, h: 0.35, d: d + 0.8, mat: isFlatRoof ? 'metal_dark' : 'roof_metal' });
     structures.push({
       type: 'house',
-      cx, cz, fy, floors, w, d, fh, doorW,
+      cx, cz, fy, floors, w, d, fh, doorW, windowW, sillH, lintelY,
+      hasBalcony: floors > 1,
       wallMat: resolvedMat,
-      roofStyle: isModernFlat ? 'flat' : (resolvedMat === 'military_wall' || resolvedMat === 'warehouse_wall' ? 'metal' : 'tile')
+      roofStyle
     });
     ffa.push({ x: cx, y: fy, z: cz + hd + 2.5, yaw: 0 });
   }
@@ -825,119 +851,288 @@ function buildBrIslandMap() {
     structures.push({ type: 'bridge', ax, az, bx, bz, bridgeW, deckY });
   }
 
+  // Helper: Shipping Container (1-tier or 2-tier stack with rooftop loot & cover)
+  function addContainer(cx, cz, mat = 'container_blue', stackedMat = null, horiz = false) {
+    const fy = Number(terrain.heightAt(cx, cz).toFixed(2));
+    const w = horiz ? 8.6 : 3.0;
+    const d = horiz ? 3.0 : 8.6;
+    blocks.push({ x: cx, y: fy - 1.2, z: cz, w: w + 0.3, h: 1.2, d: d + 0.3, mat: 'concrete' });
+    blocks.push({ x: cx, y: fy, z: cz, w, h: 2.6, d, mat });
+    if (stackedMat) {
+      blocks.push({ x: cx, y: fy + 2.6, z: cz, w, h: 2.6, d, mat: stackedMat });
+    } else {
+      pushLoot(cx, fy + 2.6, cz);
+    }
+  }
+
+  // Helper: Low Compound Brick/Concrete Wall & Tactical Sandbag Cover
+  function addCoverLine(cx, cz, w, d, h = 1.45, mat = 'bunker_concrete') {
+    const fy = Number(terrain.heightAt(cx, cz).toFixed(2));
+    blocks.push({ x: cx, y: fy - 0.8, z: cz, w, h: h + 0.8, d, mat });
+  }
+
+  // Helper: Landmark structures (Port Gantry Crane, Military Radar Tower, Fuel Silo Depot)
+  function addLandmark(type, cx, cz) {
+    const fy = Number(terrain.heightAt(cx, cz).toFixed(2));
+    if (type === 'gantry_crane') {
+      // 4 massive steel crane legs straddling container lanes (walkable underneath!)
+      for (const sx of [-6.5, 6.5]) {
+        for (const sz of [-5.5, 5.5]) {
+          blocks.push({ x: cx + sx, y: fy - 1.5, z: cz + sz, w: 1.1, h: 17.5, d: 1.1, mat: 'metal_dark' });
+        }
+      }
+      structures.push({ type: 'gantry_crane', cx, cz, fy });
+      pushLoot(cx, fy, cz);
+    } else if (type === 'radar_tower') {
+      blocks.push({ x: cx, y: fy - 1.8, z: cz, w: 7.4, h: 5.2, d: 7.4, mat: 'bunker_concrete' });
+      structures.push({ type: 'radar_tower', cx, cz, fy });
+      pushLoot(cx + 4.8, fy, cz);
+    } else if (type === 'silo_depot') {
+      for (const ox of [-5.2, 0, 5.2]) {
+        blocks.push({ x: cx + ox, y: fy - 1.5, z: cz, w: 3.8, h: 11.2, d: 3.8, mat: 'metal_dark', noVisual: true });
+      }
+      structures.push({ type: 'silo_depot', cx, cz, fy });
+      pushLoot(cx, fy, cz + 4.2);
+      pushLoot(cx - 5.2, fy, cz - 4.2);
+    }
+  }
+
   // Build 4 Strategic Bridges across Main & North Rivers
   addBridge(-420, -170, -420, -90, 8.5); // Cầu Tây Bắc
   addBridge(-210, -85, -210, -15, 8.5);  // Cầu Làng Bờ Sông
   addBridge(190, 20, 190, 100, 8.5);    // Cầu Trung Tâm Đông
   addBridge(-20, -420, 90, -420, 8.0);  // Cầu Đồn Biên Phòng Bắc
 
-  // 1. Thị Trấn Pochinki (-75, 95): Dense 2-story & 1-story town + Watchtower
-  addHouse(-105, 70, 2, 13, 11, 'building_brick');
-  addHouse(-45, 70, 2, 12, 10, 'city_wall');
-  addHouse(-105, 125, 1, 11, 9, 'building_brick');
-  addHouse(-45, 125, 2, 12, 10, 'building_glass');
-  addHouse(-75, 35, 1, 10, 9, 'warehouse_wall');
-  addHouse(-15, 95, 1, 10, 9, 'building_brick');
-  addWatchtower(-75, 95);
-  addShack(-135, 95);
+  // 1. THÀNH PHỐ POCHINKI (-75, 95): Dense 12-Building City Grid + Compound Walls + 2 Watchtowers + Courtyard Loot
+  addHouse(-122, 52, 2, 13, 10, 'building_brick');
+  addHouse(-90, 52, 2, 12, 10, 'city_wall');
+  addHouse(-56, 52, 2, 13, 10, 'building_glass');
+  addHouse(-22, 52, 1, 11, 9, 'building_brick');
 
-  // 2. Căn Cứ Quân Sự Nam (130, 390): 2 Hangars + 2 Barracks + 2 Watchtowers
-  addHangar(95, 385, 18, 26);
-  addHangar(165, 385, 18, 26);
-  addHouse(130, 335, 2, 15, 10, 'military_wall');
-  addHouse(130, 445, 1, 14, 10, 'bunker_concrete');
-  addWatchtower(60, 350);
-  addWatchtower(200, 430);
+  addHouse(-122, 95, 1, 11, 9, 'building_brick');
+  addHouse(-92, 95, 2, 12, 10, 'building_brick');
+  addHouse(-46, 95, 2, 13, 10, 'city_wall');
+  addHouse(-12, 95, 2, 12, 10, 'building_glass');
 
-  // 3. Cảng Container Tây Bắc (-360, -260): Warehouse Hangar + Stacked Containers + Watchtower
-  addHangar(-390, -270, 16, 22);
-  addHouse(-325, -240, 2, 13, 10, 'city_wall');
-  addHouse(-360, -315, 1, 11, 9, 'warehouse_wall');
-  addWatchtower(-320, -295);
+  addHouse(-118, 138, 2, 12, 10, 'city_wall');
+  addHouse(-82, 138, 1, 11, 9, 'building_brick');
+  addHouse(-46, 138, 2, 13, 10, 'building_brick');
+  addHouse(-14, 138, 1, 11, 9, 'warehouse_wall');
+
+  addWatchtower(-70, 95);
+  addWatchtower(-142, 120);
+  addShack(-146, 72);
+  addShack(12, 72);
+  addCoverLine(-70, 74, 10, 0.7, 1.35, 'bunker_concrete');
+  addCoverLine(-70, 116, 10, 0.7, 1.35, 'sandbag');
+  addContainer(-30, 74, 'container_red', null, true);
+  addContainer(-108, 116, 'container_blue', null, true);
+
+  // 2. BẾN CẢNG CONTAINER GEORGOPOL (-360, -260): 2 Giant Warehouses + 14 Stacked Containers + 2 Gantry Cranes + Offices
+  addHangar(-412, -268, 18, 26);
+  addHangar(-314, -296, 16, 22);
+  addHouse(-314, -240, 2, 13, 10, 'city_wall');
+  addHouse(-362, -318, 2, 13, 10, 'building_glass');
+  addHouse(-410, -220, 1, 11, 9, 'warehouse_wall');
+  addWatchtower(-320, -210);
+  addWatchtower(-435, -295);
+  addLandmark('gantry_crane', -362, -252);
+  addLandmark('gantry_crane', -362, -216);
+  // Dense Colorful Shipping Container Yard Alleys
+  addContainer(-382, -256, 'container_red', 'container_blue');
+  addContainer(-372, -256, 'container_yellow', null);
+  addContainer(-352, -256, 'container_blue', 'container_green');
+  addContainer(-342, -256, 'container_red', null);
+  addContainer(-382, -238, 'container_green', null);
+  addContainer(-372, -238, 'container_blue', 'container_red');
+  addContainer(-352, -238, 'container_yellow', null);
+  addContainer(-342, -238, 'container_green', 'container_yellow');
+  addContainer(-382, -218, 'container_blue', null);
+  addContainer(-368, -218, 'container_red', 'container_yellow');
+  addContainer(-348, -218, 'container_green', null);
+  addContainer(-336, -218, 'container_blue', null);
   {
-    const portY = terrain.heightAt(-355, -215);
-    blocks.push({ x: -365, y: portY, z: -215, w: 3.0, h: 2.6, d: 8.5, mat: 'container_red' });
-    blocks.push({ x: -350, y: portY, z: -215, w: 3.0, h: 2.6, d: 8.5, mat: 'container_blue' });
-    pushLoot(-358, portY, -215);
+    const cy = terrain.heightAt(-360, -246);
+    pushLoot(-362, cy, -246);
+    pushLoot(-377, cy, -246);
+    pushLoot(-347, cy, -228);
+    pushLoot(-362, cy, -228);
   }
 
-  // 4. Thung Lũng Yasnaya (260, -360): Mountain Valley Town
-  addHouse(230, -385, 2, 12, 10, 'building_brick');
-  addHouse(290, -385, 2, 12, 10, 'building_glass');
-  addHouse(235, -330, 1, 11, 9, 'building_brick');
-  addHouse(295, -330, 1, 10, 9, 'city_wall');
-  addWatchtower(265, -410);
-  addShack(205, -355);
+  // 3. CĂN CỨ QUÂN SỰ & SÂN BAY (130, 390): 3 Giant Hangars + 3 Barracks + Radar Tower + Fuel Silos + 3 Watchtowers
+  addHangar(82, 392, 18, 26);
+  addHangar(132, 392, 18, 26);
+  addHangar(182, 392, 18, 26);
+  addHouse(96, 336, 2, 15, 10, 'military_wall');
+  addHouse(164, 336, 2, 15, 10, 'military_wall');
+  addHouse(130, 452, 2, 16, 11, 'bunker_concrete');
+  addHouse(72, 446, 1, 12, 9, 'bunker_concrete');
+  addLandmark('radar_tower', 130, 318);
+  addLandmark('silo_depot', 194, 448);
+  addWatchtower(56, 345);
+  addWatchtower(208, 345);
+  addWatchtower(212, 436);
+  addCoverLine(130, 362, 18, 0.9, 1.35, 'sandbag');
+  addCoverLine(130, 424, 18, 0.9, 1.35, 'sandbag');
+  addContainer(62, 392, 'container_green', null);
+  addContainer(206, 392, 'container_green', 'container_yellow');
 
-  // 5. Trạm Nghiên Cứu Núi Đông (290, -80)
-  addHouse(270, -80, 2, 14, 11, 'building_glass');
-  addHouse(315, -65, 1, 11, 9, 'bunker_concrete');
-  addWatchtower(290, -115);
+  // 4. ĐỒI THÔNG & THÁP CANH (-315, 255): Pine Ridge Sniper Overlook + Cabins + 3 Watchtowers
+  addHouse(-334, 246, 2, 12, 10, 'crate_wood');
+  addHouse(-294, 246, 1, 11, 9, 'crate_wood');
+  addHouse(-314, 282, 2, 12, 10, 'building_brick');
+  addWatchtower(-348, 272);
+  addWatchtower(-282, 272);
+  addWatchtower(-315, 218);
+  addShack(-278, 232);
+  addShack(-350, 228);
+  addCoverLine(-315, 262, 9, 0.8, 1.3, 'sandbag');
 
-  // 6. Làng Bờ Sông (-210, -30)
-  addHouse(-225, -10, 1, 11, 9, 'building_brick');
-  addHouse(-190, -45, 2, 11, 9, 'crate_wood');
-  addShack(-240, -55);
-  addWatchtower(-175, -5);
+  // 5. NHÀ MÁY ĐIỆN & KHU CÔNG NGHIỆP ĐÔNG (365, 130): Giant Turbine Hall + Silos + Factory Yard
+  addHangar(350, 128, 20, 28);
+  addHouse(392, 112, 2, 14, 10, 'warehouse_wall');
+  addHouse(392, 152, 1, 13, 9, 'bunker_concrete');
+  addHouse(326, 168, 2, 12, 10, 'city_wall');
+  addLandmark('silo_depot', 362, 86);
+  addWatchtower(318, 96);
+  addWatchtower(416, 146);
+  addContainer(340, 102, 'container_yellow', null, true);
+  addContainer(376, 174, 'container_blue', 'container_red', true);
+  addCoverLine(368, 140, 8, 0.8, 1.3, 'bunker_concrete');
 
-  // 7. Đồn Biên Phòng Bắc (100, -460)
-  addHangar(100, -460, 16, 20);
-  addHouse(65, -480, 1, 10, 9, 'military_wall');
-  addWatchtower(135, -485);
+  // 6. THÀNH PHỐ THUNG LŨNG YASNAYA (260, -360): Dense 8-Building Mountain Valley City
+  addHouse(222, -392, 2, 13, 10, 'building_brick');
+  addHouse(260, -392, 2, 12, 10, 'city_wall');
+  addHouse(298, -392, 2, 13, 10, 'building_glass');
+  addHouse(222, -342, 1, 11, 9, 'building_brick');
+  addHouse(260, -342, 2, 12, 10, 'building_brick');
+  addHouse(298, -342, 1, 11, 9, 'city_wall');
+  addHouse(242, -310, 1, 11, 9, 'warehouse_wall');
+  addHouse(286, -310, 2, 12, 10, 'building_glass');
+  addWatchtower(260, -422);
+  addWatchtower(326, -366);
+  addShack(196, -364);
+  addContainer(260, -366, 'container_red', null, true);
 
-  // 8. Trại Hồ Tây Nam (-400, 420)
-  addHouse(-400, 420, 2, 12, 10, 'building_brick');
-  addShack(-435, 435);
-  addWatchtower(-365, 400);
+  // 7. TRẠM RADAR NÚI ĐÔNG (290, -80)
+  addHouse(268, -76, 2, 14, 11, 'building_glass');
+  addHouse(312, -64, 2, 12, 10, 'bunker_concrete');
+  addHouse(290, -42, 1, 11, 9, 'military_wall');
+  addLandmark('radar_tower', 292, -106);
+  addWatchtower(254, -102);
+  addWatchtower(326, -98);
+  addShack(324, -36);
 
-  // Roadside Outposts & Wild Forest Shacks / Watchtowers
+  // 8. LÀNG VEN SÔNG (-210, -30)
+  addHouse(-232, -12, 2, 12, 10, 'building_brick');
+  addHouse(-194, -12, 1, 11, 9, 'crate_wood');
+  addHouse(-228, -46, 1, 11, 9, 'crate_wood');
+  addHouse(-188, -48, 2, 12, 10, 'city_wall');
+  addHouse(-254, -28, 1, 10, 9, 'building_brick');
+  addShack(-244, -64);
+  addShack(-168, -32);
+  addWatchtower(-172, -4);
+  addWatchtower(-256, -54);
+
+  // 9. ĐỒN BIÊN PHÒNG BẮC (100, -460)
+  addHangar(98, -456, 16, 22);
+  addHangar(132, -456, 15, 20);
+  addHouse(64, -476, 2, 12, 10, 'military_wall');
+  addHouse(100, -496, 1, 13, 9, 'bunker_concrete');
+  addWatchtower(148, -488);
+  addWatchtower(56, -442);
+  addCoverLine(100, -432, 16, 0.9, 1.35, 'sandbag');
+
+  // 10. RỪNG HỒ TÂY NAM (-400, 420)
+  addHouse(-400, 418, 2, 12, 10, 'crate_wood');
+  addHouse(-368, 434, 1, 11, 9, 'building_brick');
+  addHouse(-428, 444, 1, 11, 9, 'crate_wood');
+  addShack(-438, 412);
+  addShack(-378, 396);
+  addWatchtower(-362, 402);
+  addWatchtower(-432, 468);
+
+  // 6 Full Roadside Compounds (House + Watchtower + Shack + Tactical Crate Cover)
   for (const op of extraOutposts) {
-    addHouse(op.x - 10, op.z, 1, 10, 9, 'building_brick');
-    addWatchtower(op.x + 12, op.z - 6);
-    addShack(op.x + 10, op.z + 12);
+    addHouse(op.x - 11, op.z - 2, 2, 11, 9, 'building_brick');
+    addHouse(op.x + 10, op.z + 10, 1, 10, 9, 'crate_wood');
+    addWatchtower(op.x + 12, op.z - 10);
+    addShack(op.x - 12, op.z + 13);
   }
 
-  // Deterministic scattered Watchtowers & Shacks across hills, riverbanks, and valleys
-  for (let i = 0; i < 14; i++) {
-    const sx = (hash01(i, 19, 777) * 2 - 1) * 620;
-    const sz = (hash01(i, 83, 999) * 2 - 1) * 620;
+  // Deterministic scattered Forest Watchtowers & Hunting Cabins across ridges & riverbanks
+  for (let i = 0; i < 24; i++) {
+    const sx = (hash01(i, 19, 777) * 2 - 1) * 635;
+    const sz = (hash01(i, 83, 999) * 2 - 1) * 635;
     if (terrain.depthAt(sx, sz) > 0 || terrain.heightAt(sx, sz) < terrain.waterLevel + 1.5) continue;
-    if (terrain.slopeAt(sx, sz) > 0.36) continue;
-    if (namedPlaces.some((p) => Math.hypot(p.x - sx, p.z - sz) < 100)) continue;
+    if (terrain.slopeAt(sx, sz) > 0.38) continue;
+    if (namedPlaces.some((p) => Math.hypot(p.x - sx, p.z - sz) < p.r + 18)) continue;
     if (i % 3 === 0) addWatchtower(sx, sz);
     else addShack(sx, sz);
   }
 
-  // Forest Trees & Natural Cliff Boulders (Tuned for 1.5km x 1.5km, ~360 trees + ~90 rocks)
-  for (let i = 0; i < 360; i++) {
-    const tx = (hash01(i, 31, 1337) * 2 - 1) * 660;
-    const tz = (hash01(i, 67, 4242) * 2 - 1) * 660;
+  // DENSE CLUSTERED FOREST GROVES + SCATTERED WOODLANDS (~950 Instanced Trees = ZERO extra draw calls!)
+  const tryAddTree = (tx, tz, scale, kind) => {
+    if (Math.abs(tx) > halfW - 35 || Math.abs(tz) > halfD - 35) return false;
     const h = terrain.heightAt(tx, tz);
-    if (h < terrain.waterLevel + 1.4 || h > 95) continue;
-    if (terrain.slopeAt(tx, tz) > 0.48) continue;
+    if (h < terrain.waterLevel + 1.3 || h > 96) return false;
+    if (terrain.slopeAt(tx, tz) > 0.52) return false;
     const ix = Math.min(terrain.nx - 1, Math.max(0, Math.round((tx + halfW) / terrain.cell)));
     const iz = Math.min(terrain.nx - 1, Math.max(0, Math.round((tz + halfW) / terrain.cell)));
     const gi = iz * terrain.nx + ix;
-    if (terrain.flatMask[gi] > 40 || terrain.roadMask[gi] > 40) continue;
+    if (terrain.flatMask[gi] > 42 || terrain.roadMask[gi] > 38) return false;
+    const rx = Number(tx.toFixed(1));
+    const ry = Number(h.toFixed(2));
+    const rz = Number(tz.toFixed(1));
+    trees.push({ x: rx, y: ry, z: rz, scale: Number(scale.toFixed(2)), kind });
+    blocks.push({ x: rx, y: Number((h - 0.5).toFixed(2)), z: rz, w: 0.72, h: 4.5, d: 0.72, noVisual: true });
+    return true;
+  };
 
-    const scale = 0.85 + hash01(i, 5, 11) * 0.75;
-    const kind = (h > 27 || hash01(i, 17, 505) > 0.48) ? 'pine' : 'oak';
-    trees.push({ x: Number(tx.toFixed(1)), y: Number(h.toFixed(2)), z: Number(tz.toFixed(1)), scale: Number(scale.toFixed(2)), kind });
-    blocks.push({ x: Number(tx.toFixed(1)), y: Number((h - 0.5).toFixed(2)), z: Number(tz.toFixed(1)), w: 0.72, h: 4.5, d: 0.72, noVisual: true });
+  // 6 Distinct Dense Forest Biomes (Pine Ridge Forest, North Taiga, East Mountain Pines, River Jungle, South Lake Woods, West Port Forest)
+  const forestGroves = [
+    { cx: -350, cz: 190, rx: 140, rz: 120, count: 145, primary: 'pine', secondary: 'pine', seed: 101 },
+    { cx: -140, cz: -340, rx: 160, rz: 130, count: 120, primary: 'pine', secondary: 'oak', seed: 202 },
+    { cx: 360, cz: -210, rx: 140, rz: 130, count: 105, primary: 'pine', secondary: 'oak', seed: 303 },
+    { cx: -60, cz: -35, rx: 140, rz: 85, count: 95, primary: 'oak', secondary: 'palm', seed: 404 },
+    { cx: -260, cz: 455, rx: 145, rz: 110, count: 90, primary: 'pine', secondary: 'oak', seed: 505 },
+    { cx: 290, cz: 310, rx: 130, rz: 120, count: 85, primary: 'oak', secondary: 'pine', seed: 606 }
+  ];
+  for (const grove of forestGroves) {
+    for (let i = 0; i < grove.count; i++) {
+      const a = hash01(i, 11, grove.seed) * Math.PI * 2;
+      const rad = Math.sqrt(hash01(i, 29, grove.seed + 7));
+      const tx = grove.cx + Math.cos(a) * grove.rx * rad;
+      const tz = grove.cz + Math.sin(a) * grove.rz * rad;
+      const scale = 0.88 + hash01(i, 7, grove.seed + 19) * 0.85;
+      const kind = hash01(i, 41, grove.seed + 31) > 0.28 ? grove.primary : grove.secondary;
+      tryAddTree(tx, tz, scale, kind);
+    }
   }
 
-  for (let i = 0; i < 90; i++) {
-    const rx = (hash01(i, 91, 8080) * 2 - 1) * 660;
-    const rz = (hash01(i, 43, 6060) * 2 - 1) * 660;
+  // Natural scattered woodlands across all remaining hills & river valleys
+  for (let i = 0; i < 420; i++) {
+    const tx = (hash01(i, 31, 1337) * 2 - 1) * 670;
+    const tz = (hash01(i, 67, 4242) * 2 - 1) * 670;
+    const h = terrain.heightAt(tx, tz);
+    const scale = 0.85 + hash01(i, 5, 11) * 0.78;
+    const kind = h > 26 ? 'pine' : (h < terrain.waterLevel + 5.5 && hash01(i, 23, 88) > 0.5 ? 'palm' : (hash01(i, 17, 505) > 0.45 ? 'pine' : 'oak'));
+    tryAddTree(tx, tz, scale, kind);
+  }
+
+  // 220 Stratified Cliff & Ridge Boulders (InstancedMesh = 1 draw call per sector!)
+  for (let i = 0; i < 220; i++) {
+    const rx = (hash01(i, 91, 8080) * 2 - 1) * 670;
+    const rz = (hash01(i, 43, 6060) * 2 - 1) * 670;
     const h = terrain.heightAt(rx, rz);
     if (h < terrain.waterLevel - 0.5) continue;
     const ix = Math.min(terrain.nx - 1, Math.max(0, Math.round((rx + halfW) / terrain.cell)));
     const iz = Math.min(terrain.nx - 1, Math.max(0, Math.round((rz + halfW) / terrain.cell)));
     const gi = iz * terrain.nx + ix;
-    if (terrain.flatMask[gi] > 60 || terrain.roadMask[gi] > 60) continue;
+    if (terrain.flatMask[gi] > 55 || terrain.roadMask[gi] > 55) continue;
 
-    const rw = 2.4 + hash01(i, 7, 22) * 3.8;
-    const rh = 1.6 + hash01(i, 13, 33) * 2.8;
+    const rw = 2.4 + hash01(i, 7, 22) * 4.0;
+    const rh = 1.6 + hash01(i, 13, 33) * 3.0;
     rocks.push({ x: Number(rx.toFixed(1)), y: Number(h.toFixed(2)), z: Number(rz.toFixed(1)), s: Number((rw * 0.55).toFixed(2)), ry: Number((rh * 0.55).toFixed(2)) });
     blocks.push({ x: Number(rx.toFixed(1)), y: Number((h - 0.8).toFixed(2)), z: Number(rz.toFixed(1)), w: rw * 0.88, h: rh + 0.8, d: rw * 0.88, noVisual: true });
   }
@@ -978,7 +1173,7 @@ function buildBrIslandMap() {
   return {
     id: 'br_island',
     name: 'Đảo Sinh Tồn 1.5×1.5 km (Erangel-VN)',
-    subtitle: 'Bản đồ 1.5km×1.5km tối ưu 60+ FPS • Đồi núi, Sông cầu, Chòi canh & 8 Thị trấn',
+    subtitle: '10 Khu Tác Chiến (Thành Phố, Cảng Container, Căn Cứ, Đồi Thông, Nhà Máy Điện) • Rừng rậm & 60+ FPS',
     theme: 'desert_military',
     skyColor: '#6794c4',
     fogColor: '#8db2d6',

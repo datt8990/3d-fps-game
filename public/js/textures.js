@@ -704,6 +704,136 @@ function makeWoodPlankTextures(baseHex = '#7c5838') {
   return { map, bumpMap };
 }
 
+function makeHouseBrickTextures() {
+  const c = createCanvas(512, 512);
+  const ctx = c.getContext('2d');
+  const b = createCanvas(512, 512);
+  const bctx = b.getContext('2d');
+
+  // Warm mortar base
+  ctx.fillStyle = '#a89f91';
+  ctx.fillRect(0, 0, 512, 512);
+  bctx.fillStyle = '#383838';
+  bctx.fillRect(0, 0, 512, 512);
+
+  const rows = 16;
+  const cols = 8;
+  const rh = 512 / rows;
+  const bw = 512 / cols;
+  const tones = ['#9c4632', '#8c3c2a', '#a8523b', '#7e3526', '#944a38', '#833a2b'];
+
+  for (let r = 0; r < rows; r++) {
+    const shift = (r % 2 === 1) ? bw * 0.5 : 0;
+    const y = r * rh;
+    for (let col = -1; col <= cols; col++) {
+      const x = col * bw + shift;
+      const hash = (r * 31 + col * 17 + 99) & 0xff;
+      ctx.fillStyle = tones[hash % tones.length];
+      ctx.fillRect(x + 2, y + 2, bw - 4, rh - 4);
+      // Subtle highlight along top edge of each fired brick
+      ctx.fillStyle = 'rgba(255, 224, 195, 0.12)';
+      ctx.fillRect(x + 2, y + 2, bw - 4, 4);
+      bctx.fillStyle = hash % 3 === 0 ? '#b8b8b8' : '#a4a4a4';
+      bctx.fillRect(x + 2, y + 2, bw - 4, rh - 4);
+    }
+  }
+  // Ground-edge subtle weathering gradient
+  const grad = ctx.createLinearGradient(0, 390, 0, 512);
+  grad.addColorStop(0, 'rgba(30, 24, 18, 0)');
+  grad.addColorStop(1, 'rgba(30, 24, 18, 0.34)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 390, 512, 122);
+
+  addNoise(ctx, 512, 512, 0.08);
+  addNoise(bctx, 512, 512, 0.09);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  return { map, bumpMap };
+}
+
+function makeHouseSidingTextures(baseHex = '#7c8f9e') {
+  const c = createCanvas(512, 512);
+  const ctx = c.getContext('2d');
+  const b = createCanvas(512, 512);
+  const bctx = b.getContext('2d');
+
+  ctx.fillStyle = baseHex;
+  ctx.fillRect(0, 0, 512, 512);
+  bctx.fillStyle = '#888888';
+  bctx.fillRect(0, 0, 512, 512);
+
+  const lapH = 32;
+  for (let row = 0; row < 16; row++) {
+    const y = row * lapH;
+    const tone = ((row * 29) % 7) - 3;
+    ctx.fillStyle = tone > 0 ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)';
+    ctx.fillRect(0, y, 512, lapH - 3);
+    // Bevel shadow under each horizontal clapboard plank
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.34)';
+    ctx.fillRect(0, y + lapH - 3, 512, 3);
+    bctx.fillStyle = '#363636';
+    bctx.fillRect(0, y + lapH - 3, 512, 3);
+    bctx.fillStyle = '#adadad';
+    bctx.fillRect(0, y, 512, 4);
+  }
+  addNoise(ctx, 512, 512, 0.05);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  return { map, bumpMap };
+}
+
+function makeRoofSlateTextures() {
+  const c = createCanvas(512, 512);
+  const ctx = c.getContext('2d');
+  const b = createCanvas(512, 512);
+  const bctx = b.getContext('2d');
+
+  ctx.fillStyle = '#2d3748';
+  ctx.fillRect(0, 0, 512, 512);
+  bctx.fillStyle = '#606060';
+  bctx.fillRect(0, 0, 512, 512);
+
+  const rows = 12;
+  const cols = 8;
+  const rh = 512 / rows;
+  const sw = 512 / cols;
+  for (let r = 0; r < rows; r++) {
+    const y = r * rh;
+    const shift = (r % 2) * (sw * 0.5);
+    for (let col = -1; col <= cols; col++) {
+      const x = col * sw + shift;
+      const tone = ((r * 19 + col * 37) % 5);
+      ctx.fillStyle = ['#334155', '#2b3648', '#3c4a5f', '#263142', '#38465a'][tone];
+      ctx.fillRect(x + 1, y + 1, sw - 2, rh - 4);
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+      ctx.fillRect(x, y + rh - 4, sw, 4);
+      bctx.fillStyle = '#9a9a9a';
+      bctx.fillRect(x + 1, y + 1, sw - 2, rh - 4);
+      bctx.fillStyle = '#252525';
+      bctx.fillRect(x, y + rh - 4, sw, 4);
+    }
+  }
+  addNoise(ctx, 512, 512, 0.06);
+  const map = new THREE.CanvasTexture(c);
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  const bumpMap = new THREE.CanvasTexture(b);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+  return { map, bumpMap };
+}
+
 function makeStuccoHouseTextures(baseHex = '#cfc3aa') {
   const c = createCanvas(512, 512);
   const ctx = c.getContext('2d');
@@ -1036,6 +1166,11 @@ export function getMapMaterial(matKey = 'concrete') {
       mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.05, roughness: 0.80, metalness: 0.05 });
       break;
     }
+    case 'roof_slate': {
+      const t = makeRoofSlateTextures();
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.045, roughness: 0.72, metalness: 0.14 });
+      break;
+    }
     case 'roof_metal': {
       const t = makeRoofMetalTextures();
       mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.52, metalness: 0.48 });
@@ -1046,13 +1181,23 @@ export function getMapMaterial(matKey = 'concrete') {
       mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.84, metalness: 0.04 });
       break;
     }
+    case 'house_brick': {
+      const t = makeHouseBrickTextures();
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.05, roughness: 0.84, metalness: 0.04 });
+      break;
+    }
+    case 'house_siding': {
+      const t = makeHouseSidingTextures('#73889a');
+      mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.78, metalness: 0.06 });
+      break;
+    }
     case 'stucco_house': {
-      const t = makeStuccoHouseTextures('#d2c5ab');
+      const t = makeStuccoHouseTextures('#d6cab2');
       mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.88, metalness: 0.03 });
       break;
     }
     case 'stucco_sage': {
-      const t = makeStuccoHouseTextures('#b7c2b0');
+      const t = makeStuccoHouseTextures('#aebca8');
       mat = new THREE.MeshStandardMaterial({ map: t.map, bumpMap: t.bumpMap, bumpScale: 0.04, roughness: 0.88, metalness: 0.03 });
       break;
     }

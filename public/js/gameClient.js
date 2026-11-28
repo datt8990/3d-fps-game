@@ -727,11 +727,14 @@ export class FPSGameClient {
         return;
       }
 
-      if (e.code === 'KeyS' || e.code === 'ArrowDown') {
-        if (this.autoRun) {
-          this.autoRun = false;
-          this.hud.setAutoRunActive?.(false);
-        }
+      // Pressing WASD or Arrow movement keys immediately cancels PUBG auto-run mode
+      const isMoveKey =
+        code === 'KeyW' || code === 'KeyA' || code === 'KeyS' || code === 'KeyD' ||
+        code === 'ArrowUp' || code === 'ArrowDown' || code === 'ArrowLeft' || code === 'ArrowRight' ||
+        key === 'w' || key === 'ư' || key === 'a' || key === 's' || key === 'd' || key === 'đ';
+      if (isMoveKey && this.autoRun) {
+        this.autoRun = false;
+        this.hud.setAutoRunActive?.(false);
       }
 
       if (this.mode === 'survival' && !this.local.dead && !this.uiModalOpen) {
@@ -2394,7 +2397,7 @@ export class FPSGameClient {
           const lc = this.lootData.get(id);
           if (lc && isOW) {
             const dx = lc.x - lx, dz = lc.z - lz;
-            const maxD = lc.kind === 'deathbox' ? 160 : 90;
+            const maxD = lc.kind === 'deathbox' ? 150 : 56;
             mesh.visible = (dx * dx + dz * dz) <= maxD * maxD;
             if (!mesh.visible) continue;
           }

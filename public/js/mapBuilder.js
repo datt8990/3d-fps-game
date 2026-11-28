@@ -987,75 +987,136 @@ function emitBuilding(batch, b, mapId) {
 // REALISTIC OPEN-WORLD STRUCTURE DECOR EMITTERS (0 Extra Draw Calls -> Merged per Sector!)
 // ============================================================================
 function emitBrHouseDecor(col, s) {
-  const { cx, cz, fy, floors, w, d, fh, doorW, wallMat, roofStyle } = s;
+  const {
+    cx, cz, fy, floors, w, d, fh, doorW,
+    windowW = 3.0, sillH = 0.80, lintelY = 2.86, hasBalcony = floors > 1,
+    wallMat, roofStyle
+  } = s;
   const hw = w * 0.5;
   const hd = d * 0.5;
   const totalH = floors * fh;
   const roofY = fy + totalH + 0.34;
-  const shutterMat = (Math.abs(Math.round(cx + cz)) % 2 === 0) ? propMats.shutterGreen : propMats.shutterBlue;
+  const seed = Math.abs(Math.round(cx * 3 + cz * 7));
+  const shutterMat = (seed % 3 === 0)
+    ? propMats.shutterGreen
+    : (seed % 3 === 1 ? propMats.shutterBlue : propMats.windowWood);
+  const winH = Math.max(1.2, lintelY - sillH);
+  const winMidY = sillH + winH * 0.5;
 
-  // 1. Structural Corner Pilasters, Foundation Cap & Mid-Floor Belt Trim
+  // 1. Stone/Concrete Raised Base Skirting Plinth, Corner Quoins & Mid-Floor Cornice Belt
+  for (const zSide of [-1, 1]) {
+    const wz = cz + zSide * (hd - 0.25);
+    const wingW = (w - doorW) * 0.5 + 0.08;
+    col.addBox(wingW, 0.52, 0.66, cx - (doorW * 0.5 + wingW * 0.5 - 0.04), fy + 0.26, wz, propMats.concreteTrim, 0, 0, 0, false);
+    col.addBox(wingW, 0.52, 0.66, cx + (doorW * 0.5 + wingW * 0.5 - 0.04), fy + 0.26, wz, propMats.concreteTrim, 0, 0, 0, false);
+  }
+  for (const xSide of [-1, 1]) {
+    const wx = cx + xSide * (hw - 0.25);
+    col.addBox(0.66, 0.52, d + 0.14, wx, fy + 0.26, cz, propMats.concreteTrim, 0, 0, 0, false);
+  }
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
-      col.addBox(0.42, totalH + 0.2, 0.42, cx + sx * (hw - 0.05), fy + totalH * 0.5, cz + sz * (hd - 0.05), propMats.concreteTrim, 0, 0, 0, false);
+      col.addBox(0.50, totalH + 0.22, 0.50, cx + sx * (hw - 0.04), fy + totalH * 0.5, cz + sz * (hd - 0.04), propMats.concreteTrim, 0, 0, 0, false);
     }
   }
   if (floors > 1) {
-    col.addBox(w + 0.16, 0.18, d + 0.16, cx, fy + fh, cz, propMats.concreteTrim, 0, 0, 0, false);
+    col.addBox(w + 0.28, 0.22, d + 0.28, cx, fy + fh, cz, propMats.concreteTrim, 0, 0, 0, false);
   }
-  // Vertical Rainwater Downspout Pipe on corner
-  col.addCyl(0.06, 0.06, totalH + 0.2, 6, cx + hw + 0.08, fy + totalH * 0.5, cz + hd - 0.25, propMats.galvSteel, 0, 0, 0, false);
+  // Galvanized rainwater downspout pipe + eaves gutter trim
+  col.addCyl(0.06, 0.06, totalH + 0.2, 6, cx + hw + 0.10, fy + totalH * 0.5, cz + hd - 0.28, propMats.galvSteel, 0, 0, 0, false);
 
-  // 2. Ground-Floor Doorway Timber Frames, Concrete Steps & Sloped Porch Canopy Awnings (leaves 2.5m doorway 100% open!)
+  // 2. Front & Back Welcoming Porticos (Timber Door Casings, Entry Steps, Sloped Canopy, Pillars & Porch Lantern!)
+  const porticoRoofMat = getMapMaterial(roofStyle === 'tile' ? 'roof_tile' : (roofStyle === 'slate' ? 'roof_slate' : 'roof_metal'));
   for (const zSide of [-1, 1]) {
     const wz = cz + zSide * (hd - 0.22);
-    const outZ = cz + zSide * (hd + 0.04);
-    // Left & right timber door jambs + header lintel
-    col.addBox(0.16, 2.55, 0.62, cx - doorW * 0.5 + 0.04, fy + 1.275, wz, propMats.windowWood, 0, 0, 0, false);
-    col.addBox(0.16, 2.55, 0.62, cx + doorW * 0.5 - 0.04, fy + 1.275, wz, propMats.windowWood, 0, 0, 0, false);
-    col.addBox(doorW + 0.24, 0.18, 0.66, cx, fy + 2.56, wz, propMats.windowWood, 0, 0, 0, false);
-    // Front/back concrete entry step & sloped porch overhang
-    col.addBox(doorW + 0.6, 0.22, 0.95, cx, fy - 0.08, cz + zSide * (hd + 0.45), propMats.concreteTrim, 0, 0, 0, false);
-    col.addBox(doorW + 0.9, 0.12, 1.35, cx, fy + 2.86, cz + zSide * (hd + 0.56), getMapMaterial(roofStyle === 'tile' ? 'roof_tile' : 'roof_metal'), zSide * 0.24, 0, 0, false, 2.5);
-    // Diagonal timber porch brackets
-    for (const bx of [-doorW * 0.48, doorW * 0.48]) {
-      col.addBox(0.10, 0.68, 0.10, cx + bx, fy + 2.48, outZ + zSide * 0.28, propMats.windowWood, zSide * -0.68, 0, 0, false);
-    }
-  }
+    const outZ = cz + zSide * (hd + 0.05);
+    col.addBox(0.18, 2.75, 0.64, cx - doorW * 0.5 + 0.04, fy + 1.375, wz, propMats.windowWood, 0, 0, 0, false);
+    col.addBox(0.18, 2.75, 0.64, cx + doorW * 0.5 - 0.04, fy + 1.375, wz, propMats.windowWood, 0, 0, 0, false);
+    col.addBox(doorW + 0.30, 0.22, 0.68, cx, fy + 2.78, wz, propMats.windowWood, 0, 0, 0, false);
+    // Double masonry entry threshold steps
+    col.addBox(doorW + 0.9, 0.16, 1.35, cx, fy - 0.06, cz + zSide * (hd + 0.64), propMats.concreteTrim, 0, 0, 0, false);
+    col.addBox(doorW + 0.5, 0.14, 0.72, cx, fy + 0.03, cz + zSide * (hd + 0.34), propMats.concreteTrim, 0, 0, 0, false);
+    // Warm porch wall lantern sconce beside doorway
+    col.addBox(0.16, 0.26, 0.16, cx + doorW * 0.5 + 0.28, fy + 2.15, outZ + zSide * 0.04, propMats.darkSteel, 0, 0, 0, false);
+    col.addBox(0.10, 0.16, 0.10, cx + doorW * 0.5 + 0.28, fy + 2.12, outZ + zSide * 0.07, propMats.glowAmber, 0, 0, 0, false);
 
-  // 3. 3D Window Frames, Projecting Stone Sills & Open Shutters around EVERY shootable window cutout!
-  for (let fl = 0; fl < floors; fl++) {
-    const y0 = fy + fl * fh;
-    // Left & Right side windows (center cutout width 3.0m, y0+1.02..y0+2.35)
-    for (const xSide of [-1, 1]) {
-      const wx = cx + xSide * (hw - 0.22);
-      const outX = cx + xSide * (hw + 0.04);
-      col.addBox(0.74, 0.14, 3.24, wx, y0 + 1.00, cz, propMats.concreteTrim, 0, 0, 0, false);
-      col.addBox(0.68, 0.14, 3.18, wx, y0 + 2.38, cz, propMats.windowWood, 0, 0, 0, false);
-      col.addBox(0.64, 1.34, 0.12, wx, y0 + 1.69, cz - 1.48, propMats.windowWood, 0, 0, 0, false);
-      col.addBox(0.64, 1.34, 0.12, wx, y0 + 1.69, cz + 1.48, propMats.windowWood, 0, 0, 0, false);
-      // Open wooden shutters flanking outside of window
-      col.addBox(0.08, 1.28, 0.62, outX, y0 + 1.69, cz - 1.86, shutterMat, 0, 0, 0, false);
-      col.addBox(0.08, 1.28, 0.62, outX, y0 + 1.69, cz + 1.86, shutterMat, 0, 0, 0, false);
-    }
-    // 2nd Floor Front & Back shootable windows (width doorW=2.6m, y0+1.05..y0+2.35)
-    if (fl > 0) {
-      for (const zSide of [-1, 1]) {
-        const wz = cz + zSide * (hd - 0.22);
-        const outZ = cz + zSide * (hd + 0.04);
-        col.addBox(doorW + 0.24, 0.14, 0.74, cx, y0 + 1.03, wz, propMats.concreteTrim, 0, 0, 0, false);
-        col.addBox(doorW + 0.18, 0.14, 0.68, cx, y0 + 2.38, wz, propMats.windowWood, 0, 0, 0, false);
-        col.addBox(0.12, 1.32, 0.64, cx - doorW * 0.5 + 0.04, y0 + 1.70, wz, propMats.windowWood, 0, 0, 0, false);
-        col.addBox(0.12, 1.32, 0.64, cx + doorW * 0.5 - 0.04, y0 + 1.70, wz, propMats.windowWood, 0, 0, 0, false);
-        col.addBox(0.58, 1.26, 0.08, cx - doorW * 0.5 - 0.34, y0 + 1.70, outZ, shutterMat, 0, 0, 0, false);
-        col.addBox(0.58, 1.26, 0.08, cx + doorW * 0.5 + 0.34, y0 + 1.70, outZ, shutterMat, 0, 0, 0, false);
+    if (zSide === -1 || !hasBalcony) {
+      // Back porch / single-story front portico canopy awning + twin timber columns
+      col.addBox(doorW + 1.2, 0.14, 1.55, cx, fy + 3.04, cz + zSide * (hd + 0.68), porticoRoofMat, zSide * 0.24, 0, 0, false, 2.5);
+      for (const px of [-doorW * 0.5 - 0.30, doorW * 0.5 + 0.30]) {
+        col.addBox(0.14, 2.86, 0.14, cx + px, fy + 1.43, cz + zSide * (hd + 1.25), propMats.windowWood, 0, 0, 0, false);
       }
     }
   }
 
-  // 4. Realistic Pitched Gable Roof + Brick Chimney + Rooftop Antenna (or Modern Flat Parapet + HVAC)
+  // 3. 2nd-Floor Walk-Out Front Balcony (+Z) with Wrought-Iron Vertical Balusters, Top Rail & Support Corbels
+  if (hasBalcony) {
+    const balW = Math.min(w - 2.2, 4.8);
+    const balD = 1.45;
+    const balY = fy + fh;
+    const balFrontZ = cz + hd + balD - 0.10;
+    // Porch canopy/underside support beams framing Ground-Floor front entry underneath the balcony
+    for (const px of [-balW * 0.44, balW * 0.44]) {
+      col.addBox(0.20, fh - 0.2, 0.20, cx + px, fy + (fh - 0.2) * 0.5, cz + hd + balD - 0.14, propMats.concreteTrim, 0, 0, 0, false);
+    }
+    col.addBox(balW + 0.24, 0.24, balD + 0.16, cx, balY - 0.11, cz + hd + balD * 0.5, propMats.concreteTrim, 0, 0, 0, false);
+    // Open Wrought-Iron / Steel Balcony Railing (0.80m high -> jumpable & shoot-through!)
+    col.addBox(balW + 0.12, 0.08, 0.12, cx, balY + 0.78, balFrontZ, propMats.darkSteel, 0, 0, 0, false);
+    for (const sx of [-1, 1]) {
+      col.addBox(0.12, 0.08, balD, cx + sx * (balW * 0.5 - 0.05), balY + 0.78, cz + hd + balD * 0.5, propMats.darkSteel, 0, 0, 0, false);
+      col.addBox(0.14, 0.84, 0.14, cx + sx * (balW * 0.5 - 0.05), balY + 0.42, balFrontZ, propMats.darkSteel, 0, 0, 0, false);
+    }
+    const postCount = 7;
+    for (let i = 1; i < postCount; i++) {
+      const rx = cx - balW * 0.5 + (i / postCount) * balW;
+      col.addBox(0.05, 0.76, 0.05, rx, balY + 0.38, balFrontZ, propMats.darkSteel, 0, 0, 0, false);
+    }
+    // 2nd Floor Front Balcony Door Jambs (open floor-to-2.86m!)
+    const f2z = cz + hd - 0.22;
+    col.addBox(0.16, lintelY, 0.62, cx - doorW * 0.5 + 0.04, balY + lintelY * 0.5, f2z, propMats.windowWood, 0, 0, 0, false);
+    col.addBox(0.16, lintelY, 0.62, cx + doorW * 0.5 - 0.04, balY + lintelY * 0.5, f2z, propMats.windowWood, 0, 0, 0, false);
+    col.addBox(doorW + 0.26, 0.18, 0.66, cx, balY + lintelY + 0.06, f2z, propMats.windowWood, 0, 0, 0, false);
+  }
+
+  // 4. Clean Architectural Window Frames, Sills & Paneled Shutters around EVERY Jump-Through Cutout (Zero Blocking Bars!)
+  const halfWin = windowW * 0.5;
+  for (let fl = 0; fl < floors; fl++) {
+    const y0 = fy + fl * fh;
+    // Left & Right side windows (open y0+0.80..y0+2.86 = 2.06m clear vertical height!)
+    for (const xSide of [-1, 1]) {
+      const wx = cx + xSide * (hw - 0.22);
+      const outX = cx + xSide * (hw + 0.05);
+      // Molded projecting stone sill BELOW 0.80m opening
+      col.addBox(0.76, 0.14, windowW + 0.32, wx, y0 + sillH - 0.07, cz, propMats.concreteTrim, 0, 0, 0, false);
+      // Window box ledge accent safely below sill
+      col.addBox(0.24, 0.20, 1.35, outX + xSide * 0.12, y0 + sillH - 0.24, cz, propMats.windowWood, 0, 0, 0, false);
+      // Top timber architrave & left/right jambs flanking outside the clear opening
+      col.addBox(0.70, 0.16, windowW + 0.26, wx, y0 + lintelY + 0.06, cz, propMats.windowWood, 0, 0, 0, false);
+      col.addBox(0.64, winH, 0.12, wx, y0 + winMidY, cz - halfWin - 0.04, propMats.windowWood, 0, 0, 0, false);
+      col.addBox(0.64, winH, 0.12, wx, y0 + winMidY, cz + halfWin + 0.04, propMats.windowWood, 0, 0, 0, false);
+      // Open louvered exterior shutters flanking both sides
+      col.addBox(0.09, winH - 0.10, 0.68, outX, y0 + winMidY, cz - halfWin - 0.44, shutterMat, 0, 0, 0, false);
+      col.addBox(0.09, winH - 0.10, 0.68, outX, y0 + winMidY, cz + halfWin + 0.44, shutterMat, 0, 0, 0, false);
+    }
+    // 2nd Floor Back (-Z) jump-through window (width doorW=2.6m, y0+0.80..y0+2.86)
+    if (fl > 0) {
+      const wz = cz - (hd - 0.22);
+      const outZ = cz - (hd + 0.05);
+      const hBack = doorW * 0.5;
+      col.addBox(doorW + 0.30, 0.14, 0.76, cx, y0 + sillH - 0.07, wz, propMats.concreteTrim, 0, 0, 0, false);
+      col.addBox(doorW + 0.24, 0.16, 0.70, cx, y0 + lintelY + 0.06, wz, propMats.windowWood, 0, 0, 0, false);
+      col.addBox(0.12, winH, 0.64, cx - hBack - 0.04, y0 + winMidY, wz, propMats.windowWood, 0, 0, 0, false);
+      col.addBox(0.12, winH, 0.64, cx + hBack + 0.04, y0 + winMidY, wz, propMats.windowWood, 0, 0, 0, false);
+      col.addBox(0.64, winH - 0.10, 0.09, cx - hBack - 0.42, y0 + winMidY, outZ, shutterMat, 0, 0, 0, false);
+      col.addBox(0.64, winH - 0.10, 0.09, cx + hBack + 0.42, y0 + winMidY, outZ, shutterMat, 0, 0, 0, false);
+    }
+    // Warm interior ceiling fixture inside each floor so rooms feel inhabited
+    col.addBox(0.62, 0.08, 0.28, cx - hw * 0.18, y0 + fh - 0.28, cz, propMats.glowWhite, 0, 0, 0, false);
+  }
+
+  // 5. Realistic Pitched Gable Roof + Exposed Eaves Trim + Brick Chimney + TV/Radio Mast (or Concrete Bunker Parapet)
   if (roofStyle === 'flat') {
-    const parH = 0.72;
+    const parH = 0.78;
     col.addBox(w + 0.7, parH, 0.32, cx, roofY + parH * 0.5, cz - hd - 0.24, propMats.concreteTrim, 0, 0, 0, false);
     col.addBox(w + 0.7, parH, 0.32, cx, roofY + parH * 0.5, cz + hd + 0.24, propMats.concreteTrim, 0, 0, 0, false);
     col.addBox(0.32, parH, d + 0.7, cx - hw - 0.24, roofY + parH * 0.5, cz, propMats.concreteTrim, 0, 0, 0, false);
@@ -1063,16 +1124,17 @@ function emitBrHouseDecor(col, s) {
     col.addBox(2.2, 1.0, 1.9, cx + hw * 0.3, roofY + 0.5, cz - hd * 0.2, propMats.galvSteel, 0, 0, 0, false);
     col.addCyl(0.05, 0.08, 3.0, 6, cx - hw * 0.35, roofY + 1.5, cz + hd * 0.2, propMats.galvSteel, 0, 0, 0, false);
   } else {
-    const roofMat = getMapMaterial(roofStyle === 'tile' ? 'roof_tile' : 'roof_metal');
+    const roofMat = getMapMaterial(roofStyle === 'tile' ? 'roof_tile' : (roofStyle === 'slate' ? 'roof_slate' : 'roof_metal'));
     const gableMat = getMapMaterial(wallMat);
-    const roofH = Math.min(2.9, Math.max(2.1, Math.min(w, d) * 0.24));
+    const roofH = Math.min(3.1, Math.max(2.2, Math.min(w, d) * 0.25));
     const alongZ = d >= w;
-    col.addGableRoof(w, roofH, d, cx, roofY, cz, roofMat, gableMat, alongZ, 0.65, true);
-    // Brick Chimney rising through roof slope + terracotta cap
+    col.addGableRoof(w, roofH, d, cx, roofY, cz, roofMat, gableMat, alongZ, 0.72, true);
+    // Stepped Brick Chimney rising cleanly above ridge + terracotta flue pot
     const chX = cx + hw * 0.38;
     const chZ = cz - hd * 0.22;
-    col.addBox(0.95, roofH + 1.15, 0.95, chX, roofY + (roofH + 1.15) * 0.5, chZ, propMats.brickChimney, 0, 0, 0, false);
-    col.addBox(1.12, 0.18, 1.12, chX, roofY + roofH + 1.20, chZ, propMats.concreteTrim, 0, 0, 0, false);
+    col.addBox(0.95, roofH + 1.25, 0.95, chX, roofY + (roofH + 1.25) * 0.5, chZ, propMats.brickChimney, 0, 0, 0, false);
+    col.addBox(1.16, 0.18, 1.16, chX, roofY + roofH + 1.28, chZ, propMats.concreteTrim, 0, 0, 0, false);
+    col.addCyl(0.14, 0.16, 0.42, 6, chX, roofY + roofH + 1.54, chZ, propMats.brickChimney, 0, 0, 0, false);
     // TV Yagi antenna mast near opposite ridge
     col.addCyl(0.03, 0.04, 2.2, 5, cx - hw * 0.15, roofY + roofH + 1.0, cz + hd * 0.28, propMats.galvSteel, 0, 0, 0, false);
     col.addBox(1.3, 0.04, 0.04, cx - hw * 0.15, roofY + roofH + 1.85, cz + hd * 0.28, propMats.galvSteel, 0, 0, 0, false);
@@ -1497,10 +1559,13 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
   const tiledMaterials = new Set([
     'building_brick',
     'building_glass',
+    'house_brick',
+    'house_siding',
     'stucco_house',
     'stucco_sage',
     'wood_plank',
     'roof_tile',
+    'roof_slate',
     'roof_metal',
     'bunker_concrete',
     'warehouse_wall',
@@ -1555,7 +1620,7 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       }
     }
 
-    // Realistic Pitched Gable Roofs, Window Frames/Shutters, Chimneys, Hangar Trusses, Watchtower Hip Roofs & Bridge Arches!
+    // Realistic Pitched Gable Roofs, Window Frames/Shutters, Chimneys, Hangar Trusses, Watchtower Hip Roofs, Bridge Arches & Iconic POI Landmarks!
     for (const st of mapData.structures || []) {
       const sx = st.type === 'bridge' ? (st.ax + st.bx) * 0.5 : st.cx;
       const sz = st.type === 'bridge' ? (st.az + st.bz) * 0.5 : st.cz;
@@ -1565,6 +1630,9 @@ export function buildThreeMap(scene, mapData, mode = 'tdm', quality = 'high') {
       else if (st.type === 'shack') emitBrShackDecor(col, st);
       else if (st.type === 'hangar') emitBrHangarDecor(col, st);
       else if (st.type === 'bridge') emitBrBridgeDecor(col, st);
+      else if (st.type === 'gantry_crane') emitBrGantryCrane(col, st);
+      else if (st.type === 'radar_tower') emitBrRadarTower(col, st);
+      else if (st.type === 'silo_depot') emitBrSiloDepot(col, st);
     }
 
     for (const [key, col] of sectorCollectors.entries()) {
@@ -2033,16 +2101,106 @@ export function createParachuteMesh() {
 
 const lootTemplateCache = new Map();
 
+// ============================================================================
+// BATCHED BATTLE ROYALE ICONIC POI LANDMARKS (0 EXTRA DRAW CALLS!)
+// ============================================================================
+function emitBrGantryCrane(col, st) {
+  const { cx, cz, fy } = st;
+  const topY = fy + 16.0;
+  // Twin yellow/red industrial crane bridge beams + diagonal leg braces + cantilever boom
+  col.addBox(16.5, 1.35, 1.15, cx, topY, cz - 5.5, propMats.hazardYellow, 0, 0, 0, false);
+  col.addBox(16.5, 1.35, 1.15, cx, topY, cz + 5.5, propMats.hazardYellow, 0, 0, 0, false);
+  col.addBox(1.2, 1.2, 13.0, cx - 6.5, topY + 0.2, cz, propMats.oilDrumRed, 0, 0, 0, false);
+  col.addBox(1.2, 1.2, 13.0, cx + 6.5, topY + 0.2, cz, propMats.oilDrumRed, 0, 0, 0, false);
+  // Diagonal structural cross-bracing between crane legs
+  for (const sx of [-6.5, 6.5]) {
+    col.addBox(0.35, 12.2, 0.35, cx + sx, fy + 8.5, cz, propMats.hazardYellow, 0.72, 0, 0, false);
+    col.addBox(0.35, 12.2, 0.35, cx + sx, fy + 8.5, cz, propMats.hazardYellow, -0.72, 0, 0, false);
+  }
+  // Elevated operator cabin + overhead trolley & suspended container spreader bar
+  col.addBox(3.4, 2.6, 2.8, cx - 3.2, topY - 1.7, cz, propMats.darkSteel, 0, 0, 0, false);
+  col.addBox(2.8, 1.1, 2.9, cx - 3.2, topY - 1.5, cz, propMats.glassPane, 0, 0, 0, false);
+  col.addBox(2.6, 0.9, 12.2, cx + 1.5, topY + 0.9, cz, propMats.darkSteel, 0, 0, 0, false);
+  col.addCyl(0.08, 0.08, 4.8, 6, cx + 1.5, topY - 2.2, cz - 2.6, propMats.galvSteel, 0, 0, 0, false);
+  col.addCyl(0.08, 0.08, 4.8, 6, cx + 1.5, topY - 2.2, cz + 2.6, propMats.galvSteel, 0, 0, 0, false);
+  col.addBox(2.6, 0.45, 7.6, cx + 1.5, topY - 4.7, cz, propMats.hazardYellow, 0, 0, 0, false);
+}
+
+function emitBrRadarTower(col, st) {
+  const { cx, cz, fy } = st;
+  const baseTop = fy + 3.4;
+  // 4 tapered steel lattice tower legs rising 13m above bunker
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      col.addBox(0.32, 13.2, 0.32, cx + sx * 1.9, baseTop + 6.5, cz + sz * 1.9, propMats.galvSteel, sz * -0.10, 0, sx * 0.10, false);
+    }
+  }
+  // Mid & top observation steel platforms
+  col.addBox(4.2, 0.28, 4.2, cx, baseTop + 6.4, cz, propMats.darkSteel, 0, 0, 0, false);
+  col.addBox(3.4, 0.32, 3.4, cx, baseTop + 12.6, cz, propMats.darkSteel, 0, 0, 0, false);
+  // Giant Parabolic Military Radar Dish + Feed Horn + Red Aviation Beacon
+  col.addCyl(0.45, 0.65, 1.4, 8, cx, baseTop + 13.4, cz, propMats.darkSteel, 0, 0, 0, false);
+  col.addBox(5.6, 2.2, 0.32, cx, baseTop + 14.9, cz, propMats.fuelTankWhite, -0.26, 0.4, 0, false);
+  col.addBox(5.9, 0.32, 0.48, cx, baseTop + 14.9, cz, propMats.hazardYellow, -0.26, 0.4, 0, false);
+  col.addCyl(0.08, 0.14, 4.0, 6, cx, baseTop + 17.6, cz, propMats.galvSteel, 0, 0, 0, false);
+  col.addBox(0.36, 0.36, 0.36, cx, baseTop + 19.7, cz, propMats.glowRed, 0, 0, 0, false);
+}
+
+function emitBrSiloDepot(col, st) {
+  const { cx, cz, fy } = st;
+  // 3 Industrial Cylindrical Fuel / Power Cooling Silos + Yellow Safety Stripes + Overhead Catwalk & Red Pipes
+  for (const ox of [-5.2, 0, 5.2]) {
+    col.addCyl(1.95, 2.05, 10.6, 12, cx + ox, fy + 5.1, cz, propMats.fuelTankWhite, 0, 0, 0, false);
+    col.addCyl(2.02, 2.02, 0.55, 12, cx + ox, fy + 8.6, cz, propMats.hazardYellow, 0, 0, 0, false);
+    col.addCyl(2.02, 2.02, 0.42, 12, cx + ox, fy + 1.4, cz, propMats.darkSteel, 0, 0, 0, false);
+    col.addCyl(1.45, 1.95, 1.15, 12, cx + ox, fy + 10.95, cz, propMats.galvSteel, 0, 0, 0, false);
+    col.addCyl(0.34, 0.38, 1.1, 8, cx + ox, fy + 11.9, cz, propMats.darkSteel, 0, 0, 0, false);
+  }
+  // Connecting top maintenance bridge + high-pressure red industrial pipeline
+  col.addBox(13.2, 0.28, 1.35, cx, fy + 10.6, cz, propMats.darkSteel, 0, 0, 0, false);
+  col.addCyl(0.22, 0.22, 13.8, 8, cx, fy + 3.4, cz + 2.2, propMats.oilDrumRed, 0, 0, Math.PI / 2, false);
+}
+
+const lootMats = {
+  caseWhite: new THREE.MeshStandardMaterial({ color: '#f1f5f9', roughness: 0.34, metalness: 0.08 }),
+  medRed: new THREE.MeshStandardMaterial({ color: '#dc2626', emissive: '#7f1d1d', emissiveIntensity: 0.35, roughness: 0.32 }),
+  medOlive: new THREE.MeshStandardMaterial({ color: '#3f5a36', roughness: 0.55, metalness: 0.14 }),
+  gauzeCream: new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.85, metalness: 0.02 }),
+  gauzeTape: new THREE.MeshStandardMaterial({ color: '#d6b48c', roughness: 0.78 }),
+  canCyan: new THREE.MeshStandardMaterial({ color: '#0ea5e9', emissive: '#0369a1', emissiveIntensity: 0.35, roughness: 0.22, metalness: 0.72 }),
+  canSilver: new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.18, metalness: 0.88 }),
+  brass: new THREE.MeshStandardMaterial({ color: '#eab308', roughness: 0.24, metalness: 0.84 }),
+  copper: new THREE.MeshStandardMaterial({ color: '#c26b32', roughness: 0.28, metalness: 0.80 }),
+  ammo556: new THREE.MeshStandardMaterial({ color: '#3d5a34', roughness: 0.52, metalness: 0.22 }),
+  ammo762: new THREE.MeshStandardMaterial({ color: '#8a623c', roughness: 0.54, metalness: 0.20 }),
+  ammo9mm: new THREE.MeshStandardMaterial({ color: '#b45309', roughness: 0.48, metalness: 0.26 }),
+  ammo12g: new THREE.MeshStandardMaterial({ color: '#b91c1c', roughness: 0.46, metalness: 0.18 }),
+  ammo300: new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.34, metalness: 0.62 }),
+  tier1Mat: new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.54, metalness: 0.28 }),
+  tier2Mat: new THREE.MeshStandardMaterial({ color: '#1d4ed8', roughness: 0.44, metalness: 0.34 }),
+  tier3Mat: new THREE.MeshStandardMaterial({ color: '#141821', roughness: 0.36, metalness: 0.52 }),
+  goldTrim: new THREE.MeshStandardMaterial({ color: '#f59e0b', emissive: '#92400e', emissiveIntensity: 0.4, roughness: 0.26, metalness: 0.80 }),
+  cyanTrim: new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0284c7', emissiveIntensity: 0.4, roughness: 0.26, metalness: 0.65 }),
+  bagLv1: new THREE.MeshStandardMaterial({ color: '#786248', roughness: 0.76, metalness: 0.06 }),
+  bagLv2: new THREE.MeshStandardMaterial({ color: '#3f523a', roughness: 0.72, metalness: 0.08 }),
+  bagLv3: new THREE.MeshStandardMaterial({ color: '#1f242d', roughness: 0.64, metalness: 0.16 }),
+  fragOlive: new THREE.MeshStandardMaterial({ color: '#365314', roughness: 0.46, metalness: 0.36 }),
+  strapDark: new THREE.MeshStandardMaterial({ color: '#111827', roughness: 0.68, metalness: 0.15 }),
+  visorGlass: new THREE.MeshStandardMaterial({ color: '#0f172a', roughness: 0.12, metalness: 0.90 })
+};
+
 export function createLootCrateMesh(crateOrType = 'medkit') {
   const isObj = crateOrType && typeof crateOrType === 'object';
   const kind = isObj ? (crateOrType.kind || crateOrType.type || 'medkit') : crateOrType;
   const weaponId = isObj ? crateOrType.weaponId : null;
   const tier = isObj ? (crateOrType.tier || 1) : 1;
-  const cacheKey = `${kind}_${weaponId || ''}_${tier}`;
+  const medId = isObj ? (crateOrType.medId || '') : '';
+  const ammoType = isObj ? (crateOrType.ammoType || '') : '';
+  const cacheKey = `${kind}_${weaponId || ''}_${tier}_${medId}_${ammoType}`;
 
   let template = lootTemplateCache.get(cacheKey);
   if (!template) {
-    template = buildLootCrateTemplate(kind, weaponId, tier);
+    template = buildLootCrateTemplate(kind, weaponId, tier, medId, ammoType);
     lootTemplateCache.set(cacheKey, template);
   }
   const cloned = template.clone(true);
@@ -2050,104 +2208,226 @@ export function createLootCrateMesh(crateOrType = 'medkit') {
   return cloned;
 }
 
-function buildLootCrateTemplate(kind, weaponId, tier) {
+function addSubtleLootRing(group, colorHex, radius = 0.34) {
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(radius, 0.018, 6, 18),
+    new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.62 })
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 0.025;
+  group.add(ring);
+}
+
+// High-Craft Sculpted 3D PUBG-Style Floor Loot (Batched via MapBatchCollector -> only 2-3 draw calls per visible pickup!)
+function buildLootCrateTemplate(kind, weaponId, tier, medId = '', ammoType = '') {
+  const g = new THREE.Group();
+
+  // 1. ENEMY DEATHBOX: Authentic Wooden/Steel Military Supply Crate + Golden Smoke Beacon
   if (kind === 'deathbox') {
-    const g = new THREE.Group();
-    const coffin = new THREE.Mesh(new THREE.BoxGeometry(1.08, 0.52, 0.72), propMats.woodFrame);
-    coffin.position.y = 0.26;
-    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.10, 0.78), propMats.darkSteel);
-    lid.position.y = 0.54;
-    const tag = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.80), propMats.hazardYellow);
-    tag.position.y = 0.34;
+    const col = new MapBatchCollector();
+    col.addBox(1.02, 0.46, 0.66, 0, 0.25, 0, propMats.woodFrame, 0, 0, 0, false);
+    col.addBox(1.08, 0.08, 0.72, 0, 0.51, 0, propMats.darkSteel, 0, 0, 0, false);
+    // Steel reinforced corner posts & front latch clasp
+    for (const sx of [-0.50, 0.50]) {
+      for (const sz of [-0.32, 0.32]) {
+        col.addBox(0.08, 0.52, 0.08, sx, 0.26, sz, propMats.darkSteel, 0, 0, 0, false);
+      }
+      col.addBox(0.05, 0.06, 0.24, sx * 1.08, 0.30, 0, propMats.galvSteel, 0, 0, 0, false);
+    }
+    col.addBox(0.32, 0.12, 0.72, 0, 0.34, 0, lootMats.goldTrim, 0, 0, 0, false);
+    col.flush(g, false);
+
     const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.22, 4.5, 10, 1, true),
-      new THREE.MeshBasicMaterial({ color: '#facc15', transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide })
+      new THREE.CylinderGeometry(0.05, 0.20, 4.6, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: '#facc15', transparent: true, opacity: 0.24, depthWrite: false, side: THREE.DoubleSide })
     );
-    beam.position.y = 2.4;
-    g.add(coffin, lid, tag, beam);
+    beam.position.y = 2.45;
+    g.add(beam);
     return g;
   }
 
+  // 2. FIREARMS ON GROUND: Actual 3D Gun Model + Sleek Ground Indicator Ring
   if (kind === 'weapon' && weaponId) {
     const isElite = ['awp', 'barrett', 'm249', 'scarh', 'm200', 'pkm', 'mg3', 'mcx', 'groza', 'm24', 'mk14'].includes(weaponId);
     const ringColor = isElite ? '#f59e0b' : '#38bdf8';
-    const g = new THREE.Group();
-
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.46, 0.035, 8, 20),
-      new THREE.MeshBasicMaterial({ color: ringColor })
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.y = 0.04;
-    g.add(ring);
-
-    const aura = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.38, 0.44, 0.04, 14),
-      new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.25 })
-    );
-    aura.position.y = 0.025;
-    g.add(aura);
+    addSubtleLootRing(g, ringColor, 0.44);
 
     const gunModel = createWeaponModel(weaponId, 'default', {});
-    gunModel.scale.setScalar(1.32);
-    gunModel.position.set(0, 0.46, 0);
-    gunModel.rotation.x = 0.18;
-    gunModel.rotation.z = -0.18;
+    gunModel.scale.setScalar(1.30);
+    gunModel.position.set(0, 0.38, 0);
+    gunModel.rotation.x = 0.22;
+    gunModel.rotation.z = -0.15;
     g.add(gunModel);
     return g;
   }
 
-  const tierColors = { 1: '#94a3b8', 2: '#38bdf8', 3: '#f59e0b' };
-  const colorMap = {
-    medkit: '#22c55e',
-    med: '#22c55e',
-    vest: tierColors[tier] || '#38bdf8',
-    armor: '#38bdf8',
-    helmet: tierColors[tier] || '#60a5fa',
-    bag: tierColors[tier] || '#a855f7',
-    ammo: '#f97316',
-    grenade: '#ef4444',
-    overcharge: '#c084fc'
-  };
-  const color = colorMap[kind] || '#eab308';
-  const g = new THREE.Group();
+  const col = new MapBatchCollector();
 
-  const basePad = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 0.07, 12), propMats.darkSteel);
-  basePad.position.y = 0.035;
-  const box = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.34, 0.56), propMats.darkSteel);
-  box.position.y = 0.22;
-
-  const glowMat = new THREE.MeshBasicMaterial({ color });
-  const trim = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.08, 0.60), glowMat);
-  trim.position.y = 0.22;
-
-  const holoGroup = new THREE.Group();
-  holoGroup.position.y = 0.62;
-  if (kind === 'medkit' || kind === 'med') {
-    const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.08, 0.08), glowMat);
-    const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.28, 0.08), glowMat);
-    holoGroup.add(c1, c2);
-  } else if (kind === 'vest' || kind === 'armor') {
-    const plate = new THREE.Mesh(new THREE.OctahedronGeometry(0.18, 0), glowMat);
-    plate.scale.set(1.1, 1.3, 0.45);
-    holoGroup.add(plate);
-  } else if (kind === 'helmet') {
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.58), glowMat);
-    holoGroup.add(dome);
-  } else if (kind === 'bag') {
-    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.34, 0.16), glowMat);
-    holoGroup.add(pack);
-  } else if (kind === 'grenade') {
-    const gr = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), glowMat);
-    holoGroup.add(gr);
-  } else {
-    for (const bx of [-0.08, 0, 0.08]) {
-      const round = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.028, 0.24, 6), glowMat);
-      round.position.x = bx;
-      holoGroup.add(round);
+  // 3. MEDICAL SUPPLIES (Distinct 3D First-Aid Case, Trauma Medkit, Bandage Rolls & Energy Drink Can!)
+  if (kind === 'med' || kind === 'medkit') {
+    if (medId === 'energy') {
+      // Sleek Metallic Tilted Energy Drink Can
+      addSubtleLootRing(g, '#38bdf8', 0.24);
+      col.addCyl(0.095, 0.095, 0.32, 12, 0, 0.22, 0, lootMats.canCyan, 0.16, 0, -0.18, false);
+      col.addCyl(0.092, 0.098, 0.03, 12, 0.025, 0.38, 0.024, lootMats.canSilver, 0.16, 0, -0.18, false);
+      col.addCyl(0.096, 0.092, 0.03, 12, -0.025, 0.06, -0.024, lootMats.canSilver, 0.16, 0, -0.18, false);
+      col.addCyl(0.098, 0.098, 0.045, 12, 0.01, 0.28, 0.008, lootMats.goldTrim, 0.16, 0, -0.18, false);
+    } else if (medId === 'bandage') {
+      // Twin Rolled White Medical Gauze Bandages + Tan Tape Strip
+      addSubtleLootRing(g, '#4ade80', 0.28);
+      col.addCyl(0.095, 0.095, 0.20, 12, -0.10, 0.16, 0.02, lootMats.gauzeCream, Math.PI * 0.5, 0.25, 0, false);
+      col.addCyl(0.097, 0.097, 0.06, 12, -0.10, 0.16, 0.02, lootMats.gauzeTape, Math.PI * 0.5, 0.25, 0, false);
+      col.addCyl(0.090, 0.090, 0.19, 12, 0.11, 0.15, -0.04, lootMats.gauzeCream, Math.PI * 0.5, -0.35, 0, false);
+      col.addCyl(0.092, 0.092, 0.055, 12, 0.11, 0.15, -0.04, lootMats.medRed, Math.PI * 0.5, -0.35, 0, false);
+    } else if (medId === 'medkit' || kind === 'medkit') {
+      // Military Trauma Medkit Box (Olive Hard-Case + Embossed White & Red Cross + Carry Handle)
+      addSubtleLootRing(g, '#22c55e', 0.36);
+      col.addBox(0.50, 0.24, 0.36, 0, 0.20, 0, lootMats.medOlive, 0.12, 0, 0, false);
+      col.addBox(0.52, 0.04, 0.38, 0, 0.28, 0.01, lootMats.strapDark, 0.12, 0, 0, false);
+      // Carry handle & latches
+      col.addBox(0.18, 0.04, 0.04, 0, 0.22, -0.22, lootMats.strapDark, 0.12, 0, 0, false);
+      col.addBox(0.22, 0.025, 0.20, 0, 0.33, 0.015, lootMats.caseWhite, 0.12, 0, 0, false);
+      col.addBox(0.16, 0.032, 0.055, 0, 0.34, 0.016, lootMats.medRed, 0.12, 0, 0, false);
+      col.addBox(0.055, 0.032, 0.16, 0, 0.34, 0.016, lootMats.medRed, 0.12, 0, 0, false);
+    } else {
+      // PUBG Iconic White First-Aid Tactical Case with Red Medical Cross & Black Handle
+      addSubtleLootRing(g, '#22c55e', 0.34);
+      col.addBox(0.44, 0.18, 0.34, 0, 0.18, 0, lootMats.caseWhite, 0.18, 0, 0, false);
+      col.addBox(0.46, 0.03, 0.36, 0, 0.18, 0, lootMats.strapDark, 0.18, 0, 0, false);
+      col.addBox(0.16, 0.04, 0.04, 0, 0.20, -0.20, lootMats.strapDark, 0.18, 0, 0, false);
+      // Bold Red Medical Cross on top
+      col.addBox(0.20, 0.026, 0.064, 0, 0.28, 0.018, lootMats.medRed, 0.18, 0, 0, false);
+      col.addBox(0.064, 0.026, 0.20, 0, 0.28, 0.018, lootMats.medRed, 0.18, 0, 0, false);
     }
+    col.flush(g, false);
+    return g;
   }
 
-  g.add(basePad, box, trim, holoGroup);
+  // 4. AMMUNITION PACKS (Caliber-Colored Military Ammo Crate + Standing Brass/Red Rounds!)
+  if (kind === 'ammo') {
+    const ammoMatMap = {
+      '5.56mm': lootMats.ammo556,
+      '7.62mm': lootMats.ammo762,
+      '9mm': lootMats.ammo9mm,
+      '12G': lootMats.ammo12g,
+      '.300': lootMats.ammo300
+    };
+    const ringMap = { '5.56mm': '#4ade80', '7.62mm': '#f59e0b', '9mm': '#fbbf24', '12G': '#ef4444', '.300': '#facc15' };
+    const boxMat = ammoMatMap[ammoType] || lootMats.ammo762;
+    const shellMat = ammoType === '12G' ? lootMats.ammo12g : lootMats.brass;
+    const tipMat = ammoType === '12G' ? lootMats.brass : lootMats.copper;
+
+    addSubtleLootRing(g, ringMap[ammoType] || '#f97316', 0.30);
+    // Angled military ammo box with lid + clasp + metallic stripe
+    col.addBox(0.32, 0.18, 0.22, -0.06, 0.15, 0, boxMat, 0, 0.24, 0, false);
+    col.addBox(0.34, 0.045, 0.24, -0.06, 0.25, 0, lootMats.strapDark, 0, 0.24, 0, false);
+    col.addBox(0.10, 0.04, 0.25, -0.06, 0.20, 0, lootMats.brass, 0, 0.24, 0, false);
+    // 4 Standing Cartridges / Shotgun Shells right next to the box!
+    const offsets = [[0.18, 0.06], [0.24, 0.01], [0.17, -0.05], [0.23, -0.09]];
+    for (const [bx, bz] of offsets) {
+      col.addCyl(0.024, 0.024, 0.14, 8, bx, 0.13, bz, shellMat, 0, 0, 0, false);
+      col.addCyl(0.008, 0.022, 0.065, 8, bx, 0.23, bz, tipMat, 0, 0, 0, false);
+    }
+    col.flush(g, false);
+    return g;
+  }
+
+  // 5. ARMOR VESTS (Sculpted 3D Ballistic Plate Carrier with Shoulder Straps & Triple Mag Pouches!)
+  if (kind === 'vest' || kind === 'armor') {
+    const vestMat = tier >= 3 ? lootMats.tier3Mat : (tier === 2 ? lootMats.tier2Mat : lootMats.tier1Mat);
+    const trimMat = tier >= 3 ? lootMats.goldTrim : (tier === 2 ? lootMats.cyanTrim : lootMats.strapDark);
+    const ringCol = tier >= 3 ? '#f59e0b' : (tier === 2 ? '#38bdf8' : '#94a3b8');
+    addSubtleLootRing(g, ringCol, 0.36);
+
+    // Front & back ballistic armor plates tilted back cleanly for instant recognition
+    col.addBox(0.38, 0.42, 0.12, 0, 0.30, 0, vestMat, -0.22, 0, 0, false);
+    // Left & right over-shoulder harness straps
+    col.addBox(0.09, 0.14, 0.15, -0.14, 0.54, 0.03, lootMats.strapDark, -0.22, 0, 0, false);
+    col.addBox(0.09, 0.14, 0.15, 0.14, 0.54, 0.03, lootMats.strapDark, -0.22, 0, 0, false);
+    // Triple front MOLLE magazine pouches + glowing tier chest bar
+    for (const px of [-0.11, 0, 0.11]) {
+      col.addBox(0.085, 0.14, 0.055, px, 0.22, -0.075, lootMats.strapDark, -0.22, 0, 0, false);
+    }
+    col.addBox(0.24, 0.045, 0.04, 0, 0.40, -0.068, trimMat, -0.22, 0, 0, false);
+    // Extra heavy collar & side cummerbund for Lv2/Lv3 armor
+    if (tier >= 2) {
+      col.addBox(0.46, 0.14, 0.14, 0, 0.18, 0.01, vestMat, -0.22, 0, 0, false);
+    }
+    if (tier >= 3) {
+      col.addBox(0.32, 0.09, 0.16, 0, 0.54, 0.04, trimMat, -0.22, 0, 0, false);
+    }
+    col.flush(g, false);
+    return g;
+  }
+
+  // 6. COMBAT HELMETS (Sculpted 3D Ballistic Dome — Police Lv1, Tactical NVG Lv2, Spetsnaz Altyn Visor Lv3!)
+  if (kind === 'helmet') {
+    const hMat = tier >= 3 ? lootMats.tier3Mat : (tier === 2 ? lootMats.tier2Mat : lootMats.tier1Mat);
+    const trimMat = tier >= 3 ? lootMats.goldTrim : (tier === 2 ? lootMats.cyanTrim : lootMats.strapDark);
+    const ringCol = tier >= 3 ? '#f59e0b' : (tier === 2 ? '#38bdf8' : '#94a3b8');
+    addSubtleLootRing(g, ringCol, 0.30);
+
+    // Sculpted ballistic hemisphere shell
+    const domeGeo = new THREE.SphereGeometry(0.21, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.62);
+    domeGeo.scale(0.95, 1.0, 1.08);
+    domeGeo.translate(0, 0.24, 0);
+    col.addGeo(domeGeo, hMat, false);
+    // Protective rubber rim & side tactical rails
+    col.addCyl(0.21, 0.225, 0.05, 12, 0, 0.20, 0, lootMats.strapDark, 0, 0, 0, false);
+    if (tier === 2) {
+      // Tactical front NVG mount shroud + glowing rail strip
+      col.addBox(0.09, 0.08, 0.05, 0, 0.33, -0.22, trimMat, 0, 0, 0, false);
+    } else if (tier >= 3) {
+      // Iconic Spetsnaz Level 3 Flip-Down Steel Face Visor Shield with eye slit!
+      col.addBox(0.32, 0.20, 0.05, 0, 0.24, -0.21, hMat, 0.10, 0, 0, false);
+      col.addBox(0.24, 0.055, 0.06, 0, 0.26, -0.225, lootMats.visorGlass, 0.10, 0, 0, false);
+      col.addBox(0.28, 0.025, 0.06, 0, 0.35, -0.215, trimMat, 0.10, 0, 0, false);
+    }
+    col.flush(g, false);
+    return g;
+  }
+
+  // 7. TACTICAL BACKPACKS (Sculpted 3D Rucksack — Scales clearly from Lv1 → Lv2 → Lv3!)
+  if (kind === 'bag') {
+    const bMat = tier >= 3 ? lootMats.bagLv3 : (tier === 2 ? lootMats.bagLv2 : lootMats.bagLv1);
+    const trimMat = tier >= 3 ? lootMats.goldTrim : (tier === 2 ? lootMats.cyanTrim : lootMats.strapDark);
+    const ringCol = tier >= 3 ? '#f59e0b' : (tier === 2 ? '#a855f7' : '#94a3b8');
+    const sc = tier >= 3 ? 1.22 : (tier === 2 ? 1.06 : 0.90);
+    addSubtleLootRing(g, ringCol, 0.34);
+
+    // Contoured main rucksack pack + overlapping top flap + twin buckle straps + front & side pockets
+    col.addBox(0.34 * sc, 0.42 * sc, 0.18 * sc, 0, 0.26 * sc, 0, bMat, -0.18, 0, 0, false);
+    col.addBox(0.35 * sc, 0.12 * sc, 0.21 * sc, 0, 0.46 * sc, -0.02, bMat, -0.18, 0, 0, false);
+    col.addBox(0.24 * sc, 0.18 * sc, 0.08 * sc, 0, 0.18 * sc, -0.11 * sc, lootMats.strapDark, -0.18, 0, 0, false);
+    for (const sx of [-0.10 * sc, 0.10 * sc]) {
+      col.addBox(0.04 * sc, 0.26 * sc, 0.03, sx, 0.36 * sc, -0.10 * sc, trimMat, -0.18, 0, 0, false);
+    }
+    if (tier >= 2) {
+      for (const sx of [-0.20 * sc, 0.20 * sc]) {
+        col.addBox(0.08 * sc, 0.20 * sc, 0.12 * sc, sx, 0.20 * sc, 0, lootMats.strapDark, -0.18, 0, 0, false);
+      }
+    }
+    col.flush(g, false);
+    return g;
+  }
+
+  // 8. FRAG GRENADE (Sculpted 3D M67 Military Frag Grenade!)
+  if (kind === 'grenade') {
+    addSubtleLootRing(g, '#ef4444', 0.24);
+    const bodyGeo = new THREE.SphereGeometry(0.135, 10, 8);
+    bodyGeo.translate(0, 0.22, 0);
+    col.addGeo(bodyGeo, lootMats.fragOlive, false);
+    col.addCyl(0.140, 0.140, 0.036, 10, 0, 0.22, 0, lootMats.goldTrim, 0, 0, 0, false);
+    col.addCyl(0.042, 0.052, 0.075, 8, 0, 0.37, 0, propMats.galvSteel, 0, 0, 0, false);
+    col.addBox(0.025, 0.17, 0.04, 0.09, 0.28, 0, propMats.darkSteel, 0, 0, 0.24, false);
+    col.flush(g, false);
+    return g;
+  }
+
+  // Fallback tactical supply item
+  addSubtleLootRing(g, '#eab308', 0.30);
+  col.addBox(0.36, 0.22, 0.28, 0, 0.18, 0, propMats.darkSteel, 0, 0, 0, false);
+  col.addBox(0.38, 0.05, 0.30, 0, 0.22, 0, lootMats.goldTrim, 0, 0, 0, false);
+  col.flush(g, false);
   return g;
 }

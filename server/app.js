@@ -414,13 +414,15 @@ app.post('/api/relay/:code/client-sync', (req, res) => {
 });
 
 app.post('/api/matchmaking/find', (req, res) => {
-  const { mode, mapId } = req.body || {};
+  const { mode, rankedSubMode, mapId } = req.body || {};
   const allRooms = [...localWsRoomsProvider(), ...gameDB.getActiveCloudRooms()];
 
-  // Find open room with active human host matching mode
+  // Find open room with active human host matching mode (+ ranked sub-mode)
   const match = allRooms.find((r) => {
     if (r.mode === 'practice') return false;
-    if (mode && r.mode !== mode) return false;
+    const rSelected = r.selectedMode || r.mode;
+    if (mode && rSelected !== mode && r.mode !== mode) return false;
+    if (mode === 'ranked' && rankedSubMode && (r.rankedSubMode || 'tdm') !== rankedSubMode) return false;
     if (mapId && r.mapId !== mapId && r.humans === 0) return false;
     return r.humans > 0 && r.humans < r.maxPlayers;
   });

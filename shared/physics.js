@@ -449,13 +449,14 @@ function resolveAxisX(prevX, nextX, state, height, r, blocks) {
     if (state.z + r <= box.minZ || state.z - r >= box.maxZ) continue;
     if (state.y >= box.maxY - 0.01 || state.y + height <= box.minY + 0.01) continue;
 
-    // Attempt step-up if obstacle top is within STEP_HEIGHT
+    // Attempt step-up if obstacle top is within STEP_HEIGHT, OR smooth mid-air window/ledge vault when jumping
     const stepDiff = box.maxY - state.y;
-    if (state.onGround && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT) {
-      if (canStandAt(nextX, box.maxY, state.z, height, r, blocks)) {
-        state.y = box.maxY;
-        continue;
-      }
+    const canStepGround = state.onGround && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT;
+    const canVaultAir = !state.onGround && state.vy > -3.5 && stepDiff > 0 && stepDiff <= 0.56;
+    if ((canStepGround || canVaultAir) && canStandAt(nextX, box.maxY + 0.01, state.z, height, r, blocks)) {
+      state.y = box.maxY + 0.01;
+      if (canVaultAir) state.vy = Math.max(state.vy, 1.35);
+      continue;
     }
 
     const boxCenterX = (box.minX + box.maxX) * 0.5;
@@ -478,11 +479,12 @@ function resolveAxisZ(prevZ, nextZ, state, height, r, blocks) {
     if (state.y >= box.maxY - 0.01 || state.y + height <= box.minY + 0.01) continue;
 
     const stepDiff = box.maxY - state.y;
-    if (state.onGround && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT) {
-      if (canStandAt(state.x, box.maxY, nextZ, height, r, blocks)) {
-        state.y = box.maxY;
-        continue;
-      }
+    const canStepGround = state.onGround && stepDiff > 0 && stepDiff <= PHYSICS.STEP_HEIGHT;
+    const canVaultAir = !state.onGround && state.vy > -3.5 && stepDiff > 0 && stepDiff <= 0.56;
+    if ((canStepGround || canVaultAir) && canStandAt(state.x, box.maxY + 0.01, nextZ, height, r, blocks)) {
+      state.y = box.maxY + 0.01;
+      if (canVaultAir) state.vy = Math.max(state.vy, 1.35);
+      continue;
     }
 
     const boxCenterZ = (box.minZ + box.maxZ) * 0.5;

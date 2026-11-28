@@ -9,8 +9,8 @@ export class HumanPriorityMatchmaker {
     this.sendToClient = sendToClient;
     this.addClientToRoom = addClientToRoom;
     this.queues = new Map(); // queueKey -> { queueKey, mode, rankedSubMode, entries: [], expiresAt, timer }
-    this.queueWindowMs = 8500;
-    this.fastPairWindowMs = 3500;
+    this.queueWindowMs = 30000;
+    this.fastPairWindowMs = 5000;
   }
 
   findOpenHumanRoom(desiredMode, desiredMap = null, now = Date.now(), rankedSubMode = null) {
